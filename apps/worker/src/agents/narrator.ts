@@ -6,9 +6,13 @@ import type { ShuttleEnv } from '../env'
 import { createHistoryTools } from '../tools/history'
 import { createReadOnlySandboxTools } from '../tools/sandbox'
 
-export function createNarratorAgent(env: ShuttleEnv, runId: string) {
+export function createNarratorAgent(
+  env: ShuttleEnv,
+  runId: string,
+  storage?: DurableObjectStorage,
+) {
   const history = createHistoryTools(env, runId)
-  const sandbox = createReadOnlySandboxTools(env, runId)
+  const sandbox = createReadOnlySandboxTools(env, runId, storage)
 
   return defineAgent({
     name: 'narrator',

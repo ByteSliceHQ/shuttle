@@ -7,8 +7,12 @@ import { isJsonObject, isJsonString } from '@swirls/looms/core'
 import type { ShuttleEnv } from '../env'
 import { createWorkerAgent } from './worker'
 
-export function createConductorAgent(env: ShuttleEnv, runId: string) {
-  const worker = createWorkerAgent(env, runId)
+export function createConductorAgent(
+  env: ShuttleEnv,
+  runId: string,
+  storage?: DurableObjectStorage,
+) {
+  const worker = createWorkerAgent(env, runId, storage)
 
   const delegate = asAgentTool({
     name: 'delegate',
@@ -59,7 +63,8 @@ export function createConductorAgent(env: ShuttleEnv, runId: string) {
       'You are the Shuttle conductor for a coding session.',
       'Break the goal into focused tasks and delegate them to workers with the delegate tool.',
       'You may run multiple delegate calls in one turn for parallel work.',
-      'Workers prepare their own worktrees automatically.',
+      'Workers prepare their own worktrees automatically under /workspace/.wt/<run>/<thread>/<repo>.',
+      'When the session lists linked repositories, name the repo directory in each task.',
       'Use ask_user when a decision is ambiguous. The user replies in payload.answer; if they choose "defer", proceed with your best judgment.',
       'Respect brief updates delivered as steer messages.',
       'Summarize progress for the user after workers return.',

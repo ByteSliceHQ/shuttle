@@ -2,19 +2,30 @@ import { Files } from '@cloudflare/sandbox'
 import { DurableObject } from 'cloudflare:workers'
 
 import type { ShuttleEnv } from '../env'
+import { getInstallationToken } from '../github/app'
 import { MemoryWorkspace } from './memory-workspace'
-import type { ExecResult, Workspace } from './workspace'
+import {
+  repoCheckoutPath,
+  worktreeRepoPath,
+  worktreeRoot,
+  type ExecResult,
+  type LinkedSandboxRepo,
+  type Workspace,
+  type WorktreeResult,
+} from './workspace'
 
 /**
- * One sandbox Durable Object per coding session (named by the Looms run id).
+ * One sandbox Durable Object per workspace folder (named `folder:<folderId>`).
+ * Legacy sessions may still use a run id as the DO name.
  *
  * Modes:
- * - `memory` (default): in-DO filesystem, no Docker required.
+ * - `memory` (default): in-DO filesystem + GitHub tarball import, no Docker required.
  * - `container`: real Linux via Durable Object containers + `@cloudflare/sandbox` Files.
  */
 export class SessionSandbox extends DurableObject<ShuttleEnv> {
   private memory: MemoryWorkspace | null = null
   private activePid: number | null = null
+  private preparedRepos = false
 
   private mode(): 'memory' | 'container' {
     return this.env.SHUTTLE_WORKSPACE_MODE === 'container' ? 'container' : 'memory'
@@ -22,7 +33,7 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
 
   private async workspace(): Promise<Workspace> {
     if (this.mode() === 'memory') {
-      this.memory ??= await MemoryWorkspace.restore(this.ctx.storage)
+      this.memory ??= await MemoryWorkspace.restore(this.ctx.storage, this.env)
       this.memory.resetAbort()
       return this.memory
     }
@@ -50,40 +61,75 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
     const files = () => new Files(container)
 
     return {
-      ensureRepo: async (repoUrl) => {
+      ensureRepos: async (repos) => {
         await ensureStarted()
-        await files().mkdir('/workspace', { recursive: true })
+        await files().mkdir('/workspace/repos', { recursive: true })
 
-        if (repoUrl) {
+        if (repos.length === 0) {
+          await files().writeFile('/workspace/repos/demo/README.md', '# Shuttle workspace\n')
+          return { root: '/workspace' }
+        }
+
+        for (const repo of repos) {
+          const target = repoCheckoutPath(repo.name)
+          const token = await getInstallationToken(this.env, repo.installationId)
+          const basic = btoa(`x-access-token:${token}`)
+          const cloneUrl = `https://github.com/${repo.fullName}.git`
+
           const process = await container.exec([
-            'git',
-            'clone',
-            '--depth',
-            '1',
-            repoUrl,
-            '/workspace/repo',
+            'bash',
+            '-lc',
+            [
+              `if [ -d ${JSON.stringify(target)}/.git ]; then`,
+              `  git -C ${JSON.stringify(target)} -c http.extraheader=${JSON.stringify(`AUTHORIZATION: basic ${basic}`)} fetch --depth 1 origin ${JSON.stringify(repo.defaultBranch)} &&`,
+              `  git -C ${JSON.stringify(target)} checkout -B ${JSON.stringify(repo.defaultBranch)} FETCH_HEAD;`,
+              `else`,
+              `  mkdir -p /workspace/repos &&`,
+              `  git -c http.extraheader=${JSON.stringify(`AUTHORIZATION: basic ${basic}`)} clone --depth 1 --branch ${JSON.stringify(repo.defaultBranch)} ${JSON.stringify(cloneUrl)} ${JSON.stringify(target)};`,
+              `fi`,
+            ].join(' '),
           ])
 
           await process.output()
-          return { root: '/workspace/repo' }
         }
 
-        await files().writeFile('/workspace/README.md', '# Shuttle workspace\n')
         return { root: '/workspace' }
       },
-      ensureWorktree: async (threadId) => {
+      ensureWorktree: async (runId, threadId) => {
         await ensureStarted()
-        const root = `/workspace/.wt/${threadId}`
+        const root = worktreeRoot(runId, threadId)
+        await files().mkdir(root, { recursive: true })
 
-        await container
-          .exec([
-            'bash',
-            '-lc',
-            `mkdir -p ${root} && git worktree add ${root} -b wt-${threadId} 2>/dev/null || cp -R /workspace/repo/. ${root} 2>/dev/null || true`,
-          ])
+        const listed = await container
+          .exec(['bash', '-lc', 'ls -1 /workspace/repos 2>/dev/null || true'])
           .then((process) => process.output())
 
-        return { root }
+        const names = new TextDecoder()
+          .decode(listed.stdout)
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+
+        const repoDirs: { name: string; root: string }[] = []
+
+        for (const name of names) {
+          const target = worktreeRepoPath(runId, threadId, name)
+          repoDirs.push({ name, root: target })
+
+          await container
+            .exec([
+              'bash',
+              '-lc',
+              [
+                `mkdir -p ${JSON.stringify(root)} &&`,
+                `(git -C ${JSON.stringify(repoCheckoutPath(name))} worktree add -B shuttle/${runId}/${threadId}/${name} ${JSON.stringify(target)} 2>/dev/null`,
+                `|| cp -R ${JSON.stringify(repoCheckoutPath(name))}/. ${JSON.stringify(target)})`,
+              ].join(' '),
+            ])
+            .then((process) => process.output())
+        }
+
+        return { root, repoDirs }
       },
       readFile: async (path, cwd) => {
         await ensureStarted()
@@ -167,12 +213,42 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
     }
   }
 
-  async ensureRepo(repoUrl: string | null): Promise<{ root: string }> {
-    return (await this.workspace()).ensureRepo(repoUrl)
+  async ensureRepos(repos: LinkedSandboxRepo[]): Promise<{ root: string }> {
+    const result = await (await this.workspace()).ensureRepos(repos)
+    this.preparedRepos = true
+    return result
   }
 
-  async ensureWorktree(threadId: string): Promise<{ root: string }> {
-    return (await this.workspace()).ensureWorktree(threadId)
+  async ensureWorktree(runId: string, threadId: string): Promise<WorktreeResult> {
+    if (!this.preparedRepos) {
+      await this.ensureRepos([])
+    }
+
+    return (await this.workspace()).ensureWorktree(runId, threadId)
+  }
+
+  /** @deprecated Prefer ensureRepos. */
+  async ensureRepo(repoUrl: string | null): Promise<{ root: string }> {
+    if (!repoUrl) {
+      return this.ensureRepos([])
+    }
+
+    const match = repoUrl.match(/github\.com[/:]([^/]+)\/([^/.]+)/)
+
+    if (!match) {
+      return this.ensureRepos([])
+    }
+
+    return this.ensureRepos([
+      {
+        installationId: 0,
+        owner: match[1] ?? '',
+        name: match[2] ?? '',
+        fullName: `${match[1]}/${match[2]}`,
+        defaultBranch: 'main',
+        private: false,
+      },
+    ])
   }
 
   async readFile(path: string, cwd?: string): Promise<{ content: string }> {
@@ -211,3 +287,6 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
     return { ok: true }
   }
 }
+
+/** Preferred name; class remains SessionSandbox for the existing Durable Object binding. */
+export { SessionSandbox as WorkspaceSandbox }

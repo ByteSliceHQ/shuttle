@@ -2,7 +2,11 @@ import { z } from 'zod'
 
 import { defineTool } from '@swirls/looms/agent'
 
-import { sandboxStub, type ShuttleEnv } from '../env'
+import type { ShuttleEnv } from '../env'
+import { sandboxStub } from '../env'
+import type { LinkedSandboxRepo } from '../sandbox/workspace'
+import type { SandboxBinding } from '../session/bind-sandbox'
+import { readSandboxBinding } from '../session/bind-sandbox'
 
 async function withAbort<T>(
   signal: AbortSignal | undefined,
@@ -31,26 +35,45 @@ async function withAbort<T>(
   })
 }
 
-function worktreeCwd(threadId: string): string {
-  return `/workspace/.wt/${threadId}`
-}
-
-export function createSandboxTools(env: ShuttleEnv, runId: string) {
-  const sandbox = () => sandboxStub(env, runId)
+export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: DurableObjectStorage) {
+  let bindingPromise: Promise<SandboxBinding> | null = null
   const prepared = new Set<string>()
 
-  async function prepare(threadId: string): Promise<string> {
-    if (!prepared.has(threadId)) {
-      await sandbox().ensureRepo(null)
-      await sandbox().ensureWorktree(threadId)
-      prepared.add(threadId)
+  async function resolveBinding(): Promise<SandboxBinding> {
+    bindingPromise ??= (async () => {
+      const stored = await readSandboxBinding(storage, runId)
+
+      if (stored) {
+        return stored
+      }
+
+      return { sandboxName: runId, repos: [] as LinkedSandboxRepo[] }
+    })()
+
+    return bindingPromise
+  }
+
+  async function prepare(threadId: string): Promise<{ cwd: string; repos: LinkedSandboxRepo[] }> {
+    const binding = await resolveBinding()
+    const sandbox = sandboxStub(env, binding.sandboxName)
+    const key = `${binding.sandboxName}:${threadId}`
+
+    if (!prepared.has(key)) {
+      await sandbox.ensureRepos(binding.repos as LinkedSandboxRepo[])
+      await sandbox.ensureWorktree(runId, threadId)
+      prepared.add(key)
     }
 
-    return worktreeCwd(threadId)
+    const primary = binding.repos[0]?.name ?? 'demo'
+    return {
+      cwd: `/workspace/.wt/${runId}/${threadId}/${primary}`,
+      repos: binding.repos as LinkedSandboxRepo[],
+    }
   }
 
   const onAbort = async (): Promise<void> => {
-    await sandbox().kill()
+    const binding = await resolveBinding()
+    await sandboxStub(env, binding.sandboxName).kill()
   }
 
   const readFile = defineTool({
@@ -60,8 +83,15 @@ export function createSandboxTools(env: ShuttleEnv, runId: string) {
       path: z.string(),
     }),
     handler: async ({ path }, ctx) => {
-      const cwd = await prepare(ctx.threadId)
-      const result = await withAbort(ctx.signal, () => sandbox().readFile(path, cwd), onAbort)
+      const { cwd } = await prepare(ctx.threadId)
+      const binding = await resolveBinding()
+
+      const result = await withAbort(
+        ctx.signal,
+        () => sandboxStub(env, binding.sandboxName).readFile(path, cwd),
+        onAbort,
+      )
+
       return { path, content: result.content }
     },
   })
@@ -74,8 +104,15 @@ export function createSandboxTools(env: ShuttleEnv, runId: string) {
       content: z.string(),
     }),
     handler: async ({ path, content }, ctx) => {
-      const cwd = await prepare(ctx.threadId)
-      await withAbort(ctx.signal, () => sandbox().writeFile(path, content, cwd), onAbort)
+      const { cwd } = await prepare(ctx.threadId)
+      const binding = await resolveBinding()
+
+      await withAbort(
+        ctx.signal,
+        () => sandboxStub(env, binding.sandboxName).writeFile(path, content, cwd),
+        onAbort,
+      )
+
       return { path, ok: true }
     },
   })
@@ -89,11 +126,12 @@ export function createSandboxTools(env: ShuttleEnv, runId: string) {
       new_text: z.string(),
     }),
     handler: async ({ path, old_text, new_text }, ctx) => {
-      const cwd = await prepare(ctx.threadId)
+      const { cwd } = await prepare(ctx.threadId)
+      const binding = await resolveBinding()
 
       const result = await withAbort(
         ctx.signal,
-        () => sandbox().editFile(path, old_text, new_text, cwd),
+        () => sandboxStub(env, binding.sandboxName).editFile(path, old_text, new_text, cwd),
         onAbort,
       )
 
@@ -109,8 +147,15 @@ export function createSandboxTools(env: ShuttleEnv, runId: string) {
       path: z.string().optional(),
     }),
     handler: async ({ pattern, path }, ctx) => {
-      const cwd = await prepare(ctx.threadId)
-      const result = await withAbort(ctx.signal, () => sandbox().grep(pattern, path, cwd), onAbort)
+      const { cwd } = await prepare(ctx.threadId)
+      const binding = await resolveBinding()
+
+      const result = await withAbort(
+        ctx.signal,
+        () => sandboxStub(env, binding.sandboxName).grep(pattern, path, cwd),
+        onAbort,
+      )
+
       return { matches: result.matches }
     },
   })
@@ -122,8 +167,13 @@ export function createSandboxTools(env: ShuttleEnv, runId: string) {
       command: z.string(),
     }),
     handler: async ({ command }, ctx) => {
-      const cwd = await prepare(ctx.threadId)
-      return await withAbort(ctx.signal, () => sandbox().exec(command, { cwd }), onAbort)
+      const { cwd } = await prepare(ctx.threadId)
+      const binding = await resolveBinding()
+      return await withAbort(
+        ctx.signal,
+        () => sandboxStub(env, binding.sandboxName).exec(command, { cwd }),
+        onAbort,
+      )
     },
   })
 
@@ -132,8 +182,15 @@ export function createSandboxTools(env: ShuttleEnv, runId: string) {
     description: 'Show the current git diff in the worker worktree',
     input: z.object({}),
     handler: async (_input, ctx) => {
-      const cwd = await prepare(ctx.threadId)
-      const result = await withAbort(ctx.signal, () => sandbox().gitDiff(cwd), onAbort)
+      const { cwd } = await prepare(ctx.threadId)
+      const binding = await resolveBinding()
+
+      const result = await withAbort(
+        ctx.signal,
+        () => sandboxStub(env, binding.sandboxName).gitDiff(cwd),
+        onAbort,
+      )
+
       return { diff: result.diff }
     },
   })
@@ -141,8 +198,12 @@ export function createSandboxTools(env: ShuttleEnv, runId: string) {
   return { readFile, writeFile, editFile, grep, bash, gitDiff }
 }
 
-export function createReadOnlySandboxTools(env: ShuttleEnv, runId: string) {
-  const all = createSandboxTools(env, runId)
+export function createReadOnlySandboxTools(
+  env: ShuttleEnv,
+  runId: string,
+  storage?: DurableObjectStorage,
+) {
+  const all = createSandboxTools(env, runId, storage)
   return {
     readFile: all.readFile,
     grep: all.grep,

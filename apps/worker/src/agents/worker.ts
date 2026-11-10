@@ -5,8 +5,8 @@ import { defineAgent } from '@swirls/looms/agent'
 import type { ShuttleEnv } from '../env'
 import { createSandboxTools } from '../tools/sandbox'
 
-export function createWorkerAgent(env: ShuttleEnv, runId: string) {
-  const tools = createSandboxTools(env, runId)
+export function createWorkerAgent(env: ShuttleEnv, runId: string, storage?: DurableObjectStorage) {
+  const tools = createSandboxTools(env, runId, storage)
 
   return defineAgent({
     name: 'worker',
@@ -17,7 +17,8 @@ export function createWorkerAgent(env: ShuttleEnv, runId: string) {
     }),
     instructions: [
       'You are a Shuttle coding worker.',
-      'You work only in your assigned worktree.',
+      'You work only in your assigned worktree under /workspace/.wt/<run>/<thread>/<repo>.',
+      'When multiple repositories are linked, each repo is a sibling directory named after the repo.',
       'Use read_file, edit_file, write_file, grep, bash, and git_diff.',
       'Prefer small, correct edits.',
       'When the brief is updated via a steer message, follow the new brief.',

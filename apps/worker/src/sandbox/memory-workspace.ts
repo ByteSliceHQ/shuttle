@@ -1,63 +1,101 @@
-import { resolvePath, type ExecResult, type Workspace } from './workspace'
+import type { ShuttleEnv } from '../env'
+import { fetchRepoTarball } from '../github/app'
+import { parseTar, stripTarRoot } from './tar'
+import {
+  repoCheckoutPath,
+  resolvePath,
+  worktreeRepoPath,
+  worktreeRoot,
+  type ExecResult,
+  type LinkedSandboxRepo,
+  type Workspace,
+  type WorktreeResult,
+} from './workspace'
+
+const FILE_PREFIX = 'file:'
+const META_KEY = 'meta:repos'
 
 /**
  * In-Durable-Object filesystem for demos without Docker.
- * Enough for agents to read/write/edit files and run a few git-like commands.
+ * Base checkouts live under `/workspace/repos/<name>`; worktrees are
+ * copy-on-write overlays keyed by `/workspace/.wt/<runId>/<threadId>/<name>`.
  */
 export class MemoryWorkspace implements Workspace {
-  private readonly files = new Map<string, string>()
-  private repoRoot = '/workspace'
+  private readonly files = new Map<string, string | null>()
+  private readonly dirty = new Set<string>()
+  private repoNames: string[] = []
   private aborted = false
+  private loaded = false
 
-  constructor(private readonly storage?: DurableObjectStorage) {}
+  constructor(
+    private readonly storage?: DurableObjectStorage,
+    private readonly env?: ShuttleEnv,
+  ) {}
 
-  async ensureRepo(repoUrl: string | null): Promise<{ root: string }> {
-    this.repoRoot = '/workspace'
-    this.files.set('/workspace/README.md', `# Shuttle workspace\n\nRepo: ${repoUrl ?? 'local'}\n`)
+  async ensureRepos(repos: readonly LinkedSandboxRepo[]): Promise<{ root: string }> {
+    await this.hydrate()
 
-    this.files.set(
-      '/workspace/package.json',
-      JSON.stringify({ name: 'shuttle-demo-repo', version: '0.0.1', type: 'module' }, null, 2) +
-        '\n',
-    )
+    if (repos.length === 0) {
+      await this.seedDemoRepo()
+      this.repoNames = ['demo']
+      await this.persistMeta()
+      await this.flush()
+      return { root: '/workspace' }
+    }
 
-    this.files.set(
-      '/workspace/src/index.ts',
-      `export function greet(name: string): string {\n  return \`Hello, \${name}!\`\n}\n`,
-    )
+    for (const repo of repos) {
+      const root = repoCheckoutPath(repo.name)
+      const marker = `${root}/.shuttle-imported`
 
-    this.files.set(
-      '/workspace/src/math.ts',
-      `export function add(a: number, b: number): number {\n  return a + b\n}\n`,
-    )
-
-    await this.persist()
-    return { root: this.repoRoot }
-  }
-
-  async ensureWorktree(threadId: string): Promise<{ root: string }> {
-    const root = `/workspace/.wt/${threadId}`
-
-    // Snapshot first: the loop adds worktree copies to the same map.
-    const snapshot = Array.from(this.files)
-
-    for (const [path, content] of snapshot) {
-      if (!path.startsWith('/workspace/') || path.startsWith('/workspace/.wt/')) {
+      if (this.files.has(marker) && this.files.get(marker) !== null) {
         continue
       }
 
-      const relative = path.slice('/workspace/'.length)
-      this.files.set(`${root}/${relative}`, content)
+      if (this.env) {
+        await this.importTarball(repo)
+      } else {
+        this.files.set(`${root}/README.md`, `# ${repo.fullName}\n`)
+        this.dirty.add(`${root}/README.md`)
+      }
+
+      this.files.set(marker, repo.fullName)
+      this.dirty.add(marker)
     }
 
-    await this.persist()
-    return { root }
+    this.repoNames = repos.map((repo) => repo.name)
+    await this.persistMeta()
+    await this.flush()
+    return { root: '/workspace' }
+  }
+
+  async ensureWorktree(runId: string, threadId: string): Promise<WorktreeResult> {
+    await this.hydrate()
+    const root = worktreeRoot(runId, threadId)
+
+    const repoDirs = this.repoNames.map((name) => ({
+      name,
+      root: worktreeRepoPath(runId, threadId, name),
+    }))
+
+    // Overlay markers so the worktree exists even before the first write.
+    for (const dir of repoDirs) {
+      const marker = `${dir.root}/.shuttle-worktree`
+
+      if (!this.files.has(marker)) {
+        this.files.set(marker, `${runId}/${threadId}`)
+        this.dirty.add(marker)
+      }
+    }
+
+    await this.flush()
+    return { root, repoDirs }
   }
 
   async readFile(path: string, cwd?: string): Promise<string> {
     this.throwIfAborted()
+    await this.hydrate()
     const resolved = resolvePath(path, cwd)
-    const content = this.files.get(resolved)
+    const content = this.resolveOverlay(resolved)
 
     if (content === undefined) {
       throw new Error(`ENOENT: ${resolved}`)
@@ -68,38 +106,44 @@ export class MemoryWorkspace implements Workspace {
 
   async writeFile(path: string, content: string, cwd?: string): Promise<void> {
     this.throwIfAborted()
-    this.files.set(resolvePath(path, cwd), content)
-    await this.persist()
+    await this.hydrate()
+    const resolved = resolvePath(path, cwd)
+    this.files.set(resolved, content)
+    this.dirty.add(resolved)
+    await this.flush()
   }
 
   async editFile(path: string, oldText: string, newText: string, cwd?: string): Promise<number> {
     this.throwIfAborted()
-    const resolved = resolvePath(path, cwd)
-    const current = this.files.get(resolved)
-
-    if (current === undefined) {
-      throw new Error(`ENOENT: ${resolved}`)
-    }
+    const current = await this.readFile(path, cwd)
 
     if (!current.includes(oldText)) {
-      throw new Error(`edit_file: old_text not found in ${resolved}`)
+      throw new Error(`edit_file: old_text not found in ${resolvePath(path, cwd)}`)
     }
 
     const next = current.split(oldText).join(newText)
     const replacements = current.split(oldText).length - 1
-    this.files.set(resolved, next)
-    await this.persist()
+    await this.writeFile(path, next, cwd)
     return replacements
   }
 
   async grep(pattern: string, path?: string, cwd?: string): Promise<string> {
     this.throwIfAborted()
-    const root = path ? resolvePath(path, cwd) : (cwd ?? this.repoRoot)
+    await this.hydrate()
+    const root = path ? resolvePath(path, cwd) : (cwd ?? '/workspace')
     const regex = new RegExp(pattern)
     const lines: string[] = []
+    const seen = new Set<string>()
 
-    for (const [filePath, content] of this.files) {
-      if (!filePath.startsWith(root)) {
+    for (const filePath of this.listVisiblePaths()) {
+      if (!filePath.startsWith(root) || seen.has(filePath)) {
+        continue
+      }
+
+      seen.add(filePath)
+      const content = this.resolveOverlay(filePath)
+
+      if (content == null) {
         continue
       }
 
@@ -115,7 +159,8 @@ export class MemoryWorkspace implements Workspace {
 
   async exec(command: string, options?: { cwd?: string; timeoutMs?: number }): Promise<ExecResult> {
     this.throwIfAborted()
-    const cwd = options?.cwd ?? this.repoRoot
+    await this.hydrate()
+    const cwd = options?.cwd ?? '/workspace'
     const trimmed = command.trim()
 
     if (trimmed === 'pwd') {
@@ -126,7 +171,7 @@ export class MemoryWorkspace implements Workspace {
       const target = trimmed === 'ls' ? cwd : resolvePath(trimmed.slice(3).trim(), cwd)
       const names = new Set<string>()
 
-      for (const filePath of this.files.keys()) {
+      for (const filePath of this.listVisiblePaths()) {
         if (
           !filePath.startsWith(target.endsWith('/') ? target : `${target}/`) &&
           filePath !== target
@@ -180,19 +225,55 @@ export class MemoryWorkspace implements Workspace {
 
   async gitDiff(cwd?: string): Promise<string> {
     this.throwIfAborted()
-    const root = cwd ?? this.repoRoot
+    await this.hydrate()
+    const root = cwd ?? '/workspace'
     const lines: string[] = []
 
-    for (const [path, content] of [...this.files].toSorted(([a], [b]) => a.localeCompare(b))) {
-      if (!path.startsWith(root)) {
+    for (const filePath of this.listVisiblePaths().toSorted()) {
+      if (!filePath.startsWith(root)) {
         continue
       }
 
-      lines.push(`--- a${path}`)
-      lines.push(`+++ b${path}`)
+      const current = this.resolveOverlay(filePath)
+      const base = this.baseContent(filePath)
 
-      for (const line of content.split('\n')) {
-        lines.push(`+${line}`)
+      if (current === base) {
+        continue
+      }
+
+      if (base == null && current != null) {
+        lines.push(`--- /dev/null`)
+        lines.push(`+++ b${filePath}`)
+
+        for (const line of current.split('\n')) {
+          lines.push(`+${line}`)
+        }
+
+        continue
+      }
+
+      if (current == null && base != null) {
+        lines.push(`--- a${filePath}`)
+        lines.push(`+++ /dev/null`)
+
+        for (const line of base.split('\n')) {
+          lines.push(`-${line}`)
+        }
+
+        continue
+      }
+
+      if (current != null && base != null) {
+        lines.push(`--- a${filePath}`)
+        lines.push(`+++ b${filePath}`)
+
+        for (const line of base.split('\n')) {
+          lines.push(`-${line}`)
+        }
+
+        for (const line of current.split('\n')) {
+          lines.push(`+${line}`)
+        }
       }
     }
 
@@ -213,27 +294,180 @@ export class MemoryWorkspace implements Workspace {
     }
   }
 
-  private async persist(): Promise<void> {
+  private async seedDemoRepo(): Promise<void> {
+    const root = repoCheckoutPath('demo')
+
+    if (this.files.has(`${root}/README.md`)) {
+      return
+    }
+
+    const seed: Record<string, string> = {
+      [`${root}/README.md`]: '# Shuttle workspace\n\nRepo: local demo\n',
+      [`${root}/package.json`]:
+        JSON.stringify({ name: 'shuttle-demo-repo', version: '0.0.1', type: 'module' }, null, 2) +
+        '\n',
+      [`${root}/src/index.ts`]: `export function greet(name: string): string {\n  return \`Hello, \${name}!\`\n}\n`,
+      [`${root}/src/math.ts`]: `export function add(a: number, b: number): number {\n  return a + b\n}\n`,
+    }
+
+    for (const [path, content] of Object.entries(seed)) {
+      this.files.set(path, content)
+      this.dirty.add(path)
+    }
+  }
+
+  private async importTarball(repo: LinkedSandboxRepo): Promise<void> {
+    if (!this.env) {
+      return
+    }
+
+    const archive = await fetchRepoTarball(this.env, repo)
+    const stream = new Blob([archive]).stream().pipeThrough(new DecompressionStream('gzip'))
+    const gunzipped = await new Response(stream).arrayBuffer()
+    const entries = parseTar(gunzipped)
+    const root = repoCheckoutPath(repo.name)
+
+    for (const entry of entries) {
+      const relative = stripTarRoot(entry.path)
+
+      if (!relative || relative.endsWith('/')) {
+        continue
+      }
+
+      const path = `${root}/${relative}`
+      this.files.set(path, entry.content)
+      this.dirty.add(path)
+    }
+  }
+
+  /** Resolve a path through worktree overlay → base checkout. */
+  private resolveOverlay(path: string): string | undefined {
+    if (this.files.has(path)) {
+      const value = this.files.get(path)
+      return value === null ? undefined : value
+    }
+
+    const base = this.basePathFor(path)
+
+    if (base && this.files.has(base)) {
+      const value = this.files.get(base)
+      return value === null ? undefined : value
+    }
+
+    return undefined
+  }
+
+  private baseContent(path: string): string | undefined {
+    const base = this.basePathFor(path) ?? path
+
+    if (!this.files.has(base)) {
+      return undefined
+    }
+
+    const value = this.files.get(base)
+    return value === null ? undefined : value
+  }
+
+  private basePathFor(path: string): string | null {
+    const match = path.match(/^\/workspace\/\.wt\/[^/]+\/[^/]+\/(.+)$/)
+
+    if (!match?.[1]) {
+      return null
+    }
+
+    return `/workspace/repos/${match[1]}`
+  }
+
+  private listVisiblePaths(): string[] {
+    const paths = new Set<string>()
+
+    for (const path of this.files.keys()) {
+      if (this.files.get(path) === null) {
+        continue
+      }
+
+      paths.add(path)
+
+      // Synthesize overlay views of base files under each worktree.
+      if (path.startsWith('/workspace/repos/')) {
+        const relative = path.slice('/workspace/repos/'.length)
+
+        for (const key of this.files.keys()) {
+          const worktreeMatch = key.match(/^(\/workspace\/\.wt\/[^/]+\/[^/]+)\//)
+
+          if (worktreeMatch?.[1]) {
+            paths.add(`${worktreeMatch[1]}/${relative}`)
+          }
+        }
+      }
+    }
+
+    return [...paths]
+  }
+
+  private async hydrate(): Promise<void> {
+    if (this.loaded || !this.storage) {
+      this.loaded = true
+      return
+    }
+
+    const meta = await this.storage.get<string[]>(META_KEY)
+
+    if (meta) {
+      this.repoNames = meta
+    }
+
+    const listed = await this.storage.list<string>({ prefix: FILE_PREFIX })
+
+    for (const [key, value] of listed) {
+      this.files.set(key.slice(FILE_PREFIX.length), value)
+    }
+
+    this.loaded = true
+  }
+
+  private async persistMeta(): Promise<void> {
     if (!this.storage) {
       return
     }
 
-    await this.storage.put(
-      'files',
-      Object.fromEntries(this.files.entries()) as Record<string, string>,
-    )
+    await this.storage.put(META_KEY, this.repoNames)
   }
 
-  static async restore(storage: DurableObjectStorage): Promise<MemoryWorkspace> {
-    const workspace = new MemoryWorkspace(storage)
-    const saved = await storage.get<Record<string, string>>('files')
-
-    if (saved) {
-      for (const [path, content] of Object.entries(saved)) {
-        workspace.files.set(path, content)
-      }
+  private async flush(): Promise<void> {
+    if (!this.storage || this.dirty.size === 0) {
+      return
     }
 
-    return workspace
+    const entries = [...this.dirty]
+    this.dirty.clear()
+
+    for (let index = 0; index < entries.length; index += 25) {
+      const chunk = entries.slice(index, index + 25)
+      const putBatch: Record<string, string> = {}
+      const deleteKeys: string[] = []
+
+      for (const path of chunk) {
+        const value = this.files.get(path)
+
+        if (value == null) {
+          deleteKeys.push(`${FILE_PREFIX}${path}`)
+        } else {
+          putBatch[`${FILE_PREFIX}${path}`] = value
+        }
+      }
+
+      if (Object.keys(putBatch).length > 0) {
+        await this.storage.put(putBatch)
+      }
+
+      if (deleteKeys.length > 0) {
+        await this.storage.delete(deleteKeys)
+      }
+    }
+  }
+
+  static async restore(storage: DurableObjectStorage, env?: ShuttleEnv): Promise<MemoryWorkspace> {
+    return new MemoryWorkspace(storage, env)
   }
 }
