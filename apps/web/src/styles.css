@@ -289,7 +289,56 @@
   animation: fade-in 900ms steps(2, jump-none) infinite alternate;
 }
 
+/* The 404 shuttle lands and its thread unspools; rare enough to earn the extra time. */
+@keyframes shuttle-land {
+  from {
+    opacity: 0;
+    transform: translate(-14px, -8px) rotate(-10deg);
+  }
+}
+
+@keyframes thread-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+
+@keyframes knot-in {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+}
+
+.lost-shuttle {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: shuttle-land 450ms var(--ease-snappy) both;
+}
+
+.lost-trail {
+  animation: fade-in 300ms var(--ease-snappy) 150ms both;
+}
+
+.lost-thread {
+  stroke-dasharray: 1;
+  animation: thread-draw 900ms var(--ease-snappy) 250ms both;
+}
+
+.lost-knot {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: knot-in 250ms var(--ease-snappy) 900ms both;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .lost-shuttle,
+  .lost-trail,
+  .lost-thread,
+  .lost-knot {
+    animation: none;
+  }
+
   .pop,
   .modal[data-state='open'] {
     animation-name: fade-in;

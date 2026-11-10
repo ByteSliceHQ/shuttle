@@ -1,7 +1,8 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { ArrowRight, FolderX, Link2, LoaderCircle, Plus } from 'lucide-react'
+import { ArrowRight, Link2, LoaderCircle, Plus } from 'lucide-react'
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 
+import { NotFound } from '@/components/not-found'
 import { ActivityDot } from '@/components/sidebar/activity-dot'
 import { LinkRepoDialog } from '@/components/sidebar/link-repo-dialog'
 import { RepoChip } from '@/components/sidebar/repo-chip'
@@ -46,14 +47,10 @@ function FolderPage() {
 
   if (!folder) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 px-6">
-        <EmptyState icon={<FolderX />} title="Folder not found" className="h-auto">
-          It may have been archived. Pick another folder from the sidebar.
-        </EmptyState>
-        <Button variant="outline" size="sm" asChild>
-          <Link to="/">Back home</Link>
-        </Button>
-      </div>
+      <NotFound eyebrow="Folder not found" title="This folder came unravelled">
+        Nothing in your workspace answers to that link. Pick a folder from the sidebar, or head home
+        and start something new.
+      </NotFound>
     )
   }
 
