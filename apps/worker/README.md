@@ -26,7 +26,20 @@ Cloudflare Worker that hosts Shuttle sessions on Looms Durable Objects.
    wrangler secret put OPENROUTER_API_KEY
    ```
 
-5. Deploy:
+5. (Optional) Create a GitHub App for folder repo linking:
+
+   - Permissions: Contents (read/write), Metadata (read)
+   - Setup URL: `https://<worker-host>/github/setup` (local: `http://127.0.0.1:8790/github/setup`)
+   - Convert the private key to PKCS#8:
+
+     ```bash
+     openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in app.pem
+     ```
+
+   - Put `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY`, and
+     `GITHUB_STATE_SECRET` in `.dev.vars` (or as Wrangler secrets).
+
+6. Deploy:
 
    ```bash
    bun run deploy
