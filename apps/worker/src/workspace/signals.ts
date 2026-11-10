@@ -23,6 +23,9 @@ const GithubAccountSchema = Schema.Struct({
   avatarUrl: Schema.String,
 })
 
+/** Matches the sidebar's inline input `maxLength`. */
+const DisplayNameSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120))
+
 const SessionActivitySchema = Schema.Union([
   Schema.Literal('working'),
   Schema.Literal('needs_input'),
@@ -33,7 +36,7 @@ export const createFolder = workspaceModule.signal({
   description: 'Create a workspace folder.',
   input: Schema.Struct({
     folderId: Schema.String,
-    name: Schema.String,
+    name: DisplayNameSchema,
     createdAt: Schema.Finite,
   }),
   build: (input) =>
@@ -46,7 +49,7 @@ export const renameFolder = workspaceModule.signal({
   description: 'Rename a workspace folder.',
   input: Schema.Struct({
     folderId: Schema.String,
-    name: Schema.String,
+    name: DisplayNameSchema,
   }),
   build: (input) => workspaceModule.input('folder.renamed', input),
 })
@@ -128,7 +131,7 @@ export const renameSession = workspaceModule.signal({
   description: 'Rename a coding session in the sidebar.',
   input: Schema.Struct({
     runId: Schema.String,
-    title: Schema.String,
+    title: DisplayNameSchema,
   }),
   build: (input) => workspaceModule.input('session.renamed', input),
 })

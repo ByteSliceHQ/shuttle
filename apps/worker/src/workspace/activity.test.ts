@@ -6,7 +6,7 @@ import type { ShuttleEnv } from '../env'
 import { createWorkspaceActivityProjector } from './activity'
 
 describe('workspace activity projector', () => {
-  test('coalesces a batch and skips the workspace run itself', async () => {
+  test('coalesces a batch and only reports runs the workspace launched', async () => {
     const signals: unknown[] = []
 
     const env = {
@@ -34,9 +34,32 @@ describe('workspace activity projector', () => {
 
     expect(signals).toHaveLength(0)
 
+    const playbook = createWorkspaceActivityProjector(env, 'shuttle-playbook')
+
+    await playbook.project([
+      { type: 'runtime.run.started', seq: 1, ts: 5, payload: {} } as EventEnvelope,
+      { type: 'agent.turn.started', seq: 2, ts: 10, payload: {} } as EventEnvelope,
+    ])
+
+    expect(signals).toHaveLength(0)
+
     const projector = createWorkspaceActivityProjector(env, 'session_abc')
 
     await projector.project([
+      {
+        type: 'runtime.run.started',
+        seq: 0,
+        ts: 5,
+        payload: {
+          launchedBy: {
+            runId: 'shuttle-workspace',
+            threadId: 'root',
+            effectId: 'launch_session_abc',
+            causationId: 'evt_1',
+            causationSeq: 3,
+          },
+        },
+      } as unknown as EventEnvelope,
       {
         type: 'agent.turn.started',
         seq: 1,

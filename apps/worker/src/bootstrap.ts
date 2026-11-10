@@ -10,9 +10,10 @@ async function ensureNamedRun(
   const stub = loomsStub(env.LOOMS_RUN, runId)
 
   try {
-    const status = await stub.status()
+    // A signal can create the run's storage before launch, which `status()` reports as running.
+    const run = await stub.getRun()
 
-    if (status) {
+    if (run.startIdentity) {
       return
     }
   } catch {

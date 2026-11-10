@@ -61,7 +61,7 @@ export function resolveProjectors(env: ShuttleEnv, context?: ProjectorContext): 
   }
 
   if (context) {
-    projectors.push(createWorkspaceActivityProjector(env, context.runId))
+    projectors.push(createWorkspaceActivityProjector(env, context.runId, context.storage))
   }
 
   return projectors
