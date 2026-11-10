@@ -7,6 +7,7 @@ import { d1ReplicaDatabase, sqliteReplica } from '@swirls/looms/projectors/repli
 
 import { shuttleAttributes } from './attributes'
 import type { ShuttleEnv } from './env'
+import { createWorkspaceActivityProjector } from './workspace/activity'
 
 const StubLlm: LlmAdapter = {
   complete: async ({ messages }) => {
@@ -41,20 +42,35 @@ export function resolveLlm(env: ShuttleEnv): LlmAdapter {
   })
 }
 
-export function resolveProjectors(env: ShuttleEnv): Projector[] {
-  if (!env.REPLICA) {
-    return []
+export interface ProjectorContext {
+  readonly runId: string
+  readonly storage?: DurableObjectStorage
+}
+
+export function resolveProjectors(env: ShuttleEnv, context?: ProjectorContext): Projector[] {
+  const projectors: Projector[] = []
+
+  if (env.REPLICA) {
+    projectors.push(
+      sqliteReplica({
+        database: d1ReplicaDatabase(env.REPLICA),
+        migrate: 'auto',
+        additionalFields: shuttleAttributes,
+      }),
+    )
   }
 
-  return [
-    sqliteReplica({
-      database: d1ReplicaDatabase(env.REPLICA),
-      migrate: 'auto',
-      additionalFields: shuttleAttributes,
-    }),
-  ]
+  if (context) {
+    projectors.push(createWorkspaceActivityProjector(env, context.runId))
+  }
+
+  return projectors
 }
 
 export function playbookRunId(env: ShuttleEnv): string {
   return env.SHUTTLE_PLAYBOOK_RUN_ID ?? 'shuttle-playbook'
+}
+
+export function workspaceRunId(env: ShuttleEnv): string {
+  return env.SHUTTLE_WORKSPACE_RUN_ID ?? 'shuttle-workspace'
 }

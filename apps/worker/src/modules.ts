@@ -11,16 +11,26 @@ import { resolveLlm } from './config'
 import type { ShuttleEnv } from './env'
 import { reflect } from './reflect/module'
 import { codingSession, shuttleSession } from './session/module'
+import { workspace } from './workspace/module'
+
+export interface ShuttleModulesOptions {
+  readonly storage?: DurableObjectStorage
+}
 
 /**
- * Compose native Looms modules with Shuttle's custom session + reflect modules.
+ * Compose native Looms modules with Shuttle's custom session, reflect, and workspace modules.
  * This is the demo's showcase of custom module interoperability.
  */
-export function shuttleModules(env: ShuttleEnv, runId: string) {
+export function shuttleModules(
+  env: ShuttleEnv,
+  runId: string,
+  options: ShuttleModulesOptions = {},
+) {
   const llm = resolveLlm(env)
-  const conductor = createConductorAgent(env, runId)
-  const worker = createWorkerAgent(env, runId)
-  const narrator = createNarratorAgent(env, runId)
+  const storage = options.storage
+  const conductor = createConductorAgent(env, runId, storage)
+  const worker = createWorkerAgent(env, runId, storage)
+  const narrator = createNarratorAgent(env, runId, storage)
   const reflector = createReflectorAgent(env, runId)
 
   return [
@@ -30,7 +40,8 @@ export function shuttleModules(env: ShuttleEnv, runId: string) {
     }),
     evaluator({ definitions: [intake] }),
     approval(),
-    shuttleSession({ definitions: [codingSession] }),
+    shuttleSession({ definitions: [codingSession], storage }),
     reflect(),
+    workspace(),
   ]
 }

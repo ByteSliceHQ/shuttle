@@ -1,3 +1,5 @@
+import type { LinkedSandboxRepo, WorktreeResult } from './sandbox/workspace'
+
 export interface ShuttleEnv {
   readonly LOOMS_RUN: DurableObjectNamespace
   readonly SANDBOX: DurableObjectNamespace
@@ -6,12 +8,19 @@ export interface ShuttleEnv {
   readonly LOOMS_MODEL?: string
   readonly SHUTTLE_WORKSPACE_MODE?: string
   readonly SHUTTLE_PLAYBOOK_RUN_ID?: string
+  readonly SHUTTLE_WORKSPACE_RUN_ID?: string
+  readonly SHUTTLE_WEB_URL?: string
+  readonly GITHUB_APP_ID?: string
+  readonly GITHUB_APP_SLUG?: string
+  readonly GITHUB_APP_PRIVATE_KEY?: string
+  readonly GITHUB_STATE_SECRET?: string
 }
 
-/** RPC surface of SessionSandbox. */
+/** RPC surface of SessionSandbox / WorkspaceSandbox. */
 export interface SessionSandboxStub {
+  ensureRepos(repos: LinkedSandboxRepo[]): Promise<{ root: string }>
+  ensureWorktree(runId: string, threadId: string): Promise<WorktreeResult>
   ensureRepo(repoUrl: string | null): Promise<{ root: string }>
-  ensureWorktree(threadId: string): Promise<{ root: string }>
   readFile(path: string, cwd?: string): Promise<{ content: string }>
   writeFile(path: string, content: string, cwd?: string): Promise<{ ok: true }>
   editFile(
@@ -29,6 +38,6 @@ export interface SessionSandboxStub {
   kill(pid?: number): Promise<{ ok: true }>
 }
 
-export function sandboxStub(env: ShuttleEnv, runId: string): SessionSandboxStub {
-  return env.SANDBOX.getByName(runId) as unknown as SessionSandboxStub
+export function sandboxStub(env: ShuttleEnv, sandboxName: string): SessionSandboxStub {
+  return env.SANDBOX.getByName(sandboxName) as unknown as SessionSandboxStub
 }

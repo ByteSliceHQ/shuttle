@@ -5,6 +5,7 @@ import {
   createWaitId,
   deterministicThreadId,
   emit,
+  invoke,
   launch,
   spawn,
   wait,
@@ -40,9 +41,22 @@ export interface PendingRoute {
   readonly text: string
 }
 
+export interface LinkedSessionRepo {
+  readonly installationId: number
+  readonly owner: string
+  readonly name: string
+  readonly fullName: string
+  readonly defaultBranch: string
+  readonly private: boolean
+}
+
 export interface SessionState {
   readonly goal: string
   readonly repoUrl: string | null
+  readonly folderId: string | null
+  readonly workspaceRunId: string | null
+  readonly sandboxName: string | null
+  readonly repos: readonly LinkedSessionRepo[]
   readonly lessons: readonly { id: string; text: string; scope?: string }[]
   readonly playbookVersion: number
   readonly playbookRunId: string | null
@@ -56,6 +70,7 @@ export interface SessionState {
   readonly workerThreadIds: readonly string[]
   readonly processedMessageIds: readonly string[]
   readonly reflectionLaunched: boolean
+  readonly sandboxBound: boolean
   readonly parked: boolean
   /** Bumped whenever the mailbox wait settles so Looms will re-arm it. */
   readonly mailboxEpoch: number
@@ -156,9 +171,41 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         ]
       })
 
+      const reposRaw = Array.isArray(input.repos) ? input.repos : []
+
+      const repos = reposRaw.flatMap((repo) => {
+        const item = asObject(repo)
+
+        if (
+          !Predicate.isNumber(item.installationId) ||
+          !Predicate.isString(item.owner) ||
+          !Predicate.isString(item.name) ||
+          !Predicate.isString(item.fullName) ||
+          !Predicate.isString(item.defaultBranch) ||
+          typeof item.private !== 'boolean'
+        ) {
+          return []
+        }
+
+        return [
+          {
+            installationId: item.installationId,
+            owner: item.owner,
+            name: item.name,
+            fullName: item.fullName,
+            defaultBranch: item.defaultBranch,
+            private: item.private,
+          },
+        ]
+      })
+
       return {
         goal: asString(input.goal) ?? 'Improve the repository',
         repoUrl: asString(input.repoUrl),
+        folderId: asString(input.folderId),
+        workspaceRunId: asString(input.workspaceRunId),
+        sandboxName: asString(input.sandboxName),
+        repos,
         lessons,
         playbookVersion: Predicate.isNumber(input.playbookVersion) ? input.playbookVersion : 0,
         playbookRunId: asString(input.playbookRunId),
@@ -172,6 +219,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         workerThreadIds: [],
         processedMessageIds: [],
         reflectionLaunched: false,
+        sandboxBound: false,
         parked: false,
         mailboxEpoch: 0,
       }
@@ -180,6 +228,10 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
       switch (event.type) {
         case 'runtime.thread.started': {
           return state
+        }
+
+        case 'shuttle.sandbox.bound': {
+          return { ...state, sandboxBound: true }
         }
 
         case 'shuttle.playbook.loaded': {
@@ -353,6 +405,26 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
     effects(state, ctx) {
       const effects: RuntimeEffect[] = []
 
+      if (!state.sandboxBound && state.sandboxName) {
+        effects.push(
+          invoke(
+            'shuttle.bindSandbox',
+            {
+              sandboxName: state.sandboxName,
+              repos: state.repos.map((repo) => ({
+                installationId: repo.installationId,
+                owner: repo.owner,
+                name: repo.name,
+                fullName: repo.fullName,
+                defaultBranch: repo.defaultBranch,
+                private: repo.private,
+              })),
+            },
+            'bind_sandbox',
+          ),
+        )
+      }
+
       if (!state.conductorThreadId) {
         const childThreadId = deterministicThreadId(ctx.threadId, 'conductor')
 
@@ -360,6 +432,13 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
           state.lessons.length > 0
             ? `\n\nPlaybook v${state.playbookVersion}:\n${state.lessons.map((lesson) => `- ${lesson.text}`).join('\n')}`
             : ''
+
+        const repoBlock =
+          state.repos.length > 0
+            ? `\n\nLinked repositories:\n${state.repos
+                .map((repo) => `- ${repo.fullName} (checkout at /workspace/repos/${repo.name})`)
+                .join('\n')}`
+            : `\n\nRepo: ${state.repoUrl ?? 'local demo workspace'}`
 
         effects.push(
           emit(
@@ -379,7 +458,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             kind: 'agent',
             definitionName: 'conductor',
             input: {
-              text: `${state.goal}${lessonBlock}\n\nRepo: ${state.repoUrl ?? 'local demo workspace'}`,
+              text: `${state.goal}${lessonBlock}${repoBlock}`,
             },
           }),
         )

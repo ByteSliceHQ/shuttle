@@ -1,0 +1,152 @@
+import { Schema } from 'effect'
+
+import { workspaceModule } from './scope'
+
+const LinkedRepoSchema = Schema.Struct({
+  installationId: Schema.Finite,
+  owner: Schema.String,
+  name: Schema.String,
+  fullName: Schema.String,
+  defaultBranch: Schema.String,
+  private: Schema.Boolean,
+})
+
+const LessonSchema = Schema.Struct({
+  id: Schema.String,
+  text: Schema.String,
+  scope: Schema.optional(Schema.String),
+})
+
+const GithubAccountSchema = Schema.Struct({
+  login: Schema.String,
+  type: Schema.String,
+  avatarUrl: Schema.String,
+})
+
+const SessionActivitySchema = Schema.Union([
+  Schema.Literal('working'),
+  Schema.Literal('needs_input'),
+  Schema.Literal('idle'),
+])
+
+export const createFolder = workspaceModule.signal({
+  description: 'Create a workspace folder.',
+  input: Schema.Struct({
+    folderId: Schema.String,
+    name: Schema.String,
+    createdAt: Schema.Finite,
+  }),
+  build: (input) =>
+    workspaceModule.input('folder.created', input, {
+      idempotencyKey: `workspace-folder:${input.folderId}`,
+    }),
+})
+
+export const renameFolder = workspaceModule.signal({
+  description: 'Rename a workspace folder.',
+  input: Schema.Struct({
+    folderId: Schema.String,
+    name: Schema.String,
+  }),
+  build: (input) => workspaceModule.input('folder.renamed', input),
+})
+
+export const archiveFolder = workspaceModule.signal({
+  description: 'Archive a workspace folder.',
+  input: Schema.Struct({
+    folderId: Schema.String,
+  }),
+  build: (input) => workspaceModule.input('folder.archived', input),
+})
+
+export const reorderFolders = workspaceModule.signal({
+  description: 'Reorder workspace folders.',
+  input: Schema.Struct({
+    folderIds: Schema.Array(Schema.String),
+  }),
+  build: (input) => workspaceModule.input('folder.reordered', input),
+})
+
+export const connectGithub = workspaceModule.signal({
+  description: 'Record a connected GitHub App installation.',
+  input: Schema.Struct({
+    installationId: Schema.Finite,
+    account: GithubAccountSchema,
+  }),
+  build: (input) =>
+    workspaceModule.input('github.connected', input, {
+      idempotencyKey: `workspace-github:${input.installationId}`,
+    }),
+})
+
+export const disconnectGithub = workspaceModule.signal({
+  description: 'Disconnect a GitHub App installation.',
+  input: Schema.Struct({
+    installationId: Schema.Finite,
+  }),
+  build: (input) => workspaceModule.input('github.disconnected', input),
+})
+
+export const linkRepo = workspaceModule.signal({
+  description: 'Link a GitHub repository to a folder.',
+  input: Schema.Struct({
+    folderId: Schema.String,
+    repo: LinkedRepoSchema,
+  }),
+  build: (input) =>
+    workspaceModule.input('repo.linked', input, {
+      idempotencyKey: `workspace-repo:${input.folderId}:${input.repo.fullName}`,
+    }),
+})
+
+export const unlinkRepo = workspaceModule.signal({
+  description: 'Unlink a GitHub repository from a folder.',
+  input: Schema.Struct({
+    folderId: Schema.String,
+    fullName: Schema.String,
+  }),
+  build: (input) => workspaceModule.input('repo.unlinked', input),
+})
+
+export const requestSession = workspaceModule.signal({
+  description: 'Request a coding session launch inside a folder.',
+  input: Schema.Struct({
+    runId: Schema.String,
+    folderId: Schema.String,
+    goal: Schema.String,
+    lessons: Schema.Array(LessonSchema),
+    playbookVersion: Schema.Finite,
+    playbookRunId: Schema.NullOr(Schema.String),
+  }),
+  build: (input) =>
+    workspaceModule.input('session.requested', input, {
+      idempotencyKey: `workspace-session:${input.runId}`,
+    }),
+})
+
+export const renameSession = workspaceModule.signal({
+  description: 'Rename a coding session in the sidebar.',
+  input: Schema.Struct({
+    runId: Schema.String,
+    title: Schema.String,
+  }),
+  build: (input) => workspaceModule.input('session.renamed', input),
+})
+
+export const archiveSession = workspaceModule.signal({
+  description: 'Archive a coding session in the sidebar.',
+  input: Schema.Struct({
+    runId: Schema.String,
+  }),
+  build: (input) => workspaceModule.input('session.archived', input),
+})
+
+export const reportActivity = workspaceModule.signal({
+  description: 'Report live activity for a coding session.',
+  input: Schema.Struct({
+    runId: Schema.String,
+    activity: SessionActivitySchema,
+    at: Schema.Finite,
+  }),
+  build: (input) => workspaceModule.input('session.activity', input),
+})

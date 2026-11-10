@@ -56,6 +56,10 @@ export const shuttleCatalog = defineEventCatalog('shuttle', {
   'reflection.launched': Schema.Struct({
     runId: Schema.String,
   }),
+  'sandbox.bound': Schema.Struct({
+    sandboxName: Schema.String,
+    repoCount: Schema.Finite,
+  }),
   reroute: Schema.Struct({
     messageId: Schema.String,
     kind: InterjectionKindSchema,

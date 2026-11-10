@@ -3,3 +3,12 @@ OPENROUTER_API_KEY=
 LOOMS_MODEL=openai/gpt-4o-mini
 SHUTTLE_WORKSPACE_MODE=memory
 SHUTTLE_PLAYBOOK_RUN_ID=shuttle-playbook
+SHUTTLE_WORKSPACE_RUN_ID=shuttle-workspace
+SHUTTLE_WEB_URL=http://127.0.0.1:5180
+
+# GitHub App (optional — enables Connect GitHub + private repos)
+# Convert the downloaded PEM: openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in app.pem
+GITHUB_APP_ID=
+GITHUB_APP_SLUG=
+GITHUB_APP_PRIVATE_KEY=
+GITHUB_STATE_SECRET=

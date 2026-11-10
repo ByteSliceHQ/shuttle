@@ -5,11 +5,13 @@ import {
   type LoomsDurableObjectConfig,
 } from '@swirls/looms/cloudflare'
 
-import { playbookRunId, resolveProjectors } from './config'
+import { ensurePlaybookQuietly, ensureWorkspaceQuietly } from './bootstrap'
+import { resolveProjectors } from './config'
 import type { ShuttleEnv } from './env'
-import { loomsStub } from './looms-stub'
 import { shuttleModules } from './modules'
+import { handleGithubRoutes } from './routes/github'
 import { handleShuttleRoutes } from './routes/sessions'
+import { handleWorkspaceRoutes } from './routes/workspace'
 import { SessionSandbox } from './sandbox/session-sandbox'
 
 export { SessionSandbox }
@@ -23,15 +25,27 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
     }
 
     return {
-      modules: shuttleModules(env, runId),
+      modules: shuttleModules(env, runId, { storage: this.ctx.storage }),
       launcher: durableObjectLauncher(env.LOOMS_RUN),
-      projectors: resolveProjectors(env),
+      projectors: resolveProjectors(env, { runId, storage: this.ctx.storage }),
     }
   }
 }
 
 export default {
   async fetch(request: Request, env: ShuttleEnv): Promise<Response> {
+    const workspace = await handleWorkspaceRoutes(request, env)
+
+    if (workspace) {
+      return workspace
+    }
+
+    const github = await handleGithubRoutes(request, env)
+
+    if (github) {
+      return github
+    }
+
     const shuttle = await handleShuttleRoutes(request, env)
 
     if (shuttle) {
@@ -41,6 +55,7 @@ export default {
     // Ensure the playbook DO exists lazily when a session is started.
     if (request.method === 'POST' && new URL(request.url).pathname === '/runs') {
       await ensurePlaybookQuietly(env)
+      await ensureWorkspaceQuietly(env)
     }
 
     const response = await routeToDurableObject(env.LOOMS_RUN, request, {
@@ -53,28 +68,3 @@ export default {
     return response ?? new Response('Not Found', { status: 404 })
   },
 } satisfies ExportedHandler<ShuttleEnv>
-
-async function ensurePlaybookQuietly(env: ShuttleEnv): Promise<void> {
-  const runId = playbookRunId(env)
-  const stub = loomsStub(env.LOOMS_RUN, runId)
-
-  try {
-    const status = await stub.status()
-
-    if (status) {
-      return
-    }
-  } catch {
-    // continue to launch
-  }
-
-  try {
-    await stub.launch({
-      kind: 'reflect-playbook',
-      definitionName: 'playbook',
-      input: { title: 'Shuttle playbook' },
-    })
-  } catch {
-    // Another request may have created it.
-  }
-}

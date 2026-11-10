@@ -8,9 +8,22 @@ const LessonSchema = z.object({
   scope: z.string().optional(),
 })
 
+const LinkedRepoSchema = z.object({
+  installationId: z.number(),
+  owner: z.string(),
+  name: z.string(),
+  fullName: z.string(),
+  defaultBranch: z.string(),
+  private: z.boolean(),
+})
+
 export const ShuttleSessionInputSchema = z.object({
   goal: z.string(),
   repoUrl: z.string().nullable().optional(),
+  folderId: z.string().nullable().optional(),
+  workspaceRunId: z.string().nullable().optional(),
+  sandboxName: z.string().nullable().optional(),
+  repos: z.array(LinkedRepoSchema).optional(),
   playbookRunId: z.string().nullable().optional(),
   playbookVersion: z.number().optional(),
   lessons: z.array(LessonSchema).optional(),

@@ -1,5 +1,6 @@
 import { defineModule, type DefinitionRef } from '@swirls/looms/core'
 
+import { createBindSandboxEffect } from './bind-sandbox'
 import { codingSession } from './definitions'
 import { brief, routing, transcript } from './projections'
 import { shuttleModule } from './scope'
@@ -8,6 +9,7 @@ import { createSessionThread } from './thread'
 
 export interface ShuttleSessionOptions {
   readonly definitions?: readonly DefinitionRef[]
+  readonly storage?: DurableObjectStorage
 }
 
 export function shuttleSession(options: ShuttleSessionOptions = {}) {
@@ -24,6 +26,9 @@ export function shuttleSession(options: ShuttleSessionOptions = {}) {
     signals: {
       say,
       reroute,
+    },
+    effects: {
+      bindSandbox: createBindSandboxEffect(options.storage),
     },
   }))
 }

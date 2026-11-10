@@ -11,6 +11,8 @@
     "LOOMS_MODEL": "openai/gpt-4o-mini",
     "SHUTTLE_WORKSPACE_MODE": "memory",
     "SHUTTLE_PLAYBOOK_RUN_ID": "shuttle-playbook",
+    "SHUTTLE_WORKSPACE_RUN_ID": "shuttle-workspace",
+    "SHUTTLE_WEB_URL": "http://127.0.0.1:5180",
   },
   "durable_objects": {
     "bindings": [
