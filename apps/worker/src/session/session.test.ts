@@ -3,10 +3,10 @@ import { setTimeout as sleep } from 'node:timers/promises'
 
 import { z } from 'zod'
 
-import { agent, defineAgent, type Message } from '@swirls/looms/agent'
+import { agent, defineAgent, type AgentDefinition, type Message } from '@swirls/looms/agent'
 import { approval } from '@swirls/looms/approval'
 import { evaluator } from '@swirls/looms/evaluator'
-import { createLooms } from '@swirls/looms/runtime'
+import { createLooms, type Looms } from '@swirls/looms/runtime'
 
 import { intake } from '../agents/intake'
 import { codingSession, say, shuttleSession, transcript, routing } from './module'
@@ -73,6 +73,36 @@ const stubReflector = defineAgent({
   }),
 })
 
+function createSessionLooms(conductor: AgentDefinition) {
+  return createLooms({
+    modules: [
+      agent({ definitions: [conductor, stubNarrator, stubWorker, stubReflector] }),
+      evaluator({ definitions: [intake] }),
+      approval(),
+      shuttleSession({ definitions: [codingSession] }),
+    ],
+  })
+}
+
+async function startCodingSession(
+  looms: Looms,
+  goal = 'Build a todo app',
+): Promise<{ runId: string }> {
+  return looms.start(codingSession, {
+    goal,
+    lessons: [],
+    playbookVersion: 0,
+  })
+}
+
+function conductorSpawnedPayloads(events: readonly { type: string; payload: unknown }[]) {
+  return events
+    .filter((event) => event.type === 'shuttle.conductor.spawned')
+    .map(
+      (event) => event.payload as { childThreadId: string; generation?: number; reason?: string },
+    )
+}
+
 describe('shuttle session routing', () => {
   test('routes a question to the narrator without requiring a model', async () => {
     const stubConductor = defineAgent({
@@ -90,31 +120,16 @@ describe('shuttle session routing', () => {
       }),
     })
 
-    const looms = createLooms({
-      modules: [
-        agent({ definitions: [stubConductor, stubNarrator, stubWorker, stubReflector] }),
-        evaluator({ definitions: [intake] }),
-        approval(),
-        shuttleSession({ definitions: [codingSession] }),
-      ],
-    })
+    const looms = createSessionLooms(stubConductor)
 
     try {
-      const { runId } = await looms.start(codingSession, {
-        goal: 'Improve greet()',
-        lessons: [],
-        playbookVersion: 0,
-      })
+      const { runId } = await startCodingSession(looms, 'Improve greet()')
 
       await looms.signal(runId, [say({ messageId: 'm1', text: 'What is the conductor doing?' })])
 
-      let chips = (await looms.project(runId, routing)).chips
+      await waitFor(async () => (await looms.project(runId, routing)).chips.length > 0)
 
-      for (let i = 0; i < 50 && chips.length === 0; i++) {
-        await sleep(20)
-        chips = (await looms.project(runId, routing)).chips
-      }
-
+      const chips = (await looms.project(runId, routing)).chips
       expect(chips[0]?.kind).toBe('question')
       expect(chips[0]?.summary).toContain('narrator')
 
@@ -145,21 +160,10 @@ describe('shuttle session routing', () => {
       },
     })
 
-    const looms = createLooms({
-      modules: [
-        agent({ definitions: [stubConductor, stubNarrator, stubWorker, stubReflector] }),
-        evaluator({ definitions: [intake] }),
-        approval(),
-        shuttleSession({ definitions: [codingSession] }),
-      ],
-    })
+    const looms = createSessionLooms(stubConductor)
 
     try {
-      const { runId } = await looms.start(codingSession, {
-        goal: 'Build a todo app',
-        lessons: [],
-        playbookVersion: 0,
-      })
+      const { runId } = await startCodingSession(looms)
 
       await waitFor(() => seen.some((text) => text.includes('Build a todo app')))
 
@@ -196,23 +200,16 @@ describe('shuttle session routing', () => {
       },
     })
 
-    const looms = createLooms({
-      modules: [
-        agent({ definitions: [stubConductor, stubNarrator, stubWorker, stubReflector] }),
-        evaluator({ definitions: [intake] }),
-        approval(),
-        shuttleSession({ definitions: [codingSession] }),
-      ],
-    })
+    const looms = createSessionLooms(stubConductor)
 
     try {
-      const { runId } = await looms.start(codingSession, {
-        goal: 'Build a todo app',
-        lessons: [],
-        playbookVersion: 0,
-      })
+      const { runId } = await startCodingSession(looms)
 
       await waitFor(() => seen.some((text) => text.includes('Build a todo app')))
+
+      const spawns = conductorSpawnedPayloads(await looms.getEvents(runId))
+      const conductorThreadId = spawns[0]?.childThreadId
+      expect(conductorThreadId).toBeDefined()
 
       await looms.signal(runId, [say({ messageId: 'stop-1', text: 'stop', forceKind: 'stop' })])
 
@@ -229,14 +226,14 @@ describe('shuttle session routing', () => {
 
       const events = await looms.getEvents(runId)
 
-      const conductorCancelled = events.some(
-        (event) =>
-          event.type === 'runtime.thread.cancelled' &&
-          typeof event.threadId === 'string' &&
-          event.threadId.includes('conductor'),
-      )
+      expect(
+        events.some(
+          (event) =>
+            event.type === 'runtime.thread.cancelled' && event.threadId === conductorThreadId,
+        ),
+      ).toBe(false)
 
-      expect(conductorCancelled).toBe(false)
+      expect(conductorSpawnedPayloads(events)).toHaveLength(1)
     } finally {
       await looms.stop()
     }
@@ -265,21 +262,10 @@ describe('shuttle session routing', () => {
       },
     })
 
-    const looms = createLooms({
-      modules: [
-        agent({ definitions: [stubConductor, stubNarrator, stubWorker, stubReflector] }),
-        evaluator({ definitions: [intake] }),
-        approval(),
-        shuttleSession({ definitions: [codingSession] }),
-      ],
-    })
+    const looms = createSessionLooms(stubConductor)
 
     try {
-      const { runId } = await looms.start(codingSession, {
-        goal: 'Build a todo app',
-        lessons: [],
-        playbookVersion: 0,
-      })
+      const { runId } = await startCodingSession(looms)
 
       await waitFor(async () => {
         const events = await looms.getEvents(runId)
@@ -294,17 +280,9 @@ describe('shuttle session routing', () => {
 
       expect(attempts).toBeGreaterThanOrEqual(2)
 
-      const events = await looms.getEvents(runId)
-      const restarts = events.filter((event) => event.type === 'shuttle.conductor.spawned')
-
-      expect(restarts.length).toBeGreaterThanOrEqual(2)
-
-      expect(
-        restarts.some((event) => {
-          const payload = event.payload as { generation?: number; reason?: string }
-          return (payload.generation ?? 0) > 0 || payload.reason === 'failed'
-        }),
-      ).toBe(true)
+      const restarts = conductorSpawnedPayloads(await looms.getEvents(runId))
+      expect(restarts).toHaveLength(2)
+      expect(restarts[1]).toMatchObject({ generation: 1, reason: 'failed' })
     } finally {
       await looms.stop()
     }
@@ -333,21 +311,10 @@ describe('shuttle session routing', () => {
       },
     })
 
-    const looms = createLooms({
-      modules: [
-        agent({ definitions: [stubConductor, stubNarrator, stubWorker, stubReflector] }),
-        evaluator({ definitions: [intake] }),
-        approval(),
-        shuttleSession({ definitions: [codingSession] }),
-      ],
-    })
+    const looms = createSessionLooms(stubConductor)
 
     try {
-      const { runId } = await looms.start(codingSession, {
-        goal: 'Build a todo app',
-        lessons: [],
-        playbookVersion: 0,
-      })
+      const { runId } = await startCodingSession(looms)
 
       await waitFor(async () => {
         const events = await looms.getEvents(runId)
@@ -370,6 +337,9 @@ describe('shuttle session routing', () => {
             text.includes('ship it on port 3001') && text.includes('Previous conductor ended'),
         ),
       ).toBe(true)
+
+      const restarts = conductorSpawnedPayloads(await looms.getEvents(runId))
+      expect(restarts[1]).toMatchObject({ generation: 1, reason: 'failed' })
     } finally {
       await looms.stop()
     }

@@ -36,6 +36,8 @@ export const shuttleCatalog = defineEventCatalog('shuttle', {
     targetThreadId: Schema.NullOr(Schema.String),
     summary: Schema.String,
     briefVersion: Schema.optional(Schema.Finite),
+    /** True when the route held this message for the next conductor spawn. */
+    queued: Schema.optional(Schema.Boolean),
   }),
   'brief.amended': Schema.Struct({
     version: Schema.Finite,
@@ -53,7 +55,14 @@ export const shuttleCatalog = defineEventCatalog('shuttle', {
   'conductor.spawned': Schema.Struct({
     childThreadId: Schema.String,
     generation: Schema.optional(Schema.Finite),
-    reason: Schema.optional(Schema.String),
+    reason: Schema.optional(
+      Schema.Union([
+        Schema.Literal('initial'),
+        Schema.Literal('failed'),
+        Schema.Literal('cancelled'),
+        Schema.Literal('completed'),
+      ]),
+    ),
   }),
   'reflection.launched': Schema.Struct({
     runId: Schema.String,
