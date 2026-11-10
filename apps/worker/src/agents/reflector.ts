@@ -7,7 +7,9 @@ import { loomsStub } from '../looms-stub'
 import { createHistoryTools } from '../tools/history'
 
 export function createReflectorAgent(env: ShuttleEnv, runId: string) {
-  const history = createHistoryTools(env, runId)
+  // Reflect launches as `reflect_<sessionRunId>`; history belongs to the session.
+  const sessionRunId = runId.startsWith('reflect_') ? runId.slice('reflect_'.length) : runId
+  const history = createHistoryTools(env, sessionRunId)
 
   const proposeLesson = defineTool({
     name: 'propose_lesson',
@@ -27,7 +29,7 @@ export function createReflectorAgent(env: ShuttleEnv, runId: string) {
     handler: async (input) => {
       const lessonId = `lesson_${crypto.randomUUID()}`
       const playbookId = input.playbookRunId ?? env.SHUTTLE_PLAYBOOK_RUN_ID ?? 'shuttle-playbook'
-      const sourceRunId = input.sourceRunId ?? runId
+      const sourceRunId = input.sourceRunId ?? sessionRunId
       const stub = loomsStub(env.LOOMS_RUN, playbookId)
 
       await stub.signal([
@@ -58,9 +60,11 @@ export function createReflectorAgent(env: ShuttleEnv, runId: string) {
     }),
     instructions: [
       'You are the Shuttle reflector.',
-      'Inspect friction and corrections with the history tools.',
+      'Inspect friction and corrections with the history tools (they already target the session run).',
+      'Prefer friction entries from corrections, stops, and tool failures.',
       'Propose exactly one concrete, reusable lesson.',
-      'Cite evidence as {runId, seq} pairs.',
+      'Cite evidence as {runId, seq} pairs from the session.',
+      'Pass playbookRunId and sourceRunId from your input when calling propose_lesson.',
       'Call propose_lesson when ready. If there is no real friction, say so and finish without proposing.',
     ].join(' '),
     tools: [history.queryEvents, history.runTree, history.friction, proposeLesson],

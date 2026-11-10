@@ -57,6 +57,8 @@ export interface SessionState {
   readonly processedMessageIds: readonly string[]
   readonly reflectionLaunched: boolean
   readonly parked: boolean
+  /** Bumped whenever the mailbox wait settles so Looms will re-arm it. */
+  readonly mailboxEpoch: number
 }
 
 function asObject(value: unknown): { [key: string]: JsonValue } {
@@ -71,12 +73,14 @@ function asString(value: JsonValue | undefined): string | null {
   return Predicate.isString(value) ? value : null
 }
 
-function asEventLike(value: unknown): { type?: string; payload?: JsonValue } | null {
+function asEventLike(
+  value: unknown,
+): { type?: string; payload?: JsonValue; threadId?: string | null } | null {
   if (!Predicate.isObject(value)) {
     return null
   }
 
-  return value as { type?: string; payload?: JsonValue }
+  return value as { type?: string; payload?: JsonValue; threadId?: string | null }
 }
 
 function readKind(value: JsonValue | undefined): InterjectionKind | null {
@@ -169,6 +173,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         processedMessageIds: [],
         reflectionLaunched: false,
         parked: false,
+        mailboxEpoch: 0,
       }
     },
     step(state, event) {
@@ -209,6 +214,8 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             ],
             processedMessageIds: [...state.processedMessageIds, payload.messageId],
             parked: false,
+            // Signals can arrive with no armed mailbox; bump so idle wait can re-register.
+            mailboxEpoch: state.mailboxEpoch + 1,
           }
         }
 
@@ -253,26 +260,29 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
           const tag = asObject(payload.tag)
           const embedded = asEventLike(payload.event)
           const embeddedPayload = asObject(embedded?.payload)
+          // Stable wait ids stay completed forever unless we bump the epoch.
+          const base = { ...state, mailboxEpoch: state.mailboxEpoch + 1 }
 
-          if (tag.kind === 'shuttle-intake' && state.activeIntake) {
-            const kind = state.activeIntake.forceKind ?? kindFromEvaluator(event, 'task')
+          if (tag.kind === 'shuttle-intake' && base.activeIntake) {
+            const kind = base.activeIntake.forceKind ?? kindFromEvaluator(event, 'task')
             return {
-              ...state,
+              ...base,
               activeIntake: null,
               pendingRoute: {
-                messageId: state.activeIntake.messageId,
+                messageId: base.activeIntake.messageId,
                 kind,
-                targetThreadId: state.activeIntake.targetThreadId ?? null,
-                text: state.activeIntake.text,
+                targetThreadId: base.activeIntake.targetThreadId ?? null,
+                text: base.activeIntake.text,
               },
             }
           }
 
-          if (tag.kind === 'shuttle-narrator') {
+          if (tag.kind === 'shuttle-narrator' || tag.kind === 'shuttle-worker') {
             const childThreadId = asString(tag.childThreadId)
             return {
-              ...state,
-              activeNarrators: state.activeNarrators.filter((id) => id !== childThreadId),
+              ...base,
+              workerThreadIds: base.workerThreadIds.filter((id) => id !== childThreadId),
+              activeNarrators: base.activeNarrators.filter((id) => id !== childThreadId),
             }
           }
 
@@ -283,11 +293,11 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             if (
               definitionName === 'worker' &&
               childThreadId &&
-              !state.workerThreadIds.includes(childThreadId)
+              !base.workerThreadIds.includes(childThreadId)
             ) {
               return {
-                ...state,
-                workerThreadIds: [...state.workerThreadIds, childThreadId],
+                ...base,
+                workerThreadIds: [...base.workerThreadIds, childThreadId],
               }
             }
           }
@@ -297,24 +307,24 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             embedded?.type === 'runtime.thread.failed' ||
             embedded?.type === 'runtime.thread.cancelled'
           ) {
-            const threadId = asString(embeddedPayload.threadId)
+            const threadId = asString(embeddedPayload.threadId) ?? embedded?.threadId
 
             if (!threadId) {
-              return state
+              return base
             }
 
             return {
-              ...state,
-              workerThreadIds: state.workerThreadIds.filter((id) => id !== threadId),
-              activeNarrators: state.activeNarrators.filter((id) => id !== threadId),
+              ...base,
+              workerThreadIds: base.workerThreadIds.filter((id) => id !== threadId),
+              activeNarrators: base.activeNarrators.filter((id) => id !== threadId),
             }
           }
 
-          return state
+          return base
         }
 
         case 'shuttle.routed': {
-          return { ...state, pendingRoute: null }
+          return { ...state, pendingRoute: null, mailboxEpoch: state.mailboxEpoch + 1 }
         }
 
         case 'shuttle.brief.amended': {
@@ -459,6 +469,24 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         )
       }
 
+      // Dedicated waits so worker completion is tracked even if the mailbox is between arms.
+      for (const workerId of state.workerThreadIds) {
+        effects.push(
+          wait({
+            waitId: createWaitId(ctx.threadId, `worker_${workerId}`),
+            on: {
+              type: [
+                'runtime.thread.completed',
+                'runtime.thread.failed',
+                'runtime.thread.cancelled',
+              ],
+              match: { threadId: workerId },
+            },
+            tag: { kind: 'shuttle-worker', childThreadId: workerId },
+          }),
+        )
+      }
+
       if (
         !state.reflectionLaunched &&
         state.conductorThreadId &&
@@ -490,7 +518,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
 
       effects.push(
         wait({
-          waitId: createWaitId(ctx.threadId, 'mailbox'),
+          waitId: createWaitId(ctx.threadId, `mailbox_${state.mailboxEpoch}`),
           on: {
             type: [
               'shuttle.user.said',
