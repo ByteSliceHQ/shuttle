@@ -32,7 +32,7 @@ export function relativeTime(then: number, now: number): string {
   return `${Math.round(hours / 24)}d ago`
 }
 
-/** Compact sidebar stamp: `1m`, `3h`, `1d`. */
+/** Compact sidebar stamp: `now`, `1m`, `3h`, `6d`, `2w`, `11mo`, `3y`. */
 export function compactRelativeTime(then: number, now: number): string {
   const seconds = Math.max(0, Math.round((now - then) / 1000))
 
@@ -52,7 +52,26 @@ export function compactRelativeTime(then: number, now: number): string {
     return `${hours}h`
   }
 
-  return `${Math.round(hours / 24)}d`
+  const days = Math.round(hours / 24)
+
+  if (days < 7) {
+    return `${days}d`
+  }
+
+  if (days < 30) {
+    return `${Math.floor(days / 7)}w`
+  }
+
+  if (days < 365) {
+    return `${Math.floor(days / 30)}mo`
+  }
+
+  return `${Math.floor(days / 365)}y`
+}
+
+/** Absolute timestamp for tooltips next to compact stamps. */
+export function fullDateTime(ts: number): string {
+  return new Date(ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 export function clockTime(ts: number): string {

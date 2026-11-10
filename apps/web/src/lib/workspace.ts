@@ -469,6 +469,32 @@ export function sessionsForFolder(
     .toSorted((left, right) => right.updatedAt - left.updatedAt)
 }
 
+export function orderedFolders(
+  tree: WorkspaceTree,
+  options?: { includeArchived?: boolean },
+): WorkspaceFolder[] {
+  return tree.folderOrder
+    .map((id) => tree.folders[id])
+    .filter((folder): folder is WorkspaceFolder => Boolean(folder))
+    .filter((folder) => options?.includeArchived || !folder.archived)
+}
+
+const SESSION_STATUS_LABELS: Record<string, string> = {
+  requested: 'Starting',
+  running: 'Running',
+  completed: 'Completed',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+}
+
+export function sessionStatusLabel(status: string): string {
+  return SESSION_STATUS_LABELS[status] ?? status
+}
+
+export function repoCountLabel(count: number): string {
+  return count === 1 ? '1 linked repo' : `${count} linked repos`
+}
+
 const LAST_FOLDER_KEY = 'shuttle.last-folder'
 
 export function rememberLastFolder(folderId: string) {
@@ -477,4 +503,15 @@ export function rememberLastFolder(folderId: string) {
 
 export function lastFolderId(): string | null {
   return localStorage.getItem(LAST_FOLDER_KEY)
+}
+
+/** The last folder the user worked in, else the first active one. */
+export function preferredFolderId(tree: WorkspaceTree): string | null {
+  const remembered = lastFolderId()
+
+  if (remembered && tree.folders[remembered] && !tree.folders[remembered]?.archived) {
+    return remembered
+  }
+
+  return orderedFolders(tree)[0]?.folderId ?? null
 }

@@ -58,6 +58,7 @@
 
   --ease-snappy: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 :root {
@@ -144,6 +145,12 @@
   }
 }
 
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
 @keyframes rise-in {
   from {
     opacity: 0;
@@ -151,10 +158,74 @@
   }
 }
 
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@keyframes modal-out {
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@keyframes breathe {
+  50% {
+    opacity: 0.35;
+  }
+}
+
 /* Anchored overlays grow from their trigger. */
 .pop {
   transform-origin: var(--radix-popper-transform-origin);
   animation: pop-in 150ms var(--ease-snappy);
+}
+
+/* Modals are not anchored, so they scale from center; exits are quicker than entrances. */
+.modal[data-state='open'] {
+  animation: modal-in 200ms var(--ease-snappy);
+}
+
+.modal[data-state='closed'] {
+  animation: modal-out 150ms var(--ease-snappy);
+}
+
+.modal-backdrop[data-state='open'] {
+  animation: fade-in 200ms var(--ease-snappy);
+}
+
+.modal-backdrop[data-state='closed'] {
+  animation: fade-out 150ms var(--ease-snappy);
+}
+
+/* Agents working right now; opacity only so the row never shifts. */
+.breathe {
+  animation: breathe 1.6s var(--ease-in-out-strong) infinite;
+}
+
+/* The narrow-viewport sidebar slides over content instead of squeezing it. */
+.drawer-in {
+  transition: transform 300ms var(--ease-drawer);
+
+  @starting-style {
+    transform: translateX(-100%);
+  }
+}
+
+.drawer-scrim {
+  transition: opacity 300ms var(--ease-drawer);
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
+/* Long lists fade out at the bottom instead of slicing a row mid-glyph. */
+.scroll-fade {
+  mask-image: linear-gradient(to bottom, black calc(100% - 20px), transparent);
 }
 
 /* New feed items settle in; transitions stay interruptible as items stream. */
@@ -174,7 +245,8 @@
     opacity 150ms var(--ease-snappy),
     transform 150ms var(--ease-snappy),
     scale 150ms var(--ease-snappy),
-    background-color 150ms ease;
+    color 100ms ease,
+    background-color 100ms ease;
 
   @starting-style {
     opacity: 0;
@@ -218,8 +290,21 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pop {
+  .pop,
+  .modal[data-state='open'] {
     animation-name: fade-in;
+  }
+
+  .modal[data-state='closed'] {
+    animation-name: fade-out;
+  }
+
+  .breathe {
+    animation: none;
+  }
+
+  .drawer-in {
+    transition: none;
   }
 
   .rise-in,

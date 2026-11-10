@@ -6,6 +6,8 @@ import { AgentTree } from '@/components/agent-tree'
 import { Composer } from '@/components/composer'
 import { Conversation } from '@/components/conversation'
 import { EventStream } from '@/components/event-stream'
+import { RepoChip } from '@/components/sidebar/repo-chip'
+import { useWorkspace } from '@/components/sidebar/workspace-context'
 import { StatusBadge } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
 import { PanelHeader, PanelTitle, SectionLabel } from '@/components/ui/panel'
@@ -21,8 +23,6 @@ import {
   type BriefRevision,
   type SessionFeed,
 } from '@/lib/session-feed'
-import { fetchWorkspace, workspaceTree } from '@/lib/workspace'
-import { RepoChip } from '@/routes/folders.$folderId'
 import type { RunStatus } from '@swirls/looms/core'
 import {
   type LoomsConnectionStatus,
@@ -159,24 +159,11 @@ function SessionHeader({
   playbookVersion: number
 }) {
   const [copied, setCopied] = useState(false)
-  const [workspaceRunId, setWorkspaceRunId] = useState<string | null>(null)
-
-  useEffect(() => {
-    void fetchWorkspace()
-      .then((result) => setWorkspaceRunId(result.runId))
-      .catch(() => setWorkspaceRunId(null))
-  }, [])
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
       <div className="flex min-w-0 flex-1 items-center gap-2.5">
-        {workspaceRunId ? (
-          <SessionFolderContext workspaceRunId={workspaceRunId} sessionRunId={runId} goal={goal} />
-        ) : (
-          <h1 className="min-w-0 truncate text-[13px] font-medium" title={goal}>
-            {goal ?? 'Coding session'}
-          </h1>
-        )}
+        <SessionFolderContext sessionRunId={runId} goal={goal} />
         <StatusBadge status={status} />
         <ConnectionIndicator connection={connection} />
       </div>
@@ -205,19 +192,20 @@ function SessionHeader({
   )
 }
 
+const HEADER_REPOS = 2
+
 function SessionFolderContext({
-  workspaceRunId,
   sessionRunId,
   goal,
 }: {
-  workspaceRunId: string
   sessionRunId: string
   goal: string | undefined
 }) {
-  const store = useRunStore(workspaceRunId)
-  const tree = useProjection(store, workspaceTree)
-  const sessionMeta = tree.sessions[sessionRunId]
-  const folder = sessionMeta ? tree.folders[sessionMeta.folderId] : undefined
+  const tree = useWorkspace()?.tree
+  const sessionMeta = tree?.sessions[sessionRunId]
+  const folder = sessionMeta ? tree?.folders[sessionMeta.folderId] : undefined
+  const title = sessionMeta?.title ?? goal ?? 'Coding session'
+  const extraRepos = folder ? folder.repos.length - HEADER_REPOS : 0
 
   return (
     <>
@@ -225,21 +213,34 @@ function SessionFolderContext({
         <Link
           to="/folders/$folderId"
           params={{ folderId: folder.folderId }}
-          className="text-muted-foreground hover:text-foreground inline-flex max-w-36 items-center gap-1 truncate text-[12px]"
+          title={folder.name}
+          className="text-muted-foreground hover:text-foreground inline-flex max-w-40 shrink-0 items-center gap-1 text-[12px] transition-colors duration-100"
         >
           <Folder className="size-3.5 shrink-0" />
-          <span className="truncate">{folder.name}</span>
+          <span className="truncate" dir="auto">
+            {folder.name}
+          </span>
           <span className="text-muted-foreground/60">/</span>
         </Link>
       ) : null}
-      <h1 className="min-w-0 truncate text-[13px] font-medium" title={goal}>
-        {goal ?? sessionMeta?.title ?? 'Coding session'}
+      <h1 className="min-w-0 truncate text-[13px] font-medium" dir="auto" title={title}>
+        {title}
       </h1>
       {folder && folder.repos.length > 0 ? (
-        <div className="hidden max-w-md flex-wrap items-center gap-1.5 lg:flex">
-          {folder.repos.slice(0, 2).map((repo) => (
-            <RepoChip key={repo.fullName} repo={repo} />
+        <div className="hidden min-w-0 shrink items-center gap-1.5 xl:flex">
+          {folder.repos.slice(0, HEADER_REPOS).map((repo) => (
+            <RepoChip key={repo.fullName} repo={repo} className="max-w-48" />
           ))}
+          {extraRepos > 0 ? (
+            <Link
+              to="/folders/$folderId"
+              params={{ folderId: folder.folderId }}
+              className="text-muted-foreground hover:text-foreground shrink-0 text-[11px] tabular-nums"
+              title={folder.repos.map((repo) => repo.fullName).join('\n')}
+            >
+              +{extraRepos}
+            </Link>
+          ) : null}
         </div>
       ) : null}
     </>

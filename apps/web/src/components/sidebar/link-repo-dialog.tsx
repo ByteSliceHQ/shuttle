@@ -1,6 +1,7 @@
 import { Check, GitBranch, LoaderCircle, Lock, Search } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
+import { RepoName } from '@/components/sidebar/repo-chip'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -18,6 +19,14 @@ import {
   type LinkedRepo,
   type WorkspaceTree,
 } from '@/lib/workspace'
+
+function linkLabel(count: number): string {
+  if (count === 0) {
+    return 'Link'
+  }
+
+  return count === 1 ? 'Link 1 repository' : `Link ${count} repositories`
+}
 
 export function LinkRepoDialog({
   open,
@@ -109,8 +118,11 @@ export function LinkRepoDialog({
         <DialogHeader>
           <DialogTitle>Link repositories</DialogTitle>
           <DialogDescription>
-            Agents spawned in <span className="text-foreground">{folderName}</span> get worktrees of
-            every linked repo.
+            Agents spawned in{' '}
+            <span className="text-foreground wrap-anywhere" dir="auto">
+              {folderName}
+            </span>{' '}
+            get worktrees of every linked repo.
           </DialogDescription>
         </DialogHeader>
 
@@ -135,19 +147,26 @@ export function LinkRepoDialog({
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search repositories…"
-                className="pl-8"
+                className="pr-8 pl-8"
                 aria-label="Search repositories"
               />
-            </div>
-            <ul className="max-h-64 overflow-y-auto rounded-lg border">
               {loading ? (
-                <li className="text-muted-foreground flex items-center gap-2 px-3 py-6 text-xs">
-                  <LoaderCircle className="size-3.5 animate-spin" />
-                  Searching…
-                </li>
-              ) : repos.length === 0 ? (
-                <li className="text-muted-foreground px-3 py-6 text-center text-xs">
-                  No repositories found.
+                <LoaderCircle className="text-muted-foreground absolute top-1/2 right-2.5 size-3.5 -translate-y-1/2 animate-spin" />
+              ) : null}
+            </div>
+            <ul
+              className={cn(
+                'h-64 overflow-y-auto overscroll-contain rounded-lg border transition-opacity duration-150',
+                loading && repos.length > 0 && 'opacity-60',
+              )}
+            >
+              {repos.length === 0 ? (
+                <li className="text-muted-foreground flex h-full items-center justify-center px-3 text-center text-xs">
+                  {loading
+                    ? 'Searching…'
+                    : query
+                      ? `No repositories match “${query}”.`
+                      : 'No repositories found.'}
                 </li>
               ) : (
                 repos.map((repo) => {
@@ -170,15 +189,17 @@ export function LinkRepoDialog({
                             return { ...prev, [repo.fullName]: repo }
                           })
                         }
+                        role="checkbox"
+                        aria-checked={checked}
                         className={cn(
-                          'hover:bg-accent/60 flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors',
+                          'hover:bg-accent/60 flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors duration-100',
                           checked && 'bg-accent/40',
                           already && 'opacity-60',
                         )}
                       >
                         <span
                           className={cn(
-                            'flex size-4 items-center justify-center rounded border',
+                            'flex size-4 shrink-0 items-center justify-center rounded border transition-colors duration-100',
                             checked
                               ? 'bg-brand border-brand text-brand-foreground'
                               : 'border-input',
@@ -187,11 +208,15 @@ export function LinkRepoDialog({
                           {checked ? <Check className="size-3" /> : null}
                         </span>
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[13px]">{repo.fullName}</span>
-                          <span className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
-                            {repo.private ? <Lock className="size-3" /> : null}
-                            {repo.defaultBranch}
-                            {already ? <span>· Linked</span> : null}
+                          <RepoName repo={repo} className="text-[13px]" />
+                          <span className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[11px]">
+                            {repo.private ? (
+                              <Lock className="size-3 shrink-0" aria-label="Private" />
+                            ) : null}
+                            <span className="truncate font-mono text-[10px]">
+                              {repo.defaultBranch}
+                            </span>
+                            {already ? <span className="shrink-0">· Linked</span> : null}
                           </span>
                         </span>
                       </button>
@@ -217,7 +242,7 @@ export function LinkRepoDialog({
               onClick={() => void save()}
             >
               {saving ? <LoaderCircle className="animate-spin" /> : null}
-              Link {Object.keys(selected).length || ''}
+              {linkLabel(Object.keys(selected).length)}
             </Button>
           ) : null}
         </DialogFooter>

@@ -7,8 +7,9 @@ import {
   MessageSquareMore,
   Network,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
+import { useMemo, useState, type KeyboardEvent } from 'react'
 
+import { useWorkspace, WorkspacePending } from '@/components/sidebar/workspace-context'
 import { Button } from '@/components/ui/button'
 import { EmptyState, Kbd } from '@/components/ui/panel'
 import {
@@ -23,52 +24,35 @@ import { errorMessage } from '@/lib/cn'
 import { rememberSession } from '@/lib/recent-sessions'
 import {
   createWorkspaceFolder,
-  fetchWorkspace,
+  orderedFolders,
+  preferredFolderId,
   rememberLastFolder,
+  repoCountLabel,
   startWorkspaceSession,
-  workspaceTree,
+  type WorkspaceTree,
 } from '@/lib/workspace'
-import { preferredFolderId } from '@/routes/folders.$folderId'
-import { useProjection, useRunStore } from '@swirls/looms/react'
 
 export const Route = createFileRoute('/')({
   component: HomePage,
 })
 
 const DEFAULT_GOAL = 'Add a zod schema for greet() and cover it with a small test.'
+const FOLDER_PREVIEW = 6
 
 function HomePage() {
-  const [workspaceRunId, setWorkspaceRunId] = useState<string | null>(null)
+  const workspace = useWorkspace()
 
-  useEffect(() => {
-    void fetchWorkspace().then((result) => setWorkspaceRunId(result.runId))
-  }, [])
-
-  if (!workspaceRunId) {
-    return (
-      <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-        Loading workspace…
-      </div>
-    )
+  if (!workspace) {
+    return <WorkspacePending label="Loading workspace…" />
   }
 
-  return <HomeComposer runId={workspaceRunId} />
+  return <HomeComposer runId={workspace.runId} tree={workspace.tree} />
 }
 
-function HomeComposer({ runId }: { runId: string }) {
+function HomeComposer({ runId, tree }: { runId: string; tree: WorkspaceTree }) {
   const navigate = useNavigate()
-  const store = useRunStore(runId)
-  const tree = useProjection(store, workspaceTree)
 
-  const folders = useMemo(
-    () =>
-      tree.folderOrder
-        .map((id) => tree.folders[id])
-        .filter((folder): folder is NonNullable<typeof folder> =>
-          Boolean(folder && !folder.archived),
-        ),
-    [tree],
-  )
+  const folders = useMemo(() => orderedFolders(tree), [tree])
 
   const [goal, setGoal] = useState(DEFAULT_GOAL)
   const [folderId, setFolderId] = useState<string>('')
@@ -143,14 +127,19 @@ function HomeComposer({ runId }: { runId: string }) {
                   value={selectedFolderId || undefined}
                   onValueChange={(value) => setFolderId(value)}
                 >
-                  <SelectTrigger className="h-7 w-auto min-w-36 gap-1.5 text-xs">
-                    <Folder className="text-muted-foreground size-3.5" />
+                  <SelectTrigger
+                    className="h-7 w-auto max-w-56 min-w-36 gap-1.5 text-xs [&>span]:truncate"
+                    aria-label="Folder"
+                  >
+                    <Folder className="text-muted-foreground size-3.5 shrink-0" />
                     <SelectValue placeholder="Folder" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-w-80">
                     {folders.map((folder) => (
                       <SelectItem key={folder.folderId} value={folder.folderId}>
-                        {folder.name}
+                        <span className="truncate" dir="auto">
+                          {folder.name}
+                        </span>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -195,25 +184,43 @@ function HomeComposer({ runId }: { runId: string }) {
           </div>
         ) : (
           <section>
-            <h2 className="mb-2 text-[13px] font-medium">Folders</h2>
+            <div className="mb-2 flex items-baseline gap-2">
+              <h2 className="text-[13px] font-medium">Folders</h2>
+              <span className="text-muted-foreground font-mono text-[11px] tabular-nums">
+                {folders.length.toLocaleString()}
+              </span>
+            </div>
             <ul className="bg-card/40 divide-y overflow-hidden rounded-xl border">
-              {folders.map((folder) => (
+              {folders.slice(0, FOLDER_PREVIEW).map((folder) => (
                 <li key={folder.folderId}>
                   <Link
                     to="/folders/$folderId"
                     params={{ folderId: folder.folderId }}
-                    className="hover:bg-accent/40 flex items-center gap-3 px-4 py-3 transition-colors"
+                    className="hover:bg-accent/40 group flex items-center gap-3 px-4 py-3 transition-colors duration-100"
                   >
-                    <Folder className="text-muted-foreground size-3.5" />
-                    <span className="min-w-0 flex-1 truncate text-[13px]">{folder.name}</span>
-                    <span className="text-muted-foreground text-[11px]">
-                      {folder.repos.length} repo{folder.repos.length === 1 ? '' : 's'}
+                    <Folder className="text-muted-foreground size-3.5 shrink-0" />
+                    <span
+                      className="min-w-0 flex-1 truncate text-[13px]"
+                      dir="auto"
+                      title={folder.name}
+                    >
+                      {folder.name}
                     </span>
-                    <ArrowRight className="text-muted-foreground size-3.5" />
+                    <span className="text-muted-foreground shrink-0 text-[11px]">
+                      {folder.repos.length === 0
+                        ? 'Demo repo'
+                        : repoCountLabel(folder.repos.length)}
+                    </span>
+                    <ArrowRight className="text-muted-foreground size-3.5 shrink-0 transition-transform duration-150 group-hover:translate-x-0.5" />
                   </Link>
                 </li>
               ))}
             </ul>
+            {folders.length > FOLDER_PREVIEW ? (
+              <p className="text-muted-foreground mt-2 text-[11px]">
+                {(folders.length - FOLDER_PREVIEW).toLocaleString()} more in the sidebar.
+              </p>
+            ) : null}
           </section>
         )}
       </div>

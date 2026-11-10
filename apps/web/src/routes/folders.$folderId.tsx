@@ -1,72 +1,82 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
-import { ArrowRight, GitBranch, Link2, LoaderCircle, Lock, Plus } from 'lucide-react'
+import { ArrowRight, FolderX, Link2, LoaderCircle, Plus } from 'lucide-react'
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 
 import { ActivityDot } from '@/components/sidebar/activity-dot'
 import { LinkRepoDialog } from '@/components/sidebar/link-repo-dialog'
+import { RepoChip } from '@/components/sidebar/repo-chip'
+import { useWorkspace, WorkspacePending } from '@/components/sidebar/workspace-context'
 import { Button } from '@/components/ui/button'
-import { EmptyState } from '@/components/ui/panel'
+import { EmptyState, Kbd } from '@/components/ui/panel'
 import { Textarea } from '@/components/ui/textarea'
-import { cn, errorMessage } from '@/lib/cn'
+import { errorMessage } from '@/lib/cn'
 import { rememberSession } from '@/lib/recent-sessions'
-import { compactRelativeTime } from '@/lib/time'
+import { compactRelativeTime, fullDateTime } from '@/lib/time'
+import { useNow } from '@/lib/use-now'
 import {
-  fetchWorkspace,
-  lastFolderId,
   rememberLastFolder,
   sessionsForFolder,
+  sessionStatusLabel,
   startWorkspaceSession,
-  workspaceTree,
+  unlinkFolderRepo,
+  type WorkspaceFolder,
   type WorkspaceTree,
 } from '@/lib/workspace'
-import { useProjection, useRunStore } from '@swirls/looms/react'
 
 export const Route = createFileRoute('/folders/$folderId')({
   component: FolderPage,
 })
 
-const DEFAULT_GOAL = 'Add a zod schema for greet() and cover it with a small test.'
+const DEMO_GOAL = 'Add a zod schema for greet() and cover it with a small test.'
+const REPO_PREVIEW = 8
 
 function FolderPage() {
   const { folderId } = Route.useParams()
-  const [workspaceRunId, setWorkspaceRunId] = useState<string | null>(null)
+  const workspace = useWorkspace()
 
   useEffect(() => {
     rememberLastFolder(folderId)
-    void fetchWorkspace().then((result) => setWorkspaceRunId(result.runId))
   }, [folderId])
 
-  if (!workspaceRunId) {
+  if (!workspace) {
+    return <WorkspacePending label="Loading folder…" />
+  }
+
+  const folder = workspace.tree.folders[folderId]
+
+  if (!folder) {
     return (
-      <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-        Loading folder…
+      <div className="flex h-full flex-col items-center justify-center gap-4 px-6">
+        <EmptyState icon={<FolderX />} title="Folder not found" className="h-auto">
+          It may have been archived. Pick another folder from the sidebar.
+        </EmptyState>
+        <Button variant="outline" size="sm" asChild>
+          <Link to="/">Back home</Link>
+        </Button>
       </div>
     )
   }
 
-  return <FolderWorkspace runId={workspaceRunId} folderId={folderId} />
+  return <FolderWorkspace key={folderId} tree={workspace.tree} folder={folder} />
 }
 
-function FolderWorkspace({ runId, folderId }: { runId: string; folderId: string }) {
-  const store = useRunStore(runId)
-  const tree = useProjection(store, workspaceTree)
-  const folder = tree.folders[folderId]
+function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: WorkspaceFolder }) {
   const navigate = useNavigate()
-  const [goal, setGoal] = useState(DEFAULT_GOAL)
+  const now = useNow()
+  const [goal, setGoal] = useState(() => (folder.repos.length === 0 ? DEMO_GOAL : ''))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [linkOpen, setLinkOpen] = useState(false)
-  const [now] = useState(() => Date.now())
+  const [showAllRepos, setShowAllRepos] = useState(false)
 
-  const sessions = useMemo(
-    () => (folder ? sessionsForFolder(tree, folder.folderId) : []),
-    [tree, folder],
-  )
+  const sessions = useMemo(() => sessionsForFolder(tree, folder.folderId), [tree, folder])
+  const repos = showAllRepos ? folder.repos : folder.repos.slice(0, REPO_PREVIEW)
+  const hiddenRepos = folder.repos.length - repos.length
 
   function start() {
     const trimmed = goal.trim()
 
-    if (!trimmed || busy || !folder) {
+    if (!trimmed || busy) {
       return
     }
 
@@ -89,16 +99,11 @@ function FolderWorkspace({ runId, folderId }: { runId: string; folderId: string 
     }
   }
 
-  if (!folder) {
-    return (
-      <div className="mx-auto flex h-full max-w-lg flex-col items-center justify-center gap-3 px-6">
-        <EmptyState icon={<GitBranch />} title="Folder not found">
-          It may have been archived. Pick another folder from the sidebar.
-        </EmptyState>
-        <Button variant="outline" size="sm" asChild>
-          <Link to="/">Back home</Link>
-        </Button>
-      </div>
+  function unlink(fullName: string) {
+    setError(null)
+
+    void unlinkFolderRepo(folder.folderId, fullName).catch((cause: unknown) =>
+      setError(errorMessage(cause)),
     )
   }
 
@@ -109,18 +114,39 @@ function FolderWorkspace({ runId, folderId }: { runId: string; folderId: string 
           <p className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
             Folder
           </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-balance">
-            What should the agents build in {folder.name}?
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-balance wrap-anywhere">
+            What should the agents build in{' '}
+            <span dir="auto" className="text-brand">
+              {folder.name}
+            </span>
+            ?
           </h1>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {folder.repos.map((repo) => (
-              <RepoChip key={repo.fullName} repo={repo} />
+
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            {repos.map((repo) => (
+              <RepoChip
+                key={repo.fullName}
+                repo={repo}
+                onRemove={folder.archived ? undefined : () => unlink(repo.fullName)}
+              />
             ))}
-            <Button variant="ghost" size="sm" onClick={() => setLinkOpen(true)}>
-              <Link2 />
-              {folder.repos.length === 0 ? 'Link a repository' : 'Link another'}
-            </Button>
+            {hiddenRepos > 0 ? (
+              <Button variant="ghost" size="xs" onClick={() => setShowAllRepos(true)}>
+                +{hiddenRepos} more
+              </Button>
+            ) : null}
+            {folder.archived ? null : (
+              <Button variant="ghost" size="xs" onClick={() => setLinkOpen(true)}>
+                <Link2 />
+                {folder.repos.length === 0 ? 'Link a repository' : 'Link another'}
+              </Button>
+            )}
           </div>
+          {folder.repos.length === 0 ? (
+            <p className="text-muted-foreground mt-2 text-xs">
+              No repos linked yet, so agents work in the demo workspace.
+            </p>
+          ) : null}
 
           <div className="bg-card mt-6 rounded-xl border p-1.5 shadow-xl shadow-black/20">
             <Textarea
@@ -129,11 +155,12 @@ function FolderWorkspace({ runId, folderId }: { runId: string; folderId: string 
               onKeyDown={onKeyDown}
               aria-label="Session goal"
               placeholder="Describe the change you want…"
-              className="min-h-24 resize-none border-0 bg-transparent text-sm focus-visible:ring-0"
+              className="max-h-80 min-h-24 resize-none border-0 bg-transparent text-sm focus-visible:ring-0"
             />
             <div className="flex items-center gap-2 px-1.5 pb-0.5">
-              <span className="text-muted-foreground ml-auto hidden text-[11px] sm:inline">
-                ⌘↵ to start
+              <span className="text-muted-foreground ml-auto hidden items-center gap-1 text-[11px] sm:inline-flex">
+                <Kbd>⌘</Kbd>
+                <Kbd>↵</Kbd>
               </span>
               <Button variant="brand" onClick={start} disabled={busy || !goal.trim()}>
                 {busy ? <LoaderCircle className="animate-spin" /> : <ArrowRight />}
@@ -141,22 +168,22 @@ function FolderWorkspace({ runId, folderId }: { runId: string; folderId: string 
               </Button>
             </div>
           </div>
-          {error ? <p className="text-status-failed mt-3 text-xs">{error}</p> : null}
+          {error ? <p className="text-status-failed mt-3 text-xs wrap-anywhere">{error}</p> : null}
         </section>
 
         <section>
-          <div className="mb-2 flex items-center gap-2">
+          <div className="mb-2 flex items-baseline gap-2">
             <h2 className="text-[13px] font-medium">Sessions</h2>
-            <span className="text-muted-foreground font-mono text-[11px] tabular-nums">
-              {sessions.length || ''}
-            </span>
+            {sessions.length > 0 ? (
+              <span className="text-muted-foreground font-mono text-[11px] tabular-nums">
+                {sessions.length.toLocaleString()}
+              </span>
+            ) : null}
           </div>
           {sessions.length === 0 ? (
             <div className="rounded-xl border border-dashed">
               <EmptyState icon={<Plus />} title="No sessions yet">
-                {folder.repos.length === 0
-                  ? 'Link a repository, then start a session above.'
-                  : 'Start a session above to put agents to work.'}
+                Describe a change above and agents will pick it up in this folder.
               </EmptyState>
             </div>
           ) : (
@@ -166,16 +193,22 @@ function FolderWorkspace({ runId, folderId }: { runId: string; folderId: string 
                   <Link
                     to="/sessions/$sessionId"
                     params={{ sessionId: session.runId }}
-                    className="hover:bg-accent/40 group flex items-center gap-3 px-4 py-3 transition-colors duration-150"
+                    className="hover:bg-accent/40 group flex items-center gap-3 px-4 py-3 transition-colors duration-100"
                   >
                     <ActivityDot activity={session.activity} status={session.status} />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px]">{session.title}</p>
+                      <p className="truncate text-[13px]" dir="auto" title={session.title}>
+                        {session.title}
+                      </p>
                       <p className="text-muted-foreground mt-0.5 text-[11px]">
-                        {compactRelativeTime(session.updatedAt, now)} · {session.status}
+                        <time title={fullDateTime(session.updatedAt)}>
+                          {compactRelativeTime(session.updatedAt, now)}
+                        </time>
+                        {' · '}
+                        {sessionStatusLabel(session.status)}
                       </p>
                     </div>
-                    <ArrowRight className="text-muted-foreground size-3.5 -translate-x-1 opacity-0 transition-[opacity,translate] duration-150 group-hover:translate-x-0 group-hover:opacity-100" />
+                    <ArrowRight className="text-muted-foreground size-3.5 shrink-0 -translate-x-1 opacity-0 transition-[opacity,translate] duration-150 group-hover:translate-x-0 group-hover:opacity-100" />
                   </Link>
                 </li>
               ))}
@@ -194,39 +227,4 @@ function FolderWorkspace({ runId, folderId }: { runId: string; folderId: string 
       />
     </div>
   )
-}
-
-export function RepoChip({
-  repo,
-}: {
-  repo: { fullName: string; private: boolean; defaultBranch: string }
-}) {
-  return (
-    <span className="bg-card/60 text-muted-foreground inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 text-[11px]">
-      <GitBranch className="size-3" />
-      <span className="text-foreground max-w-40 truncate">{repo.fullName}</span>
-      {repo.private ? <Lock className="size-3" /> : null}
-      <span className="font-mono text-[10px]">{repo.defaultBranch}</span>
-    </span>
-  )
-}
-
-/** Prefer last-used folder when present in the tree. */
-export function preferredFolderId(tree: WorkspaceTree): string | null {
-  const remembered = lastFolderId()
-
-  if (remembered && tree.folders[remembered] && !tree.folders[remembered]?.archived) {
-    return remembered
-  }
-
-  return (
-    tree.folderOrder.find((id) => {
-      const folder = tree.folders[id]
-      return folder && !folder.archived
-    }) ?? null
-  )
-}
-
-export function folderClassName(active: boolean) {
-  return cn(active ? 'bg-accent' : 'hover:bg-accent/40')
 }

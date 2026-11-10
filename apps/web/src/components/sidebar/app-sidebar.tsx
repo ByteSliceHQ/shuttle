@@ -1,579 +1,388 @@
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
 import {
+  Archive,
   BookOpen,
-  ChevronRight,
-  Folder,
-  FolderOpen,
   FolderPlus,
   GitBranch,
-  MoreHorizontal,
   Orbit,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
   SquarePen,
 } from 'lucide-react'
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from 'react'
+import { useEffect, useEffectEvent, useMemo, useState } from 'react'
 
-import { ActivityDot, SessionRowShell } from '@/components/sidebar/activity-dot'
+import { FixtureToggle } from '@/components/sidebar/fixture-toggle'
+import { FolderGroup } from '@/components/sidebar/folder-group'
+import { InlineNameInput } from '@/components/sidebar/inline-name-input'
 import { LinkRepoDialog } from '@/components/sidebar/link-repo-dialog'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { SessionRow } from '@/components/sidebar/session-row'
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { Input } from '@/components/ui/input'
+  useWorkspace,
+  useWorkspaceError,
+  WorkspaceProvider,
+  type WorkspaceValue,
+} from '@/components/sidebar/workspace-context'
+import { Button } from '@/components/ui/button'
+import { Kbd } from '@/components/ui/panel'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/cn'
 import { recentSessions } from '@/lib/recent-sessions'
-import { compactRelativeTime } from '@/lib/time'
+import { useMediaQuery } from '@/lib/use-media-query'
+import { useNow } from '@/lib/use-now'
 import {
-  archiveWorkspaceFolder,
-  archiveWorkspaceSession,
   createWorkspaceFolder,
-  fetchWorkspace,
+  orderedFolders,
   rememberLastFolder,
-  renameWorkspaceFolder,
-  renameWorkspaceSession,
   sessionsForFolder,
-  workspaceTree,
-  type WorkspaceTree,
+  type GithubInstallation,
 } from '@/lib/workspace'
-import { LoomsProvider, useProjection, useRunStore } from '@swirls/looms/react'
+import { LoomsProvider } from '@swirls/looms/react'
 
 const COLLAPSED_KEY = 'shuttle.sidebar-collapsed'
 const EXPANDED_KEY = 'shuttle.sidebar-expanded'
 const SHOW_ARCHIVED_KEY = 'shuttle.sidebar-show-archived'
-const SESSION_PREVIEW = 5
+const UNFILED_LIMIT = 8
+
+function readExpanded(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(EXPANDED_KEY) ?? '{}') as Record<string, boolean>
+  } catch {
+    return {}
+  }
+}
 
 export function AppSidebarShell({ children }: { children: React.ReactNode }) {
-  const [workspaceRunId, setWorkspaceRunId] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    void fetchWorkspace()
-      .then((result) => setWorkspaceRunId(result.runId))
-      .catch((cause: unknown) =>
-        setError(cause instanceof Error ? cause.message : 'Failed to load workspace'),
-      )
-  }, [])
-
   return (
     <LoomsProvider endpoint="">
-      <div className="flex h-dvh min-h-0">
-        {workspaceRunId ? (
-          <AppSidebar runId={workspaceRunId} />
-        ) : (
-          <aside className="bg-sidebar border-border flex w-[260px] shrink-0 flex-col border-r">
-            <div className="text-muted-foreground flex h-12 items-center gap-2 px-3 text-xs">
-              <Orbit className="size-3.5" />
-              {error ?? 'Loading workspace…'}
-            </div>
-          </aside>
-        )}
-        <div className="min-w-0 flex-1">{children}</div>
-      </div>
+      <WorkspaceProvider>
+        <div className="flex h-dvh min-h-0">
+          <AppSidebar />
+          <div className="min-w-0 flex-1">{children}</div>
+        </div>
+        {import.meta.env.DEV ? <FixtureToggle /> : null}
+      </WorkspaceProvider>
     </LoomsProvider>
   )
 }
 
-function AppSidebar({ runId }: { runId: string }) {
-  const store = useRunStore(runId)
-  const tree = useProjection(store, workspaceTree)
+function AppSidebar() {
   const navigate = useNavigate()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const narrow = useMediaQuery('(max-width: 767px)')
 
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSED_KEY) === '1')
+  const [collapsedPref, setCollapsedPref] = useState(
+    () => localStorage.getItem(COLLAPSED_KEY) === '1',
+  )
+
+  /** On narrow screens the drawer stays open only on the page it was opened from. */
+  const [drawerPath, setDrawerPath] = useState<string | null>(null)
+  const drawerOpen = narrow && drawerPath === pathname
+  const collapsed = narrow ? !drawerOpen : collapsedPref
+
+  function toggle() {
+    if (narrow) {
+      setDrawerPath(drawerOpen ? null : pathname)
+      return
+    }
+
+    const next = !collapsedPref
+    localStorage.setItem(COLLAPSED_KEY, next ? '1' : '0')
+    setCollapsedPref(next)
+  }
+
+  /** ⌘N belongs to the browser, so new session lives on ⌘⇧O. */
+  const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
+    const mod = event.metaKey || event.ctrlKey
+    const key = event.key.toLowerCase()
+
+    if (mod && !event.shiftKey && key === 'b') {
+      event.preventDefault()
+      toggle()
+    }
+
+    if (mod && event.shiftKey && key === 'o') {
+      event.preventDefault()
+      void navigate({ to: '/' })
+    }
+
+    if (key === 'escape' && drawerOpen && !event.defaultPrevented) {
+      setDrawerPath(null)
+    }
+  })
+
+  useEffect(() => {
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  const rail = <SidebarRail pathname={pathname} onExpand={toggle} />
+
+  if (collapsed) {
+    return rail
+  }
+
+  const panel = <SidebarPanel pathname={pathname} onCollapse={toggle} />
+
+  if (narrow) {
+    return (
+      <>
+        {rail}
+        <div
+          aria-hidden
+          className="drawer-scrim fixed inset-0 z-40 bg-black/50"
+          onClick={() => setDrawerPath(null)}
+        />
+        <div
+          className="drawer-in fixed inset-y-0 left-0 z-50 flex shadow-2xl shadow-black/60"
+          onClick={(event) => {
+            if (event.target instanceof Element && event.target.closest('a[href]')) {
+              setDrawerPath(null)
+            }
+          }}
+        >
+          {panel}
+        </div>
+      </>
+    )
+  }
+
+  return panel
+}
+
+function SidebarRail({ pathname, onExpand }: { pathname: string; onExpand: () => void }) {
+  return (
+    <aside className="bg-sidebar flex w-12 shrink-0 flex-col items-center gap-1 border-r py-2">
+      <IconTip label="Expand sidebar" shortcut={['⌘', 'B']} side="right">
+        <Button variant="ghost" size="icon-sm" aria-label="Expand sidebar" onClick={onExpand}>
+          <PanelLeftOpen />
+        </Button>
+      </IconTip>
+      <div className="bg-border my-1 h-px w-5" />
+      <IconTip label="New session" shortcut={['⌘', '⇧', 'O']} side="right">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className={cn(pathname === '/' && 'bg-accent text-foreground')}
+          asChild
+        >
+          <Link to="/" aria-label="New session">
+            <SquarePen />
+          </Link>
+        </Button>
+      </IconTip>
+      <IconTip label="Playbook" side="right">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className={cn(pathname === '/playbook' && 'bg-accent text-foreground')}
+          asChild
+        >
+          <Link to="/playbook" aria-label="Playbook">
+            <BookOpen />
+          </Link>
+        </Button>
+      </IconTip>
+    </aside>
+  )
+}
+
+function SidebarPanel({ pathname, onCollapse }: { pathname: string; onCollapse: () => void }) {
+  const workspace = useWorkspace()
+  const error = useWorkspaceError()
+
+  return (
+    <aside className="bg-sidebar flex w-[260px] shrink-0 flex-col border-r">
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b pr-2 pl-3">
+        <Link
+          to="/"
+          className="focus-visible:ring-ring/50 flex min-w-0 flex-1 items-center gap-2 rounded-md outline-none focus-visible:ring-2"
+        >
+          <span className="bg-brand/15 text-brand ring-brand/25 flex size-6 shrink-0 items-center justify-center rounded-md ring-1 ring-inset">
+            <Orbit className="size-3.5" />
+          </span>
+          <span className="truncate text-[13px] font-semibold tracking-tight">Shuttle</span>
+        </Link>
+        <IconTip label="Collapse sidebar" shortcut={['⌘', 'B']}>
+          <Button variant="ghost" size="icon-xs" aria-label="Collapse sidebar" onClick={onCollapse}>
+            <PanelLeftClose />
+          </Button>
+        </IconTip>
+      </div>
+
+      <nav className="flex flex-col gap-px p-2">
+        <SidebarNavLink
+          to="/"
+          icon={<SquarePen />}
+          active={pathname === '/'}
+          shortcut={['⌘', '⇧', 'O']}
+        >
+          New session
+        </SidebarNavLink>
+        <SidebarNavLink to="/playbook" icon={<BookOpen />} active={pathname === '/playbook'}>
+          Playbook
+        </SidebarNavLink>
+      </nav>
+
+      {workspace ? (
+        <FolderTree workspace={workspace} pathname={pathname} />
+      ) : (
+        <FolderTreeSkeleton error={error} />
+      )}
+
+      <GithubFooter installations={workspace ? Object.values(workspace.tree.installations) : []} />
+    </aside>
+  )
+}
+
+function FolderTree({ workspace, pathname }: { workspace: WorkspaceValue; pathname: string }) {
+  const { runId, tree } = workspace
+  const navigate = useNavigate()
+  const now = useNow()
 
   const [showArchived, setShowArchived] = useState(
     () => localStorage.getItem(SHOW_ARCHIVED_KEY) === '1',
   )
 
-  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(EXPANDED_KEY) ?? '{}') as Record<string, boolean>
-    } catch {
-      return {}
-    }
-  })
-
+  const [expanded, setExpanded] = useState(readExpanded)
   const [creating, setCreating] = useState(false)
-  const [draftName, setDraftName] = useState('New folder')
-  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null)
-  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null)
   const [linkFolderId, setLinkFolderId] = useState<string | null>(null)
-  const [moreFolders, setMoreFolders] = useState<Record<string, boolean>>({})
-  const [now, setNow] = useState(() => Date.now())
 
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 30_000)
-    return () => window.clearInterval(timer)
-  }, [])
-
-  useEffect(() => {
-    localStorage.setItem(COLLAPSED_KEY, collapsed ? '1' : '0')
-  }, [collapsed])
-
-  useEffect(() => {
-    localStorage.setItem(SHOW_ARCHIVED_KEY, showArchived ? '1' : '0')
-  }, [showArchived])
-
-  useEffect(() => {
-    localStorage.setItem(EXPANDED_KEY, JSON.stringify(expanded))
-  }, [expanded])
-
-  const onKeyDown = useCallback(
-    (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b') {
-        event.preventDefault()
-        setCollapsed((value) => !value)
-      }
-
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') {
-        event.preventDefault()
-        void navigate({ to: '/' })
-      }
-    },
-    [navigate],
-  )
-
-  useEffect(() => {
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onKeyDown])
-
-  const folders = useMemo(
-    () =>
-      tree.folderOrder
-        .map((id) => tree.folders[id])
-        .filter((folder): folder is NonNullable<typeof folder> => Boolean(folder))
-        .filter((folder) => showArchived || !folder.archived),
-    [tree, showArchived],
-  )
-
-  const filedRunIds = useMemo(() => new Set(Object.keys(tree.sessions)), [tree.sessions])
+  const folders = orderedFolders(tree, { includeArchived: showArchived })
 
   const unfiled = useMemo(
     () =>
       recentSessions()
-        .filter((session) => !filedRunIds.has(session.runId))
-        .slice(0, 8),
-    [filedRunIds],
+        .filter((session) => !tree.sessions[session.runId])
+        .slice(0, UNFILED_LIMIT),
+    [tree.sessions],
   )
 
-  const installations = Object.values(tree.installations)
-  const linkFolder = linkFolderId ? tree.folders[linkFolderId] : null
+  const linkFolder = linkFolderId ? tree.folders[linkFolderId] : undefined
 
-  async function submitNewFolder() {
-    const name = draftName.trim() || 'New folder'
+  function toggleArchived() {
+    const next = !showArchived
+    localStorage.setItem(SHOW_ARCHIVED_KEY, next ? '1' : '0')
+    setShowArchived(next)
+  }
+
+  function setFolderOpen(folderId: string, open: boolean) {
+    setExpanded((prev) => {
+      const next = { ...prev, [folderId]: open }
+      localStorage.setItem(EXPANDED_KEY, JSON.stringify(next))
+      return next
+    })
+  }
+
+  async function createFolder(name: string) {
     setCreating(false)
     const folderId = await createWorkspaceFolder(runId, name)
-    setExpanded((prev) => ({ ...prev, [folderId]: true }))
+    setFolderOpen(folderId, true)
     rememberLastFolder(folderId)
     void navigate({ to: '/folders/$folderId', params: { folderId } })
   }
 
-  if (collapsed) {
-    return (
-      <aside className="bg-sidebar border-border flex w-12 shrink-0 flex-col items-center gap-2 border-r py-2">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Expand sidebar"
-          onClick={() => setCollapsed(false)}
-        >
-          <PanelLeftOpen />
-        </Button>
-        <Button variant="ghost" size="icon-sm" asChild>
-          <Link to="/" aria-label="New session">
-            <SquarePen />
-          </Link>
-        </Button>
-        <Button variant="ghost" size="icon-sm" asChild>
-          <Link to="/playbook" aria-label="Playbook">
-            <BookOpen />
-          </Link>
-        </Button>
-      </aside>
-    )
-  }
-
   return (
-    <aside className="bg-sidebar border-border flex w-[260px] shrink-0 flex-col border-r">
-      <div className="flex h-12 items-center gap-2 border-b px-2.5">
-        <Link to="/" className="flex min-w-0 flex-1 items-center gap-2 px-0.5">
-          <span className="bg-brand/15 text-brand ring-brand/25 flex size-6 items-center justify-center rounded-md ring-1 ring-inset">
-            <Orbit className="size-3.5" />
-          </span>
-          <span className="truncate text-[13px] font-semibold tracking-tight">Shuttle</span>
-        </Link>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Collapse sidebar"
-          onClick={() => setCollapsed(true)}
-        >
-          <PanelLeftClose />
-        </Button>
-      </div>
-
-      <div className="flex flex-col gap-0.5 p-2">
-        <SidebarNavLink to="/" icon={<SquarePen className="size-3.5" />} active={pathname === '/'}>
-          New Session
-        </SidebarNavLink>
-        <SidebarNavLink
-          to="/playbook"
-          icon={<BookOpen className="size-3.5" />}
-          active={pathname === '/playbook'}
-        >
-          Playbook
-        </SidebarNavLink>
-      </div>
-
-      <div className="flex items-center gap-1 px-3 pt-2 pb-1">
-        <span className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
-          Folders
-        </span>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          className="ml-auto"
-          title={showArchived ? 'Hide archived' : 'Show archived'}
-          onClick={() => setShowArchived((value) => !value)}
-        >
-          <Badge variant="outline" className="h-4 px-1 text-[9px]">
-            {showArchived ? 'All' : 'Active'}
-          </Badge>
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="New folder"
-          onClick={() => {
-            setDraftName('New folder')
-            setCreating(true)
-          }}
-        >
-          <FolderPlus />
-        </Button>
-      </div>
-
-      <ScrollArea className="min-h-0 flex-1 px-1.5 pb-2">
-        {creating ? (
-          <div className="px-1.5 py-1">
-            <Input
-              autoFocus
-              value={draftName}
-              onChange={(event) => setDraftName(event.target.value)}
-              onBlur={() => void submitNewFolder()}
-              onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault()
-                  void submitNewFolder()
-                }
-
-                if (event.key === 'Escape') {
-                  setCreating(false)
-                }
-              }}
-              className="h-7 text-xs"
-            />
-          </div>
-        ) : null}
-
-        {folders.length === 0 && !creating ? (
-          <p className="text-muted-foreground px-3 py-4 text-[11px] leading-relaxed">
-            Create a folder to organize sessions and link GitHub repos.
-          </p>
-        ) : null}
-
-        {folders.map((folder) => {
-          const open = expanded[folder.folderId] ?? true
-
-          const sessions = sessionsForFolder(tree, folder.folderId, {
-            includeArchived: showArchived,
-          })
-
-          const visible = moreFolders[folder.folderId]
-            ? sessions
-            : sessions.slice(0, SESSION_PREVIEW)
-
-          const folderActive = pathname === `/folders/${folder.folderId}`
-
-          return (
-            <div key={folder.folderId} className="mb-1">
-              <div
-                className={cn(
-                  'group flex h-8 items-center gap-1 rounded-md px-1.5 transition-colors',
-                  folderActive ? 'bg-accent' : 'hover:bg-accent/40',
-                )}
-              >
-                <button
-                  type="button"
-                  className="text-muted-foreground hover:text-foreground flex size-5 items-center justify-center"
-                  onClick={() =>
-                    setExpanded((prev) => ({
-                      ...prev,
-                      [folder.folderId]: !open,
-                    }))
-                  }
-                  aria-label={open ? 'Collapse folder' : 'Expand folder'}
-                >
-                  <ChevronRight
-                    className={cn('size-3.5 transition-transform', open && 'rotate-90')}
-                  />
-                </button>
-                {renamingFolderId === folder.folderId ? (
-                  <Input
-                    autoFocus
-                    defaultValue={folder.name}
-                    className="h-6 flex-1 text-xs"
-                    onBlur={(event) => {
-                      const name = event.target.value.trim()
-                      setRenamingFolderId(null)
-
-                      if (name && name !== folder.name) {
-                        void renameWorkspaceFolder(runId, folder.folderId, name)
-                      }
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.currentTarget.blur()
-                      }
-
-                      if (event.key === 'Escape') {
-                        setRenamingFolderId(null)
-                      }
-                    }}
-                  />
-                ) : (
-                  <Link
-                    to="/folders/$folderId"
-                    params={{ folderId: folder.folderId }}
-                    className="flex min-w-0 flex-1 items-center gap-1.5"
-                    onDoubleClick={(event) => {
-                      event.preventDefault()
-                      setRenamingFolderId(folder.folderId)
-                    }}
-                    onClick={() => rememberLastFolder(folder.folderId)}
-                  >
-                    {open ? (
-                      <FolderOpen className="text-muted-foreground size-3.5 shrink-0" />
-                    ) : (
-                      <Folder className="text-muted-foreground size-3.5 shrink-0" />
-                    )}
-                    <span className="truncate text-[12.5px] font-medium">{folder.name}</span>
-                    {folder.repos.length > 0 ? (
-                      <span className="text-muted-foreground font-mono text-[10px] tabular-nums">
-                        {folder.repos.length}
-                      </span>
-                    ) : null}
-                  </Link>
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  className="opacity-0 group-hover:opacity-100"
-                  aria-label="New session in folder"
-                  onClick={() => {
-                    rememberLastFolder(folder.folderId)
-
-                    void navigate({
-                      to: '/folders/$folderId',
-                      params: { folderId: folder.folderId },
-                    })
-                  }}
-                >
-                  <Plus />
-                </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      className="opacity-0 group-hover:opacity-100"
-                      aria-label="Folder menu"
-                    >
-                      <MoreHorizontal />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <DropdownMenuItem onSelect={() => setRenamingFolderId(folder.folderId)}>
-                      Rename
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => setLinkFolderId(folder.folderId)}>
-                      Link repository
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onSelect={() => void archiveWorkspaceFolder(runId, folder.folderId)}
-                    >
-                      Archive
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-
-              {open ? (
-                <div className="ml-3 border-l border-white/5 pl-1">
-                  {visible.map((session) => {
-                    const active = pathname === `/sessions/${session.runId}`
-
-                    if (renamingSessionId === session.runId) {
-                      return (
-                        <div key={session.runId} className="px-1 py-0.5">
-                          <Input
-                            autoFocus
-                            defaultValue={session.title}
-                            className="h-6 text-xs"
-                            onBlur={(event) => {
-                              const title = event.target.value.trim()
-                              setRenamingSessionId(null)
-
-                              if (title && title !== session.title) {
-                                void renameWorkspaceSession(runId, session.runId, title)
-                              }
-                            }}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
-                                event.currentTarget.blur()
-                              }
-
-                              if (event.key === 'Escape') {
-                                setRenamingSessionId(null)
-                              }
-                            }}
-                          />
-                        </div>
-                      )
-                    }
-
-                    return (
-                      <Link
-                        key={session.runId}
-                        to="/sessions/$sessionId"
-                        params={{ sessionId: session.runId }}
-                        className="block"
-                      >
-                        <SessionRowShell active={active}>
-                          <ActivityDot activity={session.activity} status={session.status} />
-                          <span className="min-w-0 flex-1 truncate">{session.title}</span>
-                          <span className="text-muted-foreground font-mono text-[10px] tabular-nums">
-                            {compactRelativeTime(session.updatedAt, now)}
-                          </span>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <button
-                                type="button"
-                                className="hover:text-foreground opacity-0 group-hover:opacity-100"
-                                onClick={(event) => event.preventDefault()}
-                                aria-label="Session menu"
-                              >
-                                <MoreHorizontal className="size-3.5" />
-                              </button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="start">
-                              <DropdownMenuItem
-                                onSelect={() => setRenamingSessionId(session.runId)}
-                              >
-                                Rename
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onSelect={() => void archiveWorkspaceSession(runId, session.runId)}
-                              >
-                                Archive
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </SessionRowShell>
-                      </Link>
-                    )
-                  })}
-                  {sessions.length > SESSION_PREVIEW && !moreFolders[folder.folderId] ? (
-                    <button
-                      type="button"
-                      className="text-muted-foreground hover:text-foreground px-2 py-1 text-[11px]"
-                      onClick={() =>
-                        setMoreFolders((prev) => ({ ...prev, [folder.folderId]: true }))
-                      }
-                    >
-                      More
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          )
-        })}
-
-        {unfiled.length > 0 ? (
-          <div className="mt-3">
-            <div className="text-muted-foreground px-2 pb-1 text-[11px] font-medium tracking-wide uppercase">
-              Unfiled
-            </div>
-            {unfiled.map((session) => (
-              <Link
-                key={session.runId}
-                to="/sessions/$sessionId"
-                params={{ sessionId: session.runId }}
-                className="block"
-              >
-                <SessionRowShell active={pathname === `/sessions/${session.runId}`}>
-                  <ActivityDot activity="idle" status="running" />
-                  <span className="min-w-0 flex-1 truncate">{session.goal}</span>
-                  <span className="text-muted-foreground font-mono text-[10px] tabular-nums">
-                    {compactRelativeTime(session.openedAt, now)}
-                  </span>
-                </SessionRowShell>
-              </Link>
-            ))}
-          </div>
-        ) : null}
-      </ScrollArea>
-
-      <div className="border-border flex items-center gap-2 border-t px-3 py-2.5">
-        {installations.length > 0 ? (
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <div className="flex -space-x-1.5">
-              {installations.slice(0, 3).map((installation) =>
-                installation.account.avatarUrl ? (
-                  <img
-                    key={installation.installationId}
-                    src={installation.account.avatarUrl}
-                    alt={installation.account.login}
-                    className="border-sidebar size-5 rounded-full border"
-                  />
-                ) : (
-                  <span
-                    key={installation.installationId}
-                    className="bg-accent flex size-5 items-center justify-center rounded-full text-[9px]"
-                  >
-                    {installation.account.login.slice(0, 1).toUpperCase()}
-                  </span>
-                ),
-              )}
-            </div>
-            <span className="text-muted-foreground truncate text-[11px]">
-              {installations.map((installation) => installation.account.login).join(', ')}
-            </span>
-          </div>
-        ) : (
-          <Button variant="ghost" size="sm" className="w-full justify-start" asChild>
-            <a href="/github/install">
-              <GitBranch />
-              Connect GitHub
-            </a>
+    <>
+      <div className="flex h-7 shrink-0 items-center gap-0.5 pr-2 pl-3">
+        <SectionHeading>Folders</SectionHeading>
+        <IconTip label={showArchived ? 'Hide archived' : 'Show archived'}>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="aria-pressed:bg-accent aria-pressed:text-foreground ml-auto"
+            aria-label="Show archived"
+            aria-pressed={showArchived}
+            onClick={toggleArchived}
+          >
+            <Archive />
           </Button>
-        )}
+        </IconTip>
+        <IconTip label="New folder">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="New folder"
+            onClick={() => setCreating(true)}
+          >
+            <FolderPlus />
+          </Button>
+        </IconTip>
       </div>
+
+      <ScrollArea className="scroll-fade min-h-0 flex-1">
+        <div className="px-1.5 pt-0.5 pb-5">
+          {creating ? (
+            <div className="px-1 py-0.5">
+              <InlineNameInput
+                initialValue="New folder"
+                label="Folder name"
+                commitUnchanged
+                onCancel={() => setCreating(false)}
+                onCommit={(name) => void createFolder(name)}
+              />
+            </div>
+          ) : null}
+
+          {folders.length === 0 && !creating ? (
+            <div className="mx-1.5 my-1 rounded-lg border border-dashed px-3 py-3">
+              <p className="text-muted-foreground text-[11.5px] leading-relaxed">
+                Folders group sessions and the GitHub repos their agents can work in.
+              </p>
+              <Button
+                variant="secondary"
+                size="xs"
+                className="mt-2"
+                onClick={() => setCreating(true)}
+              >
+                <FolderPlus />
+                New folder
+              </Button>
+            </div>
+          ) : null}
+
+          {folders.map((folder) => {
+            const open = expanded[folder.folderId] ?? !folder.archived
+
+            return (
+              <FolderGroup
+                key={folder.folderId}
+                runId={runId}
+                folder={folder}
+                sessions={sessionsForFolder(tree, folder.folderId, {
+                  includeArchived: showArchived,
+                })}
+                open={open}
+                onToggle={() => setFolderOpen(folder.folderId, !open)}
+                pathname={pathname}
+                now={now}
+                onLinkRepo={() => setLinkFolderId(folder.folderId)}
+              />
+            )
+          })}
+
+          {unfiled.length > 0 ? (
+            <div className="mt-4">
+              <div className="flex h-7 items-center px-1.5">
+                <SectionHeading>Unfiled</SectionHeading>
+              </div>
+              {unfiled.map((session) => (
+                <SessionRow
+                  key={session.runId}
+                  runId={session.runId}
+                  title={session.goal}
+                  activity="idle"
+                  status="unknown"
+                  updatedAt={session.openedAt}
+                  now={now}
+                  active={pathname === `/sessions/${session.runId}`}
+                />
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </ScrollArea>
 
       {linkFolder ? (
         <LinkRepoDialog
@@ -589,7 +398,120 @@ function AppSidebar({ runId }: { runId: string }) {
           linked={linkFolder.repos}
         />
       ) : null}
-    </aside>
+    </>
+  )
+}
+
+const SKELETON_WIDTHS = ['w-24', 'w-36', 'w-28', 'w-32', 'w-20']
+
+function FolderTreeSkeleton({ error }: { error: string | null }) {
+  return (
+    <>
+      <div className="flex h-7 shrink-0 items-center pr-2 pl-3">
+        <SectionHeading>Folders</SectionHeading>
+      </div>
+      <div className="min-h-0 flex-1 px-3 pt-1" aria-busy={!error}>
+        {error ? (
+          <div className="rounded-lg border border-dashed px-3 py-3">
+            <p className="text-status-failed text-[11.5px] leading-relaxed">{error}</p>
+            <Button
+              variant="secondary"
+              size="xs"
+              className="mt-2"
+              onClick={() => window.location.reload()}
+            >
+              Retry
+            </Button>
+          </div>
+        ) : (
+          SKELETON_WIDTHS.map((width, index) => (
+            <div
+              key={width}
+              className="flex h-8 items-center gap-2"
+              style={{ opacity: 1 - index * 0.15 }}
+            >
+              <span className="bg-accent size-3.5 rounded-sm" />
+              <span className={cn('bg-accent h-2.5 rounded-sm', width)} />
+            </div>
+          ))
+        )}
+      </div>
+    </>
+  )
+}
+
+function GithubFooter({ installations }: { installations: readonly GithubInstallation[] }) {
+  if (installations.length === 0) {
+    return (
+      <div className="shrink-0 border-t p-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 w-full justify-start px-2 text-[12.5px]"
+          asChild
+        >
+          <a href="/github/install">
+            <GitBranch />
+            Connect GitHub
+          </a>
+        </Button>
+      </div>
+    )
+  }
+
+  const logins = installations.map((installation) => installation.account.login).join(', ')
+
+  return (
+    <div className="flex h-12 shrink-0 items-center gap-2 border-t pr-2 pl-3">
+      <div className="flex shrink-0 -space-x-1.5">
+        {installations.slice(0, 3).map((installation) => (
+          <GithubAvatar key={installation.installationId} installation={installation} />
+        ))}
+      </div>
+      <span className="text-muted-foreground min-w-0 flex-1 truncate text-[11px]" title={logins}>
+        {logins}
+      </span>
+      <IconTip label="Add GitHub account">
+        <Button variant="ghost" size="icon-xs" aria-label="Add GitHub account" asChild>
+          <a href="/github/install">
+            <Plus />
+          </a>
+        </Button>
+      </IconTip>
+    </div>
+  )
+}
+
+function GithubAvatar({ installation }: { installation: GithubInstallation }) {
+  const { login, avatarUrl } = installation.account
+  const [failed, setFailed] = useState(false)
+
+  if (!avatarUrl || failed) {
+    return (
+      <span
+        aria-label={login}
+        className="bg-accent text-foreground ring-sidebar flex size-5 items-center justify-center rounded-full text-[9px] font-medium uppercase ring-2"
+      >
+        {Array.from(login)[0] ?? '?'}
+      </span>
+    )
+  }
+
+  return (
+    <img
+      src={avatarUrl}
+      alt={login}
+      onError={() => setFailed(true)}
+      className="ring-sidebar size-5 rounded-full object-cover ring-2"
+    />
+  )
+}
+
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+      {children}
+    </span>
   )
 }
 
@@ -597,18 +519,20 @@ function SidebarNavLink({
   to,
   icon,
   active,
+  shortcut,
   children,
 }: {
   to: '/' | '/playbook'
   icon: React.ReactNode
   active: boolean
+  shortcut?: readonly string[]
   children: React.ReactNode
 }) {
   return (
     <Link
       to={to}
       className={cn(
-        'flex h-8 items-center gap-2 rounded-md px-2 text-[12.5px] transition-colors',
+        'group/nav focus-visible:ring-ring/50 flex h-8 items-center gap-2 rounded-md px-2 text-[12.5px] transition-colors duration-100 outline-none focus-visible:ring-2 [&>svg]:size-3.5 [&>svg]:shrink-0',
         active
           ? 'bg-accent text-foreground'
           : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
@@ -616,9 +540,44 @@ function SidebarNavLink({
     >
       {icon}
       {children}
+      {shortcut ? (
+        <span
+          aria-hidden
+          className="ml-auto flex gap-0.5 opacity-0 transition-opacity duration-100 group-hover/nav:opacity-100 pointer-coarse:hidden"
+        >
+          {shortcut.map((key) => (
+            <Kbd key={key}>{key}</Kbd>
+          ))}
+        </span>
+      ) : null}
     </Link>
   )
 }
 
-/** Expose tree for pages that need folder context without a second subscription. */
-export type { WorkspaceTree }
+function IconTip({
+  label,
+  shortcut,
+  side = 'bottom',
+  children,
+}: {
+  label: string
+  shortcut?: readonly string[]
+  side?: 'top' | 'right' | 'bottom' | 'left'
+  children: React.ReactNode
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side={side} className="flex items-center gap-2">
+        {label}
+        {shortcut ? (
+          <span className="flex gap-0.5">
+            {shortcut.map((key) => (
+              <Kbd key={key}>{key}</Kbd>
+            ))}
+          </span>
+        ) : null}
+      </TooltipContent>
+    </Tooltip>
+  )
+}

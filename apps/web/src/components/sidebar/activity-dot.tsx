@@ -1,68 +1,68 @@
 import { cn } from '@/lib/cn'
 
-export function ActivityDot({ activity, status }: { activity: string; status: string }) {
+type DotTone = 'failed' | 'done' | 'working' | 'needs_input' | 'idle'
+
+function dotTone(activity: string, status: string): DotTone {
   if (status === 'failed') {
-    return <span className="bg-status-failed size-1.5 shrink-0 rounded-full" title="Failed" />
+    return 'failed'
   }
 
   if (status === 'completed' || status === 'cancelled') {
-    return (
-      <span
-        className="border-muted-foreground/40 size-1.5 shrink-0 rounded-full border"
-        title={status}
-      />
-    )
+    return 'done'
   }
 
-  switch (activity) {
+  if (activity === 'working' || activity === 'needs_input') {
+    return activity
+  }
+
+  return 'idle'
+}
+
+const DOT_LABELS: Record<DotTone, string> = {
+  failed: 'Failed',
+  done: 'Finished',
+  working: 'Working',
+  needs_input: 'Needs input',
+  idle: 'Idle',
+}
+
+function dotClass(tone: DotTone): string {
+  switch (tone) {
+    case 'failed':
+      return 'bg-status-failed'
+    case 'done':
+      return 'border-muted-foreground/40 border'
     case 'working':
-      return (
-        <span className="bg-brand size-1.5 shrink-0 animate-pulse rounded-full" title="Working" />
-      )
+      return 'bg-brand breathe'
     case 'needs_input':
-      return (
-        <span className="bg-status-waiting size-1.5 shrink-0 rounded-full" title="Needs input" />
-      )
-    default:
-      return (
-        <span
-          className="border-muted-foreground/50 size-1.5 shrink-0 rounded-full border"
-          title="Idle"
-        />
-      )
+      return 'bg-status-waiting'
+    case 'idle':
+      return 'border-muted-foreground/50 border'
+
+    default: {
+      const exhaustive: never = tone
+      return exhaustive
+    }
   }
 }
 
-export function activityTone(activity: string, status: string): string {
-  if (status === 'failed') {
-    return 'text-status-failed'
-  }
-
-  if (activity === 'working') {
-    return 'text-foreground'
-  }
-
-  return 'text-muted-foreground'
-}
-
-export function SessionRowShell({
-  active,
-  children,
+export function ActivityDot({
+  activity,
+  status,
   className,
 }: {
-  active?: boolean
-  children: React.ReactNode
+  activity: string
+  status: string
   className?: string
 }) {
+  const tone = dotTone(activity, status)
+
   return (
-    <div
-      className={cn(
-        'group float-in flex h-8 items-center gap-2 rounded-md px-2 text-[12.5px] transition-colors duration-150',
-        active ? 'bg-accent text-foreground' : 'hover:bg-accent/50 text-muted-foreground',
-        className,
-      )}
-    >
-      {children}
-    </div>
+    <span
+      role="img"
+      aria-label={DOT_LABELS[tone]}
+      title={DOT_LABELS[tone]}
+      className={cn('size-1.5 shrink-0 rounded-full', dotClass(tone), className)}
+    />
   )
 }
