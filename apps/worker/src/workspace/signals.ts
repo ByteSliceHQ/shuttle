@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
 
-import { workspaceModule } from './scope'
+import { TabKindSchema, workspaceModule } from './scope'
 
 const LinkedRepoSchema = Schema.Struct({
   installationId: Schema.Finite,
@@ -152,4 +152,49 @@ export const reportActivity = workspaceModule.signal({
     at: Schema.Finite,
   }),
   build: (input) => workspaceModule.input('session.activity', input),
+})
+
+export const openTab = workspaceModule.signal({
+  description: 'Open an artifact tab for a coding session.',
+  input: Schema.Struct({
+    runId: Schema.String,
+    tabId: Schema.String,
+    kind: TabKindSchema,
+    title: Schema.String,
+    target: Schema.String,
+    at: Schema.Finite,
+  }),
+  build: (input) =>
+    workspaceModule.input('tab.opened', input, {
+      idempotencyKey: `workspace-tab:${input.runId}:${input.tabId}`,
+    }),
+})
+
+export const closeTab = workspaceModule.signal({
+  description: 'Close an artifact tab for a coding session.',
+  input: Schema.Struct({
+    runId: Schema.String,
+    tabId: Schema.String,
+  }),
+  build: (input) => workspaceModule.input('tab.closed', input),
+})
+
+export const reorderTabs = workspaceModule.signal({
+  description: 'Reorder artifact tabs for a coding session.',
+  input: Schema.Struct({
+    runId: Schema.String,
+    tabIds: Schema.Array(Schema.String),
+  }),
+  build: (input) => workspaceModule.input('tab.reordered', input),
+})
+
+export const retargetTab = workspaceModule.signal({
+  description: 'Update an artifact tab title or target.',
+  input: Schema.Struct({
+    runId: Schema.String,
+    tabId: Schema.String,
+    title: Schema.String,
+    target: Schema.String,
+  }),
+  build: (input) => workspaceModule.input('tab.retargeted', input),
 })

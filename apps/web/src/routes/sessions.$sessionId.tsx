@@ -3,9 +3,9 @@ import { Check, Copy, Folder, Users } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { AgentTree } from '@/components/agent-tree'
+import { ArtifactPane } from '@/components/artifacts/artifact-pane'
 import { Composer } from '@/components/composer'
 import { Conversation } from '@/components/conversation'
-import { EventStream } from '@/components/event-stream'
 import { SessionContextButtons } from '@/components/session-context'
 import { RepoChip } from '@/components/sidebar/repo-chip'
 import { useWorkspace } from '@/components/sidebar/workspace-context'
@@ -49,11 +49,13 @@ function SessionWorkspace({ runId }: { runId: string }) {
 
   const [selectedThreadId, setSelectedThreadId] = useState<string | undefined>()
   const [selectedSeq, setSelectedSeq] = useState<number | undefined>()
+  const [focusEventsToken, setFocusEventsToken] = useState(0)
 
   const identities = useMemo(() => agentIdentities(tree.root), [tree.root])
   const goal = feed.items.find((item) => item.kind === 'user' && item.goal)
   const hasInterjected = feed.items.some((item) => item.kind === 'user' && !item.goal)
   const goalText = goal?.kind === 'user' ? goal.text : undefined
+  const folderId = useWorkspace()?.tree.sessions[runId]?.folderId
 
   useEffect(() => {
     if (goalText) {
@@ -69,6 +71,7 @@ function SessionWorkspace({ runId }: { runId: string }) {
   const inspect = useCallback((threadId: string, seq?: number) => {
     setSelectedThreadId(threadId)
     setSelectedSeq(seq)
+    setFocusEventsToken((token) => token + 1)
   }, [])
 
   return (
@@ -120,8 +123,10 @@ function SessionWorkspace({ runId }: { runId: string }) {
         </ResizablePanel>
         <ResizableHandle />
         <ResizablePanel defaultSize="30" minSize={280}>
-          <aside className="bg-sidebar h-full min-h-0">
-            <EventStream
+          <aside className="h-full min-h-0">
+            <ArtifactPane
+              runId={runId}
+              folderId={folderId}
               events={events}
               startedAt={summary.startedAt}
               threadId={selectedThreadId}
@@ -130,6 +135,8 @@ function SessionWorkspace({ runId }: { runId: string }) {
               onClearThread={() => setSelectedThreadId(undefined)}
               selectedSeq={selectedSeq}
               onSelectSeq={setSelectedSeq}
+              identities={identities}
+              focusEventsToken={focusEventsToken}
             />
           </aside>
         </ResizablePanel>

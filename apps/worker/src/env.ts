@@ -10,6 +10,7 @@ export interface ShuttleEnv {
   readonly SHUTTLE_PLAYBOOK_RUN_ID?: string
   readonly SHUTTLE_WORKSPACE_RUN_ID?: string
   readonly SHUTTLE_WEB_URL?: string
+  readonly SHUTTLE_PREVIEW_HOST?: string
   readonly GITHUB_APP_ID?: string
   readonly GITHUB_APP_SLUG?: string
   readonly GITHUB_APP_PRIVATE_KEY?: string
@@ -21,7 +22,10 @@ export interface SessionSandboxStub {
   ensureRepos(repos: LinkedSandboxRepo[]): Promise<{ root: string }>
   ensureWorktree(runId: string, threadId: string): Promise<WorktreeResult>
   ensureRepo(repoUrl: string | null): Promise<{ root: string }>
-  readFile(path: string, cwd?: string): Promise<{ content: string }>
+  readFile(
+    path: string,
+    cwd?: string,
+  ): Promise<{ content: string; missing?: false } | { content: null; missing: true; error: string }>
   writeFile(path: string, content: string, cwd?: string): Promise<{ ok: true }>
   editFile(
     path: string,
@@ -30,12 +34,15 @@ export interface SessionSandboxStub {
     cwd?: string,
   ): Promise<{ ok: true; replacements: number }>
   grep(pattern: string, path?: string, cwd?: string): Promise<{ matches: string }>
+  listFiles(root: string): Promise<{ files: string[] }>
   exec(
     command: string,
     options?: { cwd?: string; timeoutMs?: number },
   ): Promise<{ stdout: string; stderr: string; exitCode: number }>
   gitDiff(cwd?: string): Promise<{ diff: string }>
   kill(pid?: number): Promise<{ ok: true }>
+  getMode(): Promise<{ mode: 'memory' | 'container' }>
+  fetch(request: Request): Promise<Response>
 }
 
 export function sandboxStub(env: ShuttleEnv, sandboxName: string): SessionSandboxStub {

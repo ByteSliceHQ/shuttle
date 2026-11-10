@@ -30,6 +30,7 @@ export function EventStream({
   onClearThread,
   selectedSeq,
   onSelectSeq,
+  toolbar = false,
 }: {
   events: readonly SessionEvent[]
   startedAt?: number
@@ -39,6 +40,8 @@ export function EventStream({
   onClearThread?: () => void
   selectedSeq?: number
   onSelectSeq: (seq: number | undefined) => void
+  /** When true, drop the panel title — the tab strip already names Events. */
+  toolbar?: boolean
 }) {
   const [query, setQuery] = useState('')
   const [follow, setFollow] = useState(true)
@@ -99,10 +102,16 @@ export function EventStream({
   return (
     <div className="event-stream flex h-full min-h-0 flex-col">
       <PanelHeader className="gap-1.5 pr-2">
-        <PanelTitle meta={filtered ? `${visible.length}/${events.length}` : events.length}>
-          Events
-        </PanelTitle>
-        <div className="relative ml-auto min-w-0 flex-1 basis-24">
+        {toolbar ? (
+          <span className="text-muted-foreground font-mono text-[11px] tabular-nums">
+            {filtered ? `${visible.length}/${events.length}` : events.length}
+          </span>
+        ) : (
+          <PanelTitle meta={filtered ? `${visible.length}/${events.length}` : events.length}>
+            Events
+          </PanelTitle>
+        )}
+        <div className={cn('relative min-w-0 flex-1 basis-24', toolbar ? '' : 'ml-auto')}>
           <Search
             aria-hidden
             className="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-3 -translate-y-1/2"

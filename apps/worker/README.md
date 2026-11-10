@@ -17,8 +17,19 @@ Cloudflare Worker that hosts Shuttle sessions on Looms Durable Objects.
 
 2. Uncomment the `d1_databases` block in `wrangler.jsonc` and paste the id.
 
-3. For real Linux sandboxes, install Docker, set
-   `SHUTTLE_WORKSPACE_MODE=container`, and uncomment the `containers` block.
+3. For real Linux sandboxes (terminal + browser preview ports), install Docker,
+   set `SHUTTLE_WORKSPACE_MODE=container` in `.dev.vars`, and enable the
+   `containers` block in `wrangler.jsonc` (`scheduling_policy: "durable_object"`
+   with a named `images.base.dockerfile`). Code starts instances via
+   `ctx.container.images.base`. Preview iframes use hostnames of the form
+   `p<port>-<folderId>.<SHUTTLE_PREVIEW_HOST>` (default host `localhost`, so
+   local previews hit `http://p3000-<folderId>.localhost:8790`). Production
+   needs a wildcard DNS record and route for that host.
+
+   The image bakes a coding baseline (`node`/`npm`, `python3`, `git`, `rg`,
+   `curl`, `bash`). Agents may install extras via bash (`apk add`, project-local
+   `npm install`, etc.). After Dockerfile changes, restart `wrangler` so it
+   rebuilds the image — container disk is ephemeral and resets on recreate.
 
 4. Set secrets:
 

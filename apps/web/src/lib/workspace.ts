@@ -1,5 +1,7 @@
 import type { AnyEventEnvelope, ProjectionDefinition } from '@swirls/looms/core'
 
+import { reduceTabEvent } from './tab-set'
+
 export interface LinkedRepo {
   readonly installationId: number
   readonly owner: string
@@ -45,12 +47,31 @@ export interface WorkspaceTree {
   readonly installations: Readonly<Record<string, GithubInstallation>>
 }
 
+export type ArtifactTabKind = 'events' | 'files' | 'file' | 'changes' | 'terminal' | 'browser'
+
+export interface ArtifactTab {
+  readonly tabId: string
+  readonly kind: ArtifactTabKind
+  readonly title: string
+  readonly target: string
+  readonly openedAt: number
+}
+
+export interface SessionTabSet {
+  readonly order: readonly string[]
+  readonly tabs: Readonly<Record<string, ArtifactTab>>
+}
+
+export type SessionTabsState = Readonly<Record<string, SessionTabSet>>
+
 export const emptyWorkspaceTree: WorkspaceTree = {
   folderOrder: [],
   folders: {},
   sessions: {},
   installations: {},
 }
+
+export const emptySessionTabs: SessionTabsState = {}
 
 export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
   name: 'workspaceTree',
@@ -351,6 +372,17 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
   },
 }
 
+export const sessionTabs: ProjectionDefinition<SessionTabsState> = {
+  name: 'sessionTabs',
+  initialState: emptySessionTabs,
+  reduce(state, event: AnyEventEnvelope) {
+    return reduceTabEvent(state, {
+      type: event.type,
+      payload: (event.payload ?? {}) as Record<string, unknown>,
+    })
+  },
+}
+
 async function postJson(path: string, body: object): Promise<Response> {
   return fetch(path, {
     method: 'POST',
@@ -416,6 +448,44 @@ export async function renameWorkspaceSession(runId: string, sessionRunId: string
 
 export async function archiveWorkspaceSession(runId: string, sessionRunId: string) {
   await signalWorkspace(runId, 'workspace/archiveSession', { runId: sessionRunId })
+}
+
+export async function openSessionTab(
+  workspaceRunId: string,
+  input: {
+    runId: string
+    tabId: string
+    kind: ArtifactTabKind
+    title: string
+    target: string
+    at?: number
+  },
+) {
+  await signalWorkspace(workspaceRunId, 'workspace/openTab', {
+    ...input,
+    at: input.at ?? Date.now(),
+  })
+}
+
+export async function closeSessionTab(
+  workspaceRunId: string,
+  input: { runId: string; tabId: string },
+) {
+  await signalWorkspace(workspaceRunId, 'workspace/closeTab', input)
+}
+
+export async function reorderSessionTabs(
+  workspaceRunId: string,
+  input: { runId: string; tabIds: string[] },
+) {
+  await signalWorkspace(workspaceRunId, 'workspace/reorderTabs', input)
+}
+
+export async function retargetSessionTab(
+  workspaceRunId: string,
+  input: { runId: string; tabId: string; title: string; target: string },
+) {
+  await signalWorkspace(workspaceRunId, 'workspace/retargetTab', input)
 }
 
 export async function linkFolderRepos(

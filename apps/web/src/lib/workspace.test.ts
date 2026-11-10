@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import type { AnyEventEnvelope } from '@swirls/looms/core'
 
-import { emptyWorkspaceTree, workspaceTree } from './workspace'
+import { emptySessionTabs, emptyWorkspaceTree, sessionTabs, workspaceTree } from './workspace'
 
 function event(type: string, payload: object): AnyEventEnvelope {
   return { type, payload, seq: 1, id: 'e1', ts: 1 } as AnyEventEnvelope
@@ -60,5 +60,62 @@ describe('workspaceTree reducer', () => {
     expect(state.folders.f1?.repos[0]?.fullName).toBe('byteslicehq/shuttle')
     expect(state.sessions.s1?.activity).toBe('needs_input')
     expect(state.sessions.s1?.status).toBe('running')
+  })
+})
+
+describe('sessionTabs reducer', () => {
+  test('opens, retargets, reorders, and closes tabs', () => {
+    let state = emptySessionTabs
+
+    state = sessionTabs.reduce(
+      state,
+      event('workspace.tab.opened', {
+        runId: 's1',
+        tabId: 'events',
+        kind: 'events',
+        title: 'Events',
+        target: '',
+        at: 1,
+      }),
+    )
+
+    state = sessionTabs.reduce(
+      state,
+      event('workspace.tab.opened', {
+        runId: 's1',
+        tabId: 'browser',
+        kind: 'browser',
+        title: 'Browser',
+        target: '3000',
+        at: 2,
+      }),
+    )
+
+    state = sessionTabs.reduce(
+      state,
+      event('workspace.tab.retargeted', {
+        runId: 's1',
+        tabId: 'browser',
+        title: 'App',
+        target: 'http://localhost:3000',
+      }),
+    )
+
+    state = sessionTabs.reduce(
+      state,
+      event('workspace.tab.reordered', {
+        runId: 's1',
+        tabIds: ['browser', 'events'],
+      }),
+    )
+
+    state = sessionTabs.reduce(
+      state,
+      event('workspace.tab.closed', { runId: 's1', tabId: 'events' }),
+    )
+
+    expect(state.s1?.order).toEqual(['browser'])
+    expect(state.s1?.tabs.browser?.title).toBe('App')
+    expect(state.s1?.tabs.events).toBeUndefined()
   })
 })

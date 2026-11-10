@@ -1,12 +1,19 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 
-import { fetchWorkspace, workspaceTree, type WorkspaceTree } from '@/lib/workspace'
+import {
+  fetchWorkspace,
+  sessionTabs,
+  workspaceTree,
+  type SessionTabsState,
+  type WorkspaceTree,
+} from '@/lib/workspace'
 import { FIXTURE_MODES, workspaceFixture, type FixtureMode } from '@/lib/workspace-fixtures'
 import { useProjection, useRunStore, useRunSummary } from '@swirls/looms/react'
 
 export interface WorkspaceValue {
   readonly runId: string
   readonly tree: WorkspaceTree
+  readonly tabs: SessionTabsState
 }
 
 interface WorkspaceState {
@@ -38,6 +45,7 @@ function initialFixtureMode(): FixtureMode {
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [runId, setRunId] = useState<string | null>(null)
   const [liveTree, setLiveTree] = useState<WorkspaceTree | null>(null)
+  const [liveTabs, setLiveTabs] = useState<SessionTabsState>({})
   const [error, setError] = useState<string | null>(null)
   const [fixture, setFixture] = useState(() => ({ mode: initialFixtureMode(), at: Date.now() }))
   const fixtureMode = fixture.mode
@@ -62,7 +70,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<WorkspaceState>(
     () => ({
-      workspace: runId && tree ? { runId, tree } : null,
+      workspace: runId && tree ? { runId, tree, tabs: liveTabs } : null,
       error: tree ? null : error,
       fixtureMode,
       setFixtureMode(mode) {
@@ -70,13 +78,18 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         setFixture({ mode, at: Date.now() })
       },
     }),
-    [runId, tree, error, fixtureMode],
+    [runId, tree, liveTabs, error, fixtureMode],
   )
 
   return (
     <WorkspaceContext.Provider value={value}>
       {runId ? (
-        <WorkspaceSubscription runId={runId} onTree={setLiveTree} onStalled={setError} />
+        <WorkspaceSubscription
+          runId={runId}
+          onTree={setLiveTree}
+          onTabs={setLiveTabs}
+          onStalled={setError}
+        />
       ) : null}
       {children}
     </WorkspaceContext.Provider>
@@ -88,14 +101,17 @@ const STALL_MS = 3000
 function WorkspaceSubscription({
   runId,
   onTree,
+  onTabs,
   onStalled,
 }: {
   runId: string
   onTree: (tree: WorkspaceTree) => void
+  onTabs: (tabs: SessionTabsState) => void
   onStalled: (message: string) => void
 }) {
   const store = useRunStore(runId)
   const tree = useProjection(store, workspaceTree)
+  const tabs = useProjection(store, sessionTabs)
   const summary = useRunSummary(store)
   const hydrated = summary.startedAt !== undefined
   const live = summary.connection === 'live'
@@ -103,8 +119,9 @@ function WorkspaceSubscription({
   useEffect(() => {
     if (hydrated) {
       onTree(tree)
+      onTabs(tabs)
     }
-  }, [tree, hydrated, onTree])
+  }, [tree, tabs, hydrated, onTree, onTabs])
 
   useEffect(() => {
     if (hydrated || !live) {

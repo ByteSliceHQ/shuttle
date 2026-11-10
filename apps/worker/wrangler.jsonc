@@ -13,6 +13,9 @@
     "SHUTTLE_PLAYBOOK_RUN_ID": "shuttle-playbook",
     "SHUTTLE_WORKSPACE_RUN_ID": "shuttle-workspace",
     "SHUTTLE_WEB_URL": "http://127.0.0.1:5180",
+    // Hostname used for container preview iframes (`p3000-<folderId>.<host>`).
+    // Locally, `*.localhost` resolves to loopback; production needs wildcard DNS.
+    "SHUTTLE_PREVIEW_HOST": "localhost",
   },
   "durable_objects": {
     "bindings": [
@@ -40,12 +43,18 @@
   //     "database_id": "<create with: wrangler d1 create looms-shuttle-replica>",
   //   },
   // ],
-  // For real Linux sandboxes (Docker required for `wrangler dev`):
-  // "containers": [
-  //   {
-  //     "class_name": "SessionSandbox",
-  //     "image": "./Dockerfile",
-  //     "scheduling_policy": "durable_object",
-  //   },
-  // ],
+  // For real Linux sandboxes (Docker required for `wrangler dev`).
+  // Enables Terminal (PTY) and Browser (getTcpPort) artifact tabs.
+  // durable_object policy uses a named `images` map; start with ctx.container.images.base.
+  "containers": [
+    {
+      "class_name": "SessionSandbox",
+      "scheduling_policy": "durable_object",
+      "images": {
+        "base": {
+          "dockerfile": "./Dockerfile",
+        },
+      },
+    },
+  ],
 }

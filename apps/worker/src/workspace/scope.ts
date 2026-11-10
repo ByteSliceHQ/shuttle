@@ -31,6 +31,15 @@ const SessionActivitySchema = Schema.Union([
   Schema.Literal('idle'),
 ])
 
+export const TabKindSchema = Schema.Union([
+  Schema.Literal('events'),
+  Schema.Literal('files'),
+  Schema.Literal('file'),
+  Schema.Literal('changes'),
+  Schema.Literal('terminal'),
+  Schema.Literal('browser'),
+])
+
 export const workspaceCatalog = defineEventCatalog('workspace', {
   'folder.created': Schema.Struct({
     folderId: Schema.String,
@@ -85,6 +94,28 @@ export const workspaceCatalog = defineEventCatalog('workspace', {
     activity: SessionActivitySchema,
     at: Schema.Finite,
   }),
+  'tab.opened': Schema.Struct({
+    runId: Schema.String,
+    tabId: Schema.String,
+    kind: TabKindSchema,
+    title: Schema.String,
+    target: Schema.String,
+    at: Schema.Finite,
+  }),
+  'tab.closed': Schema.Struct({
+    runId: Schema.String,
+    tabId: Schema.String,
+  }),
+  'tab.reordered': Schema.Struct({
+    runId: Schema.String,
+    tabIds: Schema.Array(Schema.String),
+  }),
+  'tab.retargeted': Schema.Struct({
+    runId: Schema.String,
+    tabId: Schema.String,
+    title: Schema.String,
+    target: Schema.String,
+  }),
 })
 
 export const workspaceModule = createModuleScope({
@@ -105,3 +136,13 @@ export type LinkedRepo = {
 }
 
 export type SessionActivity = 'working' | 'needs_input' | 'idle'
+
+export type ArtifactTabKind = 'events' | 'files' | 'file' | 'changes' | 'terminal' | 'browser'
+
+export type ArtifactTab = {
+  readonly tabId: string
+  readonly kind: ArtifactTabKind
+  readonly title: string
+  readonly target: string
+  readonly openedAt: number
+}

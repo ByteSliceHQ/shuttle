@@ -35,6 +35,7 @@ export interface Workspace {
   writeFile(path: string, content: string, cwd?: string): Promise<void>
   editFile(path: string, oldText: string, newText: string, cwd?: string): Promise<number>
   grep(pattern: string, path?: string, cwd?: string): Promise<string>
+  listFiles(root: string): Promise<string[]>
   exec(command: string, options?: { cwd?: string; timeoutMs?: number }): Promise<ExecResult>
   gitDiff(cwd?: string): Promise<string>
   kill(pid?: number): Promise<void>

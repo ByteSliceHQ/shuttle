@@ -12,9 +12,14 @@ import { intake } from '../agents/intake'
 import { codingSession, shuttleSession } from '../session/module'
 import {
   archiveFolder,
+  closeTab,
   createFolder,
   linkRepo,
+  openTab,
+  reorderTabs,
   requestSession,
+  retargetTab,
+  sessionTabs,
   unlinkRepo,
   workspace,
   workspaceDefinition,
@@ -159,6 +164,108 @@ describe('workspace module', () => {
       }
 
       expect(tree.folders['folder-1']?.archived).toBe(true)
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('opens, closes, reorders, and retargets session tabs', async () => {
+    const looms = createLooms({
+      modules: [
+        agent({ definitions: [stubConductor, stubNarrator, stubWorker, stubReflector] }),
+        evaluator({ definitions: [intake] }),
+        approval(),
+        shuttleSession({ definitions: [codingSession] }),
+        workspace(),
+      ],
+    })
+
+    try {
+      const { runId } = await looms.launchRun({
+        kind: 'shuttle-workspace',
+        definitionName: workspaceDefinition.name,
+        input: { title: 'Tabs workspace' },
+      })
+
+      await looms.signal(runId, [
+        openTab({
+          runId: 'session_tabs',
+          tabId: 'events',
+          kind: 'events',
+          title: 'Events',
+          target: '',
+          at: 1,
+        }),
+        openTab({
+          runId: 'session_tabs',
+          tabId: 'files',
+          kind: 'files',
+          title: 'Files',
+          target: '',
+          at: 2,
+        }),
+        openTab({
+          runId: 'session_tabs',
+          tabId: 'browser',
+          kind: 'browser',
+          title: 'Browser',
+          target: '3000',
+          at: 3,
+        }),
+      ])
+
+      let tabs = await looms.project(runId, sessionTabs)
+
+      for (let i = 0; i < 50 && !tabs.session_tabs; i++) {
+        await sleep(20)
+        tabs = await looms.project(runId, sessionTabs)
+      }
+
+      expect(tabs.session_tabs?.order).toEqual(['events', 'files', 'browser'])
+      expect(tabs.session_tabs?.tabs.browser?.target).toBe('3000')
+
+      // Duplicate open is a no-op via idempotency + reducer guard.
+      await looms.signal(runId, [
+        openTab({
+          runId: 'session_tabs',
+          tabId: 'events',
+          kind: 'events',
+          title: 'Events',
+          target: '',
+          at: 99,
+        }),
+      ])
+
+      await looms.signal(runId, [
+        reorderTabs({
+          runId: 'session_tabs',
+          tabIds: ['browser', 'events', 'files'],
+        }),
+        retargetTab({
+          runId: 'session_tabs',
+          tabId: 'browser',
+          title: 'Localhost',
+          target: 'http://127.0.0.1:3000',
+        }),
+        closeTab({ runId: 'session_tabs', tabId: 'files' }),
+      ])
+
+      for (let i = 0; i < 50; i++) {
+        await sleep(20)
+        tabs = await looms.project(runId, sessionTabs)
+
+        if (
+          tabs.session_tabs?.order.length === 2 &&
+          tabs.session_tabs.tabs.browser?.title === 'Localhost'
+        ) {
+          break
+        }
+      }
+
+      expect(tabs.session_tabs?.order).toEqual(['browser', 'events'])
+      expect(tabs.session_tabs?.tabs.files).toBeUndefined()
+      expect(tabs.session_tabs?.tabs.browser?.target).toBe('http://127.0.0.1:3000')
+      expect(Object.keys(tabs.session_tabs?.tabs ?? {})).toHaveLength(2)
     } finally {
       await looms.stop()
     }

@@ -1,20 +1,24 @@
 import { defineModule } from '@swirls/looms/core'
 
 import { workspaceDefinition } from './definitions'
-import { workspaceTree } from './projections'
+import { sessionTabs, workspaceTree } from './projections'
 import { workspaceModule } from './scope'
 import {
   archiveFolder,
   archiveSession,
+  closeTab,
   connectGithub,
   createFolder,
   disconnectGithub,
   linkRepo,
+  openTab,
   renameFolder,
   renameSession,
   reorderFolders,
+  reorderTabs,
   reportActivity,
   requestSession,
+  retargetTab,
   unlinkRepo,
 } from './signals'
 import { createWorkspaceThread } from './thread'
@@ -27,6 +31,7 @@ export function workspace() {
     },
     projections: {
       workspaceTree,
+      sessionTabs,
     },
     signals: {
       createFolder,
@@ -41,6 +46,10 @@ export function workspace() {
       renameSession,
       archiveSession,
       reportActivity,
+      openTab,
+      closeTab,
+      reorderTabs,
+      retargetTab,
     },
   }))
 }
@@ -48,15 +57,20 @@ export function workspace() {
 export {
   archiveFolder,
   archiveSession,
+  closeTab,
   connectGithub,
   createFolder,
   disconnectGithub,
   linkRepo,
+  openTab,
   renameFolder,
   renameSession,
   reorderFolders,
+  reorderTabs,
   reportActivity,
   requestSession,
+  retargetTab,
+  sessionTabs,
   unlinkRepo,
   workspaceDefinition,
   workspaceTree,
@@ -67,4 +81,5 @@ export type {
   WorkspaceSession,
   WorkspaceState,
 } from './thread'
-export type { LinkedRepo, SessionActivity } from './scope'
+export type { LinkedRepo, SessionActivity, ArtifactTabKind } from './scope'
+export type { ArtifactTab, SessionTabSet, SessionTabsState } from './projections'

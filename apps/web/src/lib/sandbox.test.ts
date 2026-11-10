@@ -1,0 +1,40 @@
+import { describe, expect, test } from 'bun:test'
+
+import { loopbackPreviewPort, resolveBrowserTarget } from './sandbox'
+
+describe('resolveBrowserTarget', () => {
+  const folderId = '9f0a7be4-4c4c-4bdc-8c3f-c9e93a7951db'
+  const label = '9f0a7be4-4c4c-4bdc-8c3f-c9e93a7951db'
+
+  test('rewrites bare ports and localhost URLs to the preview host', () => {
+    const portSuffix = import.meta.env.DEV ? ':8790' : ''
+
+    expect(resolveBrowserTarget('3000', folderId, 'localhost')).toBe(
+      `http://p3000-${label}.localhost${portSuffix}`,
+    )
+
+    expect(resolveBrowserTarget('http://localhost:3000', folderId, 'localhost')).toBe(
+      `http://p3000-${label}.localhost${portSuffix}`,
+    )
+
+    expect(resolveBrowserTarget('127.0.0.1:5173', folderId, 'localhost')).toBe(
+      `http://p5173-${label}.localhost${portSuffix}`,
+    )
+
+    expect(resolveBrowserTarget('http://[::1]:8080/', folderId, 'localhost')).toBe(
+      `http://p8080-${label}.localhost${portSuffix}`,
+    )
+  })
+
+  test('leaves non-loopback URLs unchanged', () => {
+    expect(resolveBrowserTarget('https://example.com', folderId)).toBe('https://example.com')
+    expect(resolveBrowserTarget('example.com', folderId)).toBe('http://example.com')
+  })
+
+  test('loopbackPreviewPort parses common forms', () => {
+    expect(loopbackPreviewPort('3000')).toBe(3000)
+    expect(loopbackPreviewPort('localhost:3000')).toBe(3000)
+    expect(loopbackPreviewPort('http://127.0.0.1:4000/path')).toBe(4000)
+    expect(loopbackPreviewPort('https://example.com:443')).toBeNull()
+  })
+})

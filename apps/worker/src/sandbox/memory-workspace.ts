@@ -157,6 +157,17 @@ export class MemoryWorkspace implements Workspace {
     return lines.join('\n')
   }
 
+  async listFiles(root: string): Promise<string[]> {
+    this.throwIfAborted()
+    await this.hydrate()
+    const prefix = root.endsWith('/') ? root : `${root}/`
+
+    return this.listVisiblePaths()
+      .filter((path) => path === root || path.startsWith(prefix))
+      .filter((path) => this.resolveOverlay(path) != null)
+      .toSorted()
+  }
+
   async exec(command: string, options?: { cwd?: string; timeoutMs?: number }): Promise<ExecResult> {
     this.throwIfAborted()
     await this.hydrate()

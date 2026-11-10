@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 
-import { workspaceModule } from './scope'
+import { TabKindSchema, workspaceModule, type ArtifactTab } from './scope'
+import { reduceSessionTabsState, type SessionTabSet } from './tab-set'
 
 const GithubAccountSchema = Schema.Struct({
   login: Schema.String,
@@ -357,5 +358,31 @@ export const workspaceTree = workspaceModule.projection({
       default:
         return state
     }
+  },
+})
+
+const TabSchema = Schema.Struct({
+  tabId: Schema.String,
+  kind: TabKindSchema,
+  title: Schema.String,
+  target: Schema.String,
+  openedAt: Schema.Finite,
+})
+
+const SessionTabSetSchema = Schema.Struct({
+  order: Schema.Array(Schema.String),
+  tabs: Schema.Record(Schema.String, TabSchema),
+})
+
+export type { ArtifactTab, SessionTabSet }
+
+export type SessionTabsState = Readonly<Record<string, SessionTabSet>>
+
+export const sessionTabs = workspaceModule.projection({
+  name: 'sessionTabs',
+  shape: Schema.Record(Schema.String, SessionTabSetSchema),
+  initialState: {} as SessionTabsState,
+  reduce(state, event) {
+    return reduceSessionTabsState(state, event)
   },
 })
