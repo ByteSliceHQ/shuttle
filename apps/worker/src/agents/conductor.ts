@@ -56,6 +56,7 @@ export function createConductorAgent(
     name: 'conductor',
     description: 'Plans work and delegates to parallel coding workers',
     conversational: true,
+    maxTurns: 500,
     input: z.object({
       text: z.string(),
     }),
@@ -70,6 +71,7 @@ export function createConductorAgent(
       'Do not claim files exist on disk unless a worker tool result confirms them — Events history can outlive ephemeral container disk.',
       'Use ask_user when a decision is ambiguous. The user replies in payload.answer; if they choose "defer", proceed with your best judgment.',
       'Respect brief updates delivered as steer messages.',
+      'When the user sends a new request as a steer, acknowledge it and act on it — do not ignore follow-up tasks.',
       'Summarize progress for the user after workers return.',
     ].join(' '),
     tools: [delegate, askUser],

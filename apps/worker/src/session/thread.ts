@@ -61,6 +61,12 @@ export interface SessionState {
   readonly playbookVersion: number
   readonly playbookRunId: string | null
   readonly conductorThreadId: string | null
+  /** Monotonic counter; bumped when a conductor ends so the next spawn gets a fresh thread id. */
+  readonly conductorGeneration: number
+  /** Why the next conductor spawn is happening (initial | failed | cancelled | completed). */
+  readonly conductorSpawnReason: string | null
+  /** Task/idea/constraint messages held until a conductor exists. */
+  readonly queuedConductorMessages: readonly PendingMessage[]
   readonly briefVersion: number
   readonly briefText: string
   readonly pendingMessages: readonly PendingMessage[]
@@ -210,6 +216,9 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         playbookVersion: Predicate.isNumber(input.playbookVersion) ? input.playbookVersion : 0,
         playbookRunId: asString(input.playbookRunId),
         conductorThreadId: null,
+        conductorGeneration: 0,
+        conductorSpawnReason: 'initial',
+        queuedConductorMessages: [],
         briefVersion: 1,
         briefText: asString(input.goal) ?? 'Improve the repository',
         pendingMessages: [],
@@ -243,7 +252,12 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         }
 
         case 'shuttle.conductor.spawned': {
-          return { ...state, conductorThreadId: event.payload.childThreadId }
+          return {
+            ...state,
+            conductorThreadId: event.payload.childThreadId,
+            conductorSpawnReason: null,
+            queuedConductorMessages: [],
+          }
         }
 
         case 'shuttle.user.said': {
@@ -338,6 +352,10 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             }
           }
 
+          if (tag.kind === 'shuttle-conductor') {
+            return clearConductor(base, conductorEndReason(embedded?.type))
+          }
+
           if (embedded?.type === 'agent.spawn.requested') {
             const definitionName = asString(embeddedPayload.definitionName)
             const childThreadId = asString(embeddedPayload.childThreadId)
@@ -365,6 +383,10 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
               return base
             }
 
+            if (threadId === base.conductorThreadId) {
+              return clearConductor(base, conductorEndReason(embedded.type))
+            }
+
             return {
               ...base,
               workerThreadIds: base.workerThreadIds.filter((id) => id !== threadId),
@@ -376,7 +398,27 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         }
 
         case 'shuttle.routed': {
-          return { ...state, pendingRoute: null, mailboxEpoch: state.mailboxEpoch + 1 }
+          const route = state.pendingRoute
+
+          const shouldQueue =
+            route !== null &&
+            !state.conductorThreadId &&
+            (route.kind === 'task' || route.kind === 'idea' || route.kind === 'constraint')
+
+          return {
+            ...state,
+            pendingRoute: null,
+            mailboxEpoch: state.mailboxEpoch + 1,
+            queuedConductorMessages: shouldQueue
+              ? [
+                  ...state.queuedConductorMessages,
+                  {
+                    messageId: route.messageId,
+                    text: route.text,
+                  },
+                ]
+              : state.queuedConductorMessages,
+          }
         }
 
         case 'shuttle.brief.amended': {
@@ -425,45 +467,8 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         )
       }
 
-      if (!state.conductorThreadId) {
-        const childThreadId = deterministicThreadId(ctx.threadId, 'conductor')
-
-        const lessonBlock =
-          state.lessons.length > 0
-            ? `\n\nPlaybook v${state.playbookVersion}:\n${state.lessons.map((lesson) => `- ${lesson.text}`).join('\n')}`
-            : ''
-
-        const repoBlock =
-          state.repos.length > 0
-            ? `\n\nLinked repositories:\n${state.repos
-                .map((repo) => `- ${repo.fullName} (checkout at /workspace/repos/${repo.name})`)
-                .join('\n')}`
-            : `\n\nRepo: ${state.repoUrl ?? 'local demo workspace'}`
-
-        effects.push(
-          emit(
-            shuttleModule.input('playbook.loaded', {
-              version: state.playbookVersion,
-              lessons: state.lessons.map((lesson) => ({
-                id: lesson.id,
-                text: lesson.text,
-                scope: lesson.scope,
-              })),
-            }),
-            'playbook_loaded',
-          ),
-          emit(shuttleModule.input('conductor.spawned', { childThreadId }), 'conductor_spawned'),
-          spawn({
-            childThreadId,
-            kind: 'agent',
-            definitionName: 'conductor',
-            input: {
-              text: `${state.goal}${lessonBlock}${repoBlock}`,
-            },
-          }),
-        )
-      }
-
+      // Route before spawning so task/idea/constraint can queue onto state, then the next
+      // wake includes those messages in the conductor's spawn input.
       if (state.pendingRoute) {
         const route = state.pendingRoute
         const summary = routeForEffects(state, route, effects, ctx.threadId, ctx.runId)
@@ -482,6 +487,79 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         )
 
         return effects
+      }
+
+      // After a conductor dies, wait for queued follow-up work before respawning so a
+      // crashing conductor cannot tight-loop spawn → fail → spawn.
+      if (
+        !state.conductorThreadId &&
+        (state.conductorGeneration === 0 || state.queuedConductorMessages.length > 0)
+      ) {
+        const generation = state.conductorGeneration
+
+        const childThreadId =
+          generation === 0
+            ? deterministicThreadId(ctx.threadId, 'conductor')
+            : deterministicThreadId(ctx.threadId, 'conductor', String(generation))
+
+        const lessonBlock =
+          state.lessons.length > 0
+            ? `\n\nPlaybook v${state.playbookVersion}:\n${state.lessons.map((lesson) => `- ${lesson.text}`).join('\n')}`
+            : ''
+
+        const repoBlock =
+          state.repos.length > 0
+            ? `\n\nLinked repositories:\n${state.repos
+                .map((repo) => `- ${repo.fullName} (checkout at /workspace/repos/${repo.name})`)
+                .join('\n')}`
+            : `\n\nRepo: ${state.repoUrl ?? 'local demo workspace'}`
+
+        const restartBlock =
+          generation > 0
+            ? `\n\nPrevious conductor ended (${state.conductorSpawnReason ?? 'unknown'}). Continue from the current brief.`
+            : ''
+
+        const briefBlock =
+          state.briefText !== state.goal
+            ? `\n\nCurrent brief v${state.briefVersion}:\n${state.briefText}`
+            : ''
+
+        const queuedBlock =
+          state.queuedConductorMessages.length > 0
+            ? `\n\nQueued user messages:\n${state.queuedConductorMessages
+                .map((message) => `- ${message.text}`)
+                .join('\n')}`
+            : ''
+
+        effects.push(
+          emit(
+            shuttleModule.input('playbook.loaded', {
+              version: state.playbookVersion,
+              lessons: state.lessons.map((lesson) => ({
+                id: lesson.id,
+                text: lesson.text,
+                scope: lesson.scope,
+              })),
+            }),
+            'playbook_loaded',
+          ),
+          emit(
+            shuttleModule.input('conductor.spawned', {
+              childThreadId,
+              generation,
+              reason: state.conductorSpawnReason ?? 'initial',
+            }),
+            `conductor_spawned_${generation}`,
+          ),
+          spawn({
+            childThreadId,
+            kind: 'agent',
+            definitionName: 'conductor',
+            input: {
+              text: `${state.goal}${lessonBlock}${repoBlock}${briefBlock}${restartBlock}${queuedBlock}`,
+            },
+          }),
+        )
       }
 
       if (state.activeIntake) {
@@ -562,6 +640,30 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
               match: { threadId: workerId },
             },
             tag: { kind: 'shuttle-worker', childThreadId: workerId },
+          }),
+        )
+      }
+
+      if (state.conductorThreadId) {
+        effects.push(
+          wait({
+            waitId: createWaitId(
+              ctx.threadId,
+              `conductor_${state.conductorThreadId}_${state.conductorGeneration}`,
+            ),
+            on: {
+              type: [
+                'runtime.thread.completed',
+                'runtime.thread.failed',
+                'runtime.thread.cancelled',
+              ],
+              match: { threadId: state.conductorThreadId },
+            },
+            tag: {
+              kind: 'shuttle-conductor',
+              childThreadId: state.conductorThreadId,
+              generation: state.conductorGeneration,
+            },
           }),
         )
       }
@@ -680,6 +782,10 @@ function routeForEffects(
         ...state.workerThreadIds,
       ]
 
+      if (recipients.length === 0) {
+        return `brief v${nextVersion}; queued for conductor`
+      }
+
       for (const threadId of recipients) {
         effects.push(
           emit(
@@ -709,7 +815,7 @@ function routeForEffects(
 
     case 'task': {
       if (!state.conductorThreadId) {
-        return 'task queued (no conductor yet)'
+        return 'queued for conductor'
       }
 
       effects.push(
@@ -736,10 +842,37 @@ function routeForEffects(
           },
           `stop_${route.messageId}`,
         ),
-        cancel(target, `stop_cancel_${route.messageId}`),
       )
+
+      // Stopping the conductor abandons its turn but keeps the thread alive for follow-ups.
+      if (target !== state.conductorThreadId) {
+        effects.push(cancel(target, `stop_cancel_${route.messageId}`))
+      }
 
       return `stopped ${target}`
     }
+  }
+}
+
+function conductorEndReason(eventType: string | undefined): string {
+  switch (eventType) {
+    case 'runtime.thread.failed':
+      return 'failed'
+    case 'runtime.thread.cancelled':
+      return 'cancelled'
+    case 'runtime.thread.completed':
+      return 'completed'
+    default:
+      return 'ended'
+  }
+}
+
+function clearConductor(state: SessionState, reason: string): SessionState {
+  return {
+    ...state,
+    conductorThreadId: null,
+    conductorGeneration: state.conductorGeneration + 1,
+    conductorSpawnReason: reason,
+    reflectionLaunched: false,
   }
 }

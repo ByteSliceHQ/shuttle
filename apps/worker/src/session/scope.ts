@@ -52,6 +52,8 @@ export const shuttleCatalog = defineEventCatalog('shuttle', {
   }),
   'conductor.spawned': Schema.Struct({
     childThreadId: Schema.String,
+    generation: Schema.optional(Schema.Finite),
+    reason: Schema.optional(Schema.String),
   }),
   'reflection.launched': Schema.Struct({
     runId: Schema.String,

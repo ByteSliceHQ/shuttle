@@ -3,7 +3,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 
 import { z } from 'zod'
 
-import { agent, defineAgent } from '@swirls/looms/agent'
+import { agent, defineAgent, type Message } from '@swirls/looms/agent'
 import { approval } from '@swirls/looms/approval'
 import { evaluator } from '@swirls/looms/evaluator'
 import { createLooms } from '@swirls/looms/runtime'
@@ -19,19 +19,26 @@ const TextInput = z.object({
   workers: z.array(z.string()).optional(),
 })
 
-const stubConductor = defineAgent({
-  name: 'conductor',
-  input: TextInput,
-  instructions: 'Conduct.',
-  runTurn: ({ input }) => ({
-    message: {
-      role: 'assistant',
-      content: `Conductor ready for ${input.text ?? 'goal'}`,
-    },
-    done: true,
-    output: { ok: true },
-  }),
-})
+function lastUserText(messages: readonly Message[]): string {
+  return messages.findLast((message) => message.role === 'user')?.content ?? ''
+}
+
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 2_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    if (await predicate()) {
+      return
+    }
+
+    await sleep(20)
+  }
+
+  throw new Error('timed out waiting for condition')
+}
 
 const stubNarrator = defineAgent({
   name: 'narrator',
@@ -68,6 +75,21 @@ const stubReflector = defineAgent({
 
 describe('shuttle session routing', () => {
   test('routes a question to the narrator without requiring a model', async () => {
+    const stubConductor = defineAgent({
+      name: 'conductor',
+      input: TextInput,
+      instructions: 'Conduct.',
+      conversational: true,
+      runTurn: ({ input }) => ({
+        message: {
+          role: 'assistant',
+          content: `Conductor ready for ${input.text ?? 'goal'}`,
+        },
+        done: true,
+        output: { ok: true },
+      }),
+    })
+
     const looms = createLooms({
       modules: [
         agent({ definitions: [stubConductor, stubNarrator, stubWorker, stubReflector] }),
@@ -98,6 +120,256 @@ describe('shuttle session routing', () => {
 
       const messages = (await looms.project(runId, transcript)).messages
       expect(messages.some((message) => message.role === 'user')).toBe(true)
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('a follow-up task wakes an idle conversational conductor', async () => {
+    const seen: string[] = []
+
+    const stubConductor = defineAgent({
+      name: 'conductor',
+      input: TextInput,
+      instructions: 'Conduct.',
+      conversational: true,
+      maxTurns: 500,
+      runTurn: ({ messages, input }) => {
+        const text = lastUserText(messages) || String(input.text ?? '')
+        seen.push(text)
+
+        return {
+          message: { role: 'assistant', content: `ack: ${text.slice(0, 40)}` },
+          done: true,
+        }
+      },
+    })
+
+    const looms = createLooms({
+      modules: [
+        agent({ definitions: [stubConductor, stubNarrator, stubWorker, stubReflector] }),
+        evaluator({ definitions: [intake] }),
+        approval(),
+        shuttleSession({ definitions: [codingSession] }),
+      ],
+    })
+
+    try {
+      const { runId } = await looms.start(codingSession, {
+        goal: 'Build a todo app',
+        lessons: [],
+        playbookVersion: 0,
+      })
+
+      await waitFor(() => seen.some((text) => text.includes('Build a todo app')))
+
+      await looms.signal(runId, [
+        say({ messageId: 'task-1', text: 'add dark mode', forceKind: 'task' }),
+      ])
+
+      await waitFor(() => seen.some((text) => text.includes('add dark mode')))
+
+      const chips = (await looms.project(runId, routing)).chips
+
+      expect(chips.some((chip) => chip.kind === 'task' && chip.summary.includes('steered'))).toBe(
+        true,
+      )
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('stop on the conductor abandons the turn but keeps it alive for the next task', async () => {
+    const seen: string[] = []
+
+    const stubConductor = defineAgent({
+      name: 'conductor',
+      input: TextInput,
+      instructions: 'Conduct.',
+      conversational: true,
+      maxTurns: 500,
+      runTurn: ({ messages, input }) => {
+        const text = lastUserText(messages) || String(input.text ?? '')
+        seen.push(text)
+
+        return { message: { role: 'assistant', content: `ack: ${text.slice(0, 40)}` }, done: true }
+      },
+    })
+
+    const looms = createLooms({
+      modules: [
+        agent({ definitions: [stubConductor, stubNarrator, stubWorker, stubReflector] }),
+        evaluator({ definitions: [intake] }),
+        approval(),
+        shuttleSession({ definitions: [codingSession] }),
+      ],
+    })
+
+    try {
+      const { runId } = await looms.start(codingSession, {
+        goal: 'Build a todo app',
+        lessons: [],
+        playbookVersion: 0,
+      })
+
+      await waitFor(() => seen.some((text) => text.includes('Build a todo app')))
+
+      await looms.signal(runId, [say({ messageId: 'stop-1', text: 'stop', forceKind: 'stop' })])
+
+      await waitFor(async () => {
+        const chips = (await looms.project(runId, routing)).chips
+        return chips.some((chip) => chip.kind === 'stop')
+      })
+
+      await looms.signal(runId, [
+        say({ messageId: 'task-2', text: 'add dark mode', forceKind: 'task' }),
+      ])
+
+      await waitFor(() => seen.some((text) => text.includes('add dark mode')))
+
+      const events = await looms.getEvents(runId)
+
+      const conductorCancelled = events.some(
+        (event) =>
+          event.type === 'runtime.thread.cancelled' &&
+          typeof event.threadId === 'string' &&
+          event.threadId.includes('conductor'),
+      )
+
+      expect(conductorCancelled).toBe(false)
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('respawns the conductor after failure when a later task arrives', async () => {
+    const seen: string[] = []
+    let attempts = 0
+
+    const stubConductor = defineAgent({
+      name: 'conductor',
+      input: TextInput,
+      instructions: 'Conduct.',
+      conversational: true,
+      maxTurns: 500,
+      runTurn: ({ messages, input }) => {
+        attempts += 1
+        const text = lastUserText(messages) || String(input.text ?? '')
+        seen.push(text)
+
+        if (attempts === 1) {
+          throw new Error('conductor crashed')
+        }
+
+        return { message: { role: 'assistant', content: `ack: ${text.slice(0, 40)}` }, done: true }
+      },
+    })
+
+    const looms = createLooms({
+      modules: [
+        agent({ definitions: [stubConductor, stubNarrator, stubWorker, stubReflector] }),
+        evaluator({ definitions: [intake] }),
+        approval(),
+        shuttleSession({ definitions: [codingSession] }),
+      ],
+    })
+
+    try {
+      const { runId } = await looms.start(codingSession, {
+        goal: 'Build a todo app',
+        lessons: [],
+        playbookVersion: 0,
+      })
+
+      await waitFor(async () => {
+        const events = await looms.getEvents(runId)
+        return events.some((event) => event.type === 'runtime.thread.failed')
+      })
+
+      await looms.signal(runId, [
+        say({ messageId: 'task-3', text: 'add dark mode', forceKind: 'task' }),
+      ])
+
+      await waitFor(() => seen.some((text) => text.includes('add dark mode')))
+
+      expect(attempts).toBeGreaterThanOrEqual(2)
+
+      const events = await looms.getEvents(runId)
+      const restarts = events.filter((event) => event.type === 'shuttle.conductor.spawned')
+
+      expect(restarts.length).toBeGreaterThanOrEqual(2)
+
+      expect(
+        restarts.some((event) => {
+          const payload = event.payload as { generation?: number; reason?: string }
+          return (payload.generation ?? 0) > 0 || payload.reason === 'failed'
+        }),
+      ).toBe(true)
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('queues a task while the conductor is down and includes it in the respawn input', async () => {
+    const spawnInputs: string[] = []
+    let attempts = 0
+
+    const stubConductor = defineAgent({
+      name: 'conductor',
+      input: TextInput,
+      instructions: 'Conduct.',
+      conversational: true,
+      maxTurns: 500,
+      runTurn: ({ input }) => {
+        attempts += 1
+        const text = String(input.text ?? '')
+        spawnInputs.push(text)
+
+        if (attempts === 1) {
+          throw new Error('conductor crashed')
+        }
+
+        return { message: { role: 'assistant', content: 'ready again' }, done: true }
+      },
+    })
+
+    const looms = createLooms({
+      modules: [
+        agent({ definitions: [stubConductor, stubNarrator, stubWorker, stubReflector] }),
+        evaluator({ definitions: [intake] }),
+        approval(),
+        shuttleSession({ definitions: [codingSession] }),
+      ],
+    })
+
+    try {
+      const { runId } = await looms.start(codingSession, {
+        goal: 'Build a todo app',
+        lessons: [],
+        playbookVersion: 0,
+      })
+
+      await waitFor(async () => {
+        const events = await looms.getEvents(runId)
+        return events.some((event) => event.type === 'runtime.thread.failed')
+      })
+
+      await looms.signal(runId, [
+        say({ messageId: 'task-4', text: 'ship it on port 3001', forceKind: 'task' }),
+      ])
+
+      await waitFor(() =>
+        spawnInputs.some(
+          (text) => text.includes('ship it on port 3001') || text.includes('Queued user messages'),
+        ),
+      )
+
+      expect(
+        spawnInputs.some(
+          (text) =>
+            text.includes('ship it on port 3001') && text.includes('Previous conductor ended'),
+        ),
+      ).toBe(true)
     } finally {
       await looms.stop()
     }

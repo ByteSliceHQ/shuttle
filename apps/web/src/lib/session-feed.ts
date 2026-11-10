@@ -349,6 +349,26 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       }
     }
 
+    case 'shuttle.conductor.spawned': {
+      const generation = jsonNumber(payload.generation) ?? 0
+      const reason = jsonText(payload.reason)
+
+      if (generation <= 0) {
+        return feed
+      }
+
+      const reasonLabel = reason && reason !== 'initial' ? ` after ${reason}` : ''
+
+      return appendItem(feed, {
+        kind: 'notice',
+        id: event.id,
+        seq: event.seq,
+        ts: event.ts,
+        tone: 'info',
+        text: `Conductor restarted (generation ${generation})${reasonLabel}.`,
+      })
+    }
+
     case 'shuttle.reflection.launched': {
       const runId = jsonText(payload.runId)
 

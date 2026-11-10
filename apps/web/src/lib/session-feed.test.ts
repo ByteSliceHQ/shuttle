@@ -105,6 +105,28 @@ describe('session feed', () => {
     expect(feed.items).toHaveLength(0)
   })
 
+  test('shows a notice when the conductor restarts', () => {
+    const feed = fold([
+      event('shuttle.conductor.spawned', {
+        childThreadId: 'thr_conductor',
+        generation: 0,
+        reason: 'initial',
+      }),
+      event('shuttle.conductor.spawned', {
+        childThreadId: 'thr_conductor_1',
+        generation: 1,
+        reason: 'failed',
+      }),
+    ])
+
+    expect(feed.items).toHaveLength(1)
+
+    expect(feed.items[0]).toMatchObject({
+      kind: 'notice',
+      text: 'Conductor restarted (generation 1) after failed.',
+    })
+  })
+
   test('turns ask_user gates into answerable questions', () => {
     const pending = fold([
       event(
