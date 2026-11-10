@@ -35,7 +35,8 @@ describe('session feed', () => {
 
     expect(feed.items).toHaveLength(1)
     expect(feed.items[0]).toMatchObject({ kind: 'user', goal: true, text: 'Ship it' })
-    expect(feed.brief).toEqual([{ version: 1, text: 'Ship it' }])
+    expect(feed.brief).toHaveLength(1)
+    expect(feed.brief[0]).toMatchObject({ version: 1, text: 'Ship it' })
   })
 
   test('keeps steers that land before the routed event', () => {

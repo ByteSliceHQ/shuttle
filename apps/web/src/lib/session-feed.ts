@@ -93,6 +93,7 @@ export type FeedItem =
 export interface BriefRevision {
   readonly version: number
   readonly text: string
+  readonly ts: number
   readonly sourceMessageId?: string
 }
 
@@ -116,6 +117,7 @@ export interface SessionFeed {
 export interface PlaybookLessonRef {
   readonly id: string
   readonly text: string
+  readonly scope?: string
 }
 
 const initialFeed: SessionFeed = {
@@ -242,7 +244,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
           goal: true,
         }),
         rootThreadId: event.threadId,
-        brief: [{ version: 1, text: goal }],
+        brief: [{ version: 1, text: goal, ts: event.ts }],
       }
     }
 
@@ -326,7 +328,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
         ...feed,
         brief: [
           ...feed.brief.filter((revision) => revision.version !== version),
-          { version, text, sourceMessageId: jsonText(payload.sourceMessageId) },
+          { version, text, ts: event.ts, sourceMessageId: jsonText(payload.sourceMessageId) },
         ],
       }
     }
@@ -341,7 +343,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
             const fields = jsonFields(lesson)
             const id = jsonText(fields.id)
             const text = jsonText(fields.text)
-            return id && text ? [{ id, text }] : []
+            return id && text ? [{ id, text, scope: jsonText(fields.scope) }] : []
           }),
         },
       }

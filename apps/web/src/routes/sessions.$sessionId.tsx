@@ -1,28 +1,22 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { BookOpen, Check, Copy, FileText, Folder, Users } from 'lucide-react'
+import { Check, Copy, Folder, Users } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { AgentTree } from '@/components/agent-tree'
 import { Composer } from '@/components/composer'
 import { Conversation } from '@/components/conversation'
 import { EventStream } from '@/components/event-stream'
+import { SessionContextButtons } from '@/components/session-context'
 import { RepoChip } from '@/components/sidebar/repo-chip'
 import { useWorkspace } from '@/components/sidebar/workspace-context'
 import { StatusBadge } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
-import { PanelHeader, PanelTitle, SectionLabel } from '@/components/ui/panel'
+import { PanelHeader, PanelTitle } from '@/components/ui/panel'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { agentIdentities } from '@/lib/agents'
-import { cn, shortId } from '@/lib/cn'
+import { shortId } from '@/lib/cn'
 import { rememberSession } from '@/lib/recent-sessions'
-import {
-  currentBrief,
-  sessionFeed,
-  streamingText,
-  type BriefRevision,
-  type SessionFeed,
-} from '@/lib/session-feed'
+import { sessionFeed, streamingText, type SessionFeed } from '@/lib/session-feed'
 import type { RunStatus } from '@swirls/looms/core'
 import {
   type LoomsConnectionStatus,
@@ -84,7 +78,7 @@ function SessionWorkspace({ runId }: { runId: string }) {
         goal={goalText}
         status={summary.status}
         connection={summary.connection}
-        playbookVersion={feed.playbook.version}
+        feed={feed}
       />
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
         <ResizablePanel defaultSize="18" minSize={200} maxSize="30">
@@ -104,7 +98,6 @@ function SessionWorkspace({ runId }: { runId: string }) {
                 setSelectedSeq(undefined)
               }}
             />
-            <SessionContext feed={feed} />
           </aside>
         </ResizablePanel>
         <ResizableHandle />
@@ -150,13 +143,13 @@ function SessionHeader({
   goal,
   status,
   connection,
-  playbookVersion,
+  feed,
 }: {
   runId: string
   goal: string | undefined
   status: RunStatus
   connection: LoomsConnectionStatus
-  playbookVersion: number
+  feed: SessionFeed
 }) {
   const [copied, setCopied] = useState(false)
 
@@ -167,14 +160,7 @@ function SessionHeader({
         <StatusBadge status={status} />
         <ConnectionIndicator connection={connection} />
       </div>
-      {playbookVersion > 0 ? (
-        <Button variant="ghost" size="sm" asChild>
-          <Link to="/playbook">
-            <BookOpen />
-            Playbook v{playbookVersion}
-          </Link>
-        </Button>
-      ) : null}
+      <SessionContextButtons feed={feed} />
       <Button
         variant="ghost"
         size="sm"
@@ -270,54 +256,4 @@ function ConnectionIndicator({ connection }: { connection: LoomsConnectionStatus
       return exhaustive
     }
   }
-}
-
-function SessionContext({ feed }: { feed: SessionFeed }) {
-  const brief = currentBrief(feed)
-
-  return (
-    <div className="flex max-h-[45%] min-h-0 shrink-0 flex-col border-t">
-      <ScrollArea className="min-h-0 flex-1">
-        {brief ? <BriefCard brief={brief} revisions={feed.brief.length} /> : null}
-        {feed.playbook.lessons.length > 0 ? (
-          <>
-            <SectionLabel>Playbook v{feed.playbook.version}</SectionLabel>
-            <ul className="space-y-1.5 px-3 pb-3">
-              {feed.playbook.lessons.map((lesson) => (
-                <li
-                  key={lesson.id}
-                  className="text-muted-foreground flex gap-2 text-xs leading-relaxed"
-                >
-                  <span className="bg-route-constraint mt-1.5 size-1 shrink-0 rounded-full" />
-                  {lesson.text}
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : null}
-      </ScrollArea>
-    </div>
-  )
-}
-
-function BriefCard({ brief, revisions }: { brief: BriefRevision; revisions: number }) {
-  return (
-    <section>
-      <SectionLabel className="flex items-center gap-1.5">
-        <FileText className="size-3" />
-        Brief
-        <span
-          className={cn(
-            'ml-auto font-mono text-[10px] tabular-nums',
-            revisions > 1 ? 'text-route-idea' : 'text-muted-foreground',
-          )}
-        >
-          v{brief.version}
-        </span>
-      </SectionLabel>
-      <p className="text-foreground/85 px-3 pb-3 text-xs leading-relaxed whitespace-pre-wrap">
-        {brief.text}
-      </p>
-    </section>
-  )
 }
