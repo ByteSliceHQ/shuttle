@@ -18,6 +18,8 @@ export interface LoomsRunStub {
     definitionName: string
     input?: JsonValue
   }): Promise<{ runId: string }>
+  getLlmModel(): Promise<{ model: string }>
+  setLlmModel(model: string): Promise<{ model: string }>
 }
 
 export function loomsStub(namespace: DurableObjectNamespace, runId: string): LoomsRunStub {

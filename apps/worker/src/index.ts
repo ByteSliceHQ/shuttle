@@ -6,7 +6,7 @@ import {
 } from '@swirls/looms/cloudflare'
 
 import { ensurePlaybookQuietly, ensureWorkspaceQuietly } from './bootstrap'
-import { resolveProjectors } from './config'
+import { readStoredLlmModel, resolveProjectors, writeStoredLlmModel } from './config'
 import type { ShuttleEnv } from './env'
 import { sandboxStub } from './env'
 import { shuttleModules } from './modules'
@@ -33,6 +33,15 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
       launcher: durableObjectLauncher(env.LOOMS_RUN),
       projectors: resolveProjectors(env, { runId, storage: this.ctx.storage }),
     }
+  }
+
+  /** OpenRouter model id used by agent LLM turns for this run. */
+  async getLlmModel(): Promise<{ model: string }> {
+    return { model: await readStoredLlmModel(this.ctx.storage, this.env) }
+  }
+
+  async setLlmModel(model: string): Promise<{ model: string }> {
+    return { model: await writeStoredLlmModel(this.ctx.storage, model) }
   }
 }
 

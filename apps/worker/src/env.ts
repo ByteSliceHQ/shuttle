@@ -6,6 +6,10 @@ export interface ShuttleEnv {
   readonly REPLICA?: D1Database
   readonly OPENROUTER_API_KEY?: string
   readonly LOOMS_MODEL?: string
+  /** TypeSafe API key for Jev evaluator decisions (`TYPESAFE_AI_API_KEY`). */
+  readonly TYPESAFE_AI_API_KEY?: string
+  /** Optional Jev model id; defaults to `jev-latest`. */
+  readonly JEV_MODEL?: string
   readonly SHUTTLE_WORKSPACE_MODE?: string
   readonly SHUTTLE_PLAYBOOK_RUN_ID?: string
   readonly SHUTTLE_WORKSPACE_RUN_ID?: string

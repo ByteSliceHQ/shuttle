@@ -1,45 +1,39 @@
 import { describe, expect, test } from 'bun:test'
 
-import { intake } from './intake'
+import { classifyHeuristic, intake } from './intake'
 
 describe('intake heuristics', () => {
   test('classifies questions', () => {
-    const skipped = intake.skipModel?.({
-      text: 'What is worker 2 doing?',
-      activeWorkers: ['w2'],
-      hasConductor: true,
-    })
-
-    expect(skipped?.route).toBe('question')
+    expect(classifyHeuristic('What is worker 2 doing?')).toBe('question')
   })
 
   test('classifies ideas', () => {
-    const skipped = intake.skipModel?.({
-      text: 'Also use zod for validation',
-      activeWorkers: [],
-      hasConductor: true,
-    })
-
-    expect(skipped?.route).toBe('idea')
+    expect(classifyHeuristic('Also use zod for validation')).toBe('idea')
   })
 
   test('classifies corrections', () => {
-    const skipped = intake.skipModel?.({
-      text: 'Actually, do not edit package.json',
-      activeWorkers: ['w1'],
-      hasConductor: true,
-    })
-
-    expect(skipped?.route).toBe('correction')
+    expect(classifyHeuristic('Actually, do not edit package.json')).toBe('correction')
   })
 
   test('classifies stop', () => {
-    const skipped = intake.skipModel?.({
-      text: 'stop',
-      activeWorkers: ['w1'],
-      hasConductor: true,
-    })
+    expect(classifyHeuristic('stop')).toBe('stop')
+  })
 
-    expect(skipped?.route).toBe('stop')
+  test('skipModel only fast-paths stop', () => {
+    expect(
+      intake.skipModel?.({
+        text: 'stop',
+        activeWorkers: ['w1'],
+        hasConductor: true,
+      })?.route,
+    ).toBe('stop')
+
+    expect(
+      intake.skipModel?.({
+        text: 'What is worker 2 doing?',
+        activeWorkers: ['w2'],
+        hasConductor: true,
+      }),
+    ).toBeUndefined()
   })
 })

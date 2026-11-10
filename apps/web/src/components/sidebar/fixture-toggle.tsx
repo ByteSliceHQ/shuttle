@@ -63,6 +63,7 @@ export function FixtureToggle() {
       }
 
       event.preventDefault()
+
       setHidden((prev) => {
         const next = !prev
         writeHidden(next)

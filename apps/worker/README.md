@@ -35,7 +35,14 @@ Cloudflare Worker that hosts Shuttle sessions on Looms Durable Objects.
 
    ```bash
    wrangler secret put OPENROUTER_API_KEY
+   wrangler secret put TYPESAFE_AI_API_KEY
    ```
+
+   `OPENROUTER_API_KEY` powers agent LLM turns (model is selectable in the
+   session UI; default `LOOMS_MODEL` / `anthropic/claude-sonnet-5.5`).
+   `TYPESAFE_AI_API_KEY` powers TypeSafe Jev behind the Looms evaluator
+   (intake routing). Without it, intake falls back to local heuristics.
+   Optional `JEV_MODEL` (default `jev-latest`) selects the Jev model id.
 
 5. (Optional) Create a GitHub App for folder repo linking:
 

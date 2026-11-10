@@ -10,7 +10,8 @@ const IntakeInputSchema = z.object({
   hasConductor: z.boolean().default(true),
 })
 
-function classifyHeuristic(text: string): InterjectionKind {
+/** Local classifier used when Jev is unavailable (no TYPESAFE_AI_API_KEY). */
+export function classifyHeuristic(text: string): InterjectionKind {
   const trimmed = text.trim()
   const lower = trimmed.toLowerCase()
 
@@ -42,9 +43,18 @@ function classifyHeuristic(text: string): InterjectionKind {
   return 'task'
 }
 
+/** Pull the user message back out of the evaluator state string. */
+export function parseIntakeMessage(state: string): string {
+  const marker = '\nMessage: '
+  const index = state.lastIndexOf(marker)
+  return index >= 0 ? state.slice(index + marker.length) : state
+}
+
 export const intake = defineEvaluator({
   name: 'intake',
   description: 'Classify a user interjection for the Shuttle session router',
+  // TypeSafe Jev via vercelEvaluator; overridden by adapter default / JEV_MODEL.
+  model: 'jev-latest',
   input: IntakeInputSchema,
   state: ({ text, activeWorkers }) =>
     [
@@ -66,8 +76,15 @@ export const intake = defineEvaluator({
       },
     },
   },
+  // Fast-path only: cancel/stop should not wait on a model round-trip.
+  // Everything else goes through Jev (or the heuristic stub when no API key).
   skipModel: ({ text }) => {
     const kind = classifyHeuristic(text)
+
+    if (kind !== 'stop') {
+      return undefined
+    }
+
     return {
       route: kind,
       reason: 'skipped',

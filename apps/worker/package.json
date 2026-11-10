@@ -13,6 +13,7 @@
     "test": "bun test src"
   },
   "dependencies": {
+    "@ai-sdk/typesafe-ai": "^3.0.35",
     "@cloudflare/sandbox": "^1.0.3",
     "@openrouter/ai-sdk-provider": "^3.0.0",
     "@swirls/looms": "^0.11.0",

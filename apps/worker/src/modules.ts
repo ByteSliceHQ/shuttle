@@ -7,7 +7,7 @@ import { intake } from './agents/intake'
 import { createNarratorAgent } from './agents/narrator'
 import { createReflectorAgent } from './agents/reflector'
 import { createWorkerAgent } from './agents/worker'
-import { resolveLlm } from './config'
+import { resolveEvaluator, resolveLlm } from './config'
 import type { ShuttleEnv } from './env'
 import { reflect } from './reflect/module'
 import { codingSession, shuttleSession } from './session/module'
@@ -26,8 +26,9 @@ export function shuttleModules(
   runId: string,
   options: ShuttleModulesOptions = {},
 ) {
-  const llm = resolveLlm(env)
   const storage = options.storage
+  const llm = resolveLlm(env, storage)
+  const { evaluator: evaluatorAdapter, evaluatorPolicy } = resolveEvaluator(env)
   const conductor = createConductorAgent(env, runId, storage)
   const worker = createWorkerAgent(env, runId, storage)
   const narrator = createNarratorAgent(env, runId, storage)
@@ -38,7 +39,11 @@ export function shuttleModules(
       definitions: [conductor, worker, narrator, reflector],
       llm,
     }),
-    evaluator({ definitions: [intake] }),
+    evaluator({
+      definitions: [intake],
+      evaluator: evaluatorAdapter,
+      evaluatorPolicy,
+    }),
     approval(),
     shuttleSession({ definitions: [codingSession], storage }),
     reflect(),

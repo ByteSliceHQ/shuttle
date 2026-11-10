@@ -8,7 +8,7 @@
     "enabled": true,
   },
   "vars": {
-    "LOOMS_MODEL": "openai/gpt-4o-mini",
+    "LOOMS_MODEL": "anthropic/claude-sonnet-5.5",
     "SHUTTLE_WORKSPACE_MODE": "memory",
     "SHUTTLE_PLAYBOOK_RUN_ID": "shuttle-playbook",
     "SHUTTLE_WORKSPACE_RUN_ID": "shuttle-workspace",

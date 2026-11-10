@@ -14,7 +14,7 @@ flox activate
 
 bun install
 cp apps/worker/.dev.vars.example apps/worker/.dev.vars
-# optional: set OPENROUTER_API_KEY in apps/worker/.dev.vars
+# optional: set OPENROUTER_API_KEY and TYPESAFE_AI_API_KEY in apps/worker/.dev.vars
 
 bun run dev
 ```

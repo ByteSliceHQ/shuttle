@@ -156,3 +156,27 @@ export async function decideApproval(
     'Failed to decide approval',
   )
 }
+
+export async function fetchLlmModel(runId: string): Promise<{ model: string }> {
+  const response = await fetch(`/sessions/${encodeURIComponent(runId)}/llm-model`)
+
+  if (!response.ok) {
+    throw new Error(`Failed to load model: ${response.status}`)
+  }
+
+  return (await response.json()) as { model: string }
+}
+
+export async function setLlmModel(runId: string, model: string): Promise<{ model: string }> {
+  const response = await fetch(`/sessions/${encodeURIComponent(runId)}/llm-model`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to set model: ${response.status} ${await response.text()}`)
+  }
+
+  return (await response.json()) as { model: string }
+}

@@ -1,6 +1,13 @@
 # Copy to .dev.vars for local wrangler dev.
 OPENROUTER_API_KEY=
-LOOMS_MODEL=openai/gpt-4o-mini
+LOOMS_MODEL=anthropic/claude-sonnet-5.5
+
+# TypeSafe Jev for Looms evaluator decisions (intake routing).
+# Create a key at https://typesafe.ai — without it, intake uses local heuristics.
+TYPESAFE_AI_API_KEY=
+# Optional; defaults to jev-latest
+# JEV_MODEL=jev-latest
+
 SHUTTLE_WORKSPACE_MODE=memory
 SHUTTLE_PLAYBOOK_RUN_ID=shuttle-playbook
 SHUTTLE_WORKSPACE_RUN_ID=shuttle-workspace

@@ -18,6 +18,12 @@ export async function handleShuttleRoutes(
     return sessionTree(env, decodeURIComponent(treeMatch[1] ?? ''))
   }
 
+  const modelMatch = url.pathname.match(/^\/sessions\/([^/]+)\/llm-model$/)
+
+  if (modelMatch) {
+    return sessionLlmModel(request, env, decodeURIComponent(modelMatch[1] ?? ''))
+  }
+
   if (request.method === 'GET' && url.pathname === '/playbook') {
     return getPlaybook(env)
   }
@@ -27,6 +33,35 @@ export async function handleShuttleRoutes(
   }
 
   return null
+}
+
+async function sessionLlmModel(
+  request: Request,
+  env: ShuttleEnv,
+  runId: string,
+): Promise<Response> {
+  if (!runId) {
+    return Response.json({ error: 'Invalid session id' }, { status: 400 })
+  }
+
+  const stub = loomsStub(env.LOOMS_RUN, runId)
+
+  if (request.method === 'GET') {
+    return Response.json(await stub.getLlmModel())
+  }
+
+  if (request.method === 'PUT' || request.method === 'POST') {
+    const body = (await request.json().catch(() => null)) as { model?: unknown } | null
+    const model = typeof body?.model === 'string' ? body.model.trim() : ''
+
+    if (!model) {
+      return Response.json({ error: 'model is required' }, { status: 400 })
+    }
+
+    return Response.json(await stub.setLlmModel(model))
+  }
+
+  return Response.json({ error: 'Method not allowed' }, { status: 405 })
 }
 
 async function listSessions(env: ShuttleEnv): Promise<Response> {

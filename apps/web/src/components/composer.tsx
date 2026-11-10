@@ -1,12 +1,14 @@
 import { ArrowUp, Sparkles, Target } from 'lucide-react'
-import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 
 import type { AgentIdentity } from '@/lib/agents'
-import { say } from '@/lib/api'
+import { say, setLlmModel } from '@/lib/api'
 import { cn, errorMessage } from '@/lib/cn'
+import { readStoredLlmModel, writeStoredLlmModel, type OpenRouterModelId } from '@/lib/llm-models'
 import { routeStyles } from '@/lib/routes'
 import { interjectionKinds, isInterjectionKind, type InterjectionKind } from '@/lib/session-feed'
 
+import { ModelSwitcher } from './model-switcher'
 import { Button } from './ui/button'
 import { Kbd } from './ui/panel'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
@@ -28,9 +30,24 @@ export function Composer({
   const [text, setText] = useState('')
   const [kind, setKind] = useState<InterjectionKind | typeof AUTO>(AUTO)
   const [target, setTarget] = useState<string>(AUTO)
+  const [model, setModel] = useState<OpenRouterModelId>(() => readStoredLlmModel())
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const syncedRunId = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (syncedRunId.current === runId) {
+      return
+    }
+
+    syncedRunId.current = runId
+    const preferred = readStoredLlmModel()
+
+    void setLlmModel(runId, preferred).catch((cause: unknown) => {
+      setError(errorMessage(cause))
+    })
+  }, [runId])
 
   const targets = [...identities.values()].filter((identity) =>
     STEERABLE.has(identity.definitionName),
@@ -67,6 +84,16 @@ export function Composer({
       event.preventDefault()
       submit()
     }
+  }
+
+  function onModelChange(next: OpenRouterModelId) {
+    setModel(next)
+    writeStoredLlmModel(next)
+    setError(null)
+
+    void setLlmModel(runId, next).catch((cause: unknown) => {
+      setError(errorMessage(cause))
+    })
   }
 
   return (
@@ -110,7 +137,7 @@ export function Composer({
             aria-label="Message the session"
             className="placeholder:text-muted-foreground/70 block field-sizing-content max-h-48 min-h-12 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-[13.5px] leading-relaxed outline-none disabled:opacity-50"
           />
-          <div className="flex items-center gap-1 px-2 pb-2">
+          <div className="flex flex-wrap items-center gap-1 px-2 pb-2">
             <Select
               value={kind}
               onValueChange={(value) => setKind(isInterjectionKind(value) ? value : AUTO)}
@@ -160,6 +187,7 @@ export function Composer({
                 </SelectContent>
               </Select>
             ) : null}
+            <ModelSwitcher value={model} onChange={onModelChange} disabled={disabled} />
             <span className="text-muted-foreground ml-auto hidden items-center gap-1 pr-1 text-[11px] sm:inline-flex">
               <Kbd>↵</Kbd> send <Kbd>⇧↵</Kbd> newline
             </span>

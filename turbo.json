@@ -4,6 +4,8 @@
   "globalPassThroughEnv": [
     "OPENROUTER_API_KEY",
     "LOOMS_MODEL",
+    "TYPESAFE_AI_API_KEY",
+    "JEV_MODEL",
     "SHUTTLE_WORKSPACE_MODE",
     "SHUTTLE_PLAYBOOK_RUN_ID",
     "PATH",
