@@ -1,0 +1,259 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans:
+    'Inter Variable', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+
+  --color-status-running: var(--status-running);
+  --color-status-waiting: var(--status-waiting);
+  --color-status-completed: var(--status-completed);
+  --color-status-failed: var(--status-failed);
+  --color-status-cancelled: var(--status-cancelled);
+
+  --color-route-question: var(--route-question);
+  --color-route-idea: var(--route-idea);
+  --color-route-constraint: var(--route-constraint);
+  --color-route-correction: var(--route-correction);
+  --color-route-task: var(--route-task);
+  --color-route-stop: var(--route-stop);
+
+  --color-json-key: var(--json-key);
+  --color-json-string: var(--json-string);
+  --color-json-number: var(--json-number);
+  --color-json-boolean: var(--json-boolean);
+  --color-json-null: var(--json-null);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --ease-snappy: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+:root {
+  color-scheme: dark;
+  --radius: 0.625rem;
+
+  --background: oklch(0.155 0.004 265);
+  --foreground: oklch(0.94 0.006 265);
+  --card: oklch(0.185 0.005 265);
+  --card-foreground: oklch(0.94 0.006 265);
+  --popover: oklch(0.2 0.006 265);
+  --popover-foreground: oklch(0.94 0.006 265);
+  --primary: oklch(0.94 0.006 265);
+  --primary-foreground: oklch(0.2 0.006 265);
+  --secondary: oklch(0.235 0.006 265);
+  --secondary-foreground: oklch(0.94 0.006 265);
+  --muted: oklch(0.235 0.006 265);
+  --muted-foreground: oklch(0.66 0.012 265);
+  --accent: oklch(0.255 0.008 265);
+  --accent-foreground: oklch(0.96 0.006 265);
+  --destructive: oklch(0.66 0.19 25);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 11%);
+  --ring: oklch(0.62 0.12 250);
+  --sidebar: oklch(0.17 0.004 265);
+  --sidebar-foreground: oklch(0.94 0.006 265);
+  --brand: oklch(0.74 0.13 245);
+  --brand-foreground: oklch(0.18 0.03 250);
+
+  --status-running: oklch(0.74 0.13 245);
+  --status-waiting: oklch(0.8 0.14 85);
+  --status-completed: oklch(0.76 0.13 155);
+  --status-failed: oklch(0.68 0.18 25);
+  --status-cancelled: oklch(0.6 0.01 265);
+
+  --route-question: oklch(0.76 0.12 230);
+  --route-idea: oklch(0.8 0.13 85);
+  --route-constraint: oklch(0.74 0.12 300);
+  --route-correction: oklch(0.72 0.16 35);
+  --route-task: oklch(0.76 0.13 155);
+  --route-stop: oklch(0.68 0.18 20);
+
+  --json-key: oklch(0.8 0.06 280);
+  --json-string: oklch(0.8 0.1 150);
+  --json-number: oklch(0.8 0.1 230);
+  --json-boolean: oklch(0.82 0.11 70);
+  --json-null: oklch(0.6 0.01 265);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground overflow-hidden font-sans antialiased;
+    font-feature-settings:
+      'cv11' 1,
+      'ss01' 1;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: oklch(0.74 0.13 245 / 30%);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Anchored overlays grow from their trigger. */
+.pop {
+  transform-origin: var(--radix-popper-transform-origin);
+  animation: pop-in 150ms var(--ease-snappy);
+}
+
+/* New feed items settle in; transitions stay interruptible as items stream. */
+.rise-in {
+  transition:
+    opacity 220ms var(--ease-snappy),
+    transform 220ms var(--ease-snappy);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.float-in {
+  transition:
+    opacity 150ms var(--ease-snappy),
+    transform 150ms var(--ease-snappy),
+    scale 150ms var(--ease-snappy),
+    background-color 150ms ease;
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.stagger > * {
+  animation: rise-in 260ms var(--ease-snappy) both;
+}
+
+.stagger > *:nth-child(2) {
+  animation-delay: 40ms;
+}
+
+.stagger > *:nth-child(3) {
+  animation-delay: 80ms;
+}
+
+.stagger > *:nth-child(4) {
+  animation-delay: 120ms;
+}
+
+.stagger > *:nth-child(n + 5) {
+  animation-delay: 160ms;
+}
+
+/* Markdown wraps text in blocks, so the caret follows the last one. */
+.caret > :last-child::after,
+.caret:not(:has(> *))::after {
+  content: '';
+  display: inline-block;
+  width: 0.45em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.6;
+  animation: fade-in 900ms steps(2, jump-none) infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pop {
+    animation-name: fade-in;
+  }
+
+  .rise-in,
+  .float-in {
+    transition-property: opacity;
+  }
+
+  .stagger > * {
+    animation-name: fade-in;
+  }
+
+  .caret > :last-child::after,
+  .caret:not(:has(> *))::after {
+    animation: none;
+  }
+}
+
+.event-stream {
+  container-type: inline-size;
+}
+
+.event-offset,
+.event-thread {
+  display: none;
+}
+
+@container (min-width: 22rem) {
+  .event-offset {
+    display: inline;
+  }
+}
+
+@container (min-width: 32rem) {
+  .event-thread {
+    display: inline;
+  }
+}

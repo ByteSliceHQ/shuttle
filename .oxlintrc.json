@@ -1,0 +1,59 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "react", "unicorn", "oxc", "import"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/.flox/**",
+    "**/.turbo/**",
+    "**/.wrangler/**",
+    "**/routeTree.gen.ts",
+    "**/worker-configuration.d.ts",
+    ".agents/**",
+    ".claude/**",
+    ".cursor/**"
+  ],
+  "jsPlugins": [
+    {
+      "name": "@stylistic",
+      "specifier": "@stylistic/eslint-plugin"
+    }
+  ],
+  "rules": {
+    "curly": "error",
+    "no-underscore-dangle": ["warn", { "allow": ["_tag"] }],
+    "import/no-unassigned-import": ["warn", { "allow": ["**/*.css"] }],
+    "react/incompatible-library": "off",
+    "react/react-in-jsx-scope": "off",
+    "typescript/consistent-type-imports": ["error", { "disallowTypeAnnotations": true }],
+    "@stylistic/padding-line-between-statements": [
+      "error",
+      {
+        "blankLine": "always",
+        "prev": "*",
+        "next": [
+          "multiline-block-like",
+          "multiline-expression",
+          "multiline-const",
+          "multiline-let",
+          "multiline-var"
+        ]
+      },
+      {
+        "blankLine": "always",
+        "prev": [
+          "multiline-block-like",
+          "multiline-expression",
+          "multiline-const",
+          "multiline-let",
+          "multiline-var"
+        ],
+        "next": "*"
+      }
+    ]
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "shuttle",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-09",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+  },
+  "vars": {
+    "LOOMS_MODEL": "openai/gpt-4o-mini",
+    "SHUTTLE_WORKSPACE_MODE": "memory",
+    "SHUTTLE_PLAYBOOK_RUN_ID": "shuttle-playbook",
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "LOOMS_RUN",
+        "class_name": "LoomsRun",
+      },
+      {
+        "name": "SANDBOX",
+        "class_name": "SessionSandbox",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["LoomsRun", "SessionSandbox"],
+    },
+  ],
+  // Uncomment and create a D1 database for cross-run session lists and history tools:
+  // "d1_databases": [
+  //   {
+  //     "binding": "REPLICA",
+  //     "database_name": "looms-shuttle-replica",
+  //     "database_id": "<create with: wrangler d1 create looms-shuttle-replica>",
+  //   },
+  // ],
+  // For real Linux sandboxes (Docker required for `wrangler dev`):
+  // "containers": [
+  //   {
+  //     "class_name": "SessionSandbox",
+  //     "image": "./Dockerfile",
+  //     "scheduling_policy": "durable_object",
+  //   },
+  // ],
+}

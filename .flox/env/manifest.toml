@@ -1,0 +1,26 @@
+schema-version = "1.13.0"
+
+[install]
+bun.pkg-path = "bun"
+# Wrangler / Vite tooling expects a Node toolchain on PATH.
+nodejs.pkg-path = "nodejs"
+
+[vars]
+SHUTTLE_WORKER_PORT = "8790"
+SHUTTLE_WEB_PORT = "5180"
+
+[hook]
+on-activate = '''
+  echo "Shuttle"
+  echo "  bun install"
+  echo "  cp apps/worker/.dev.vars.example apps/worker/.dev.vars"
+  echo "  bun run dev   # worker :$SHUTTLE_WORKER_PORT + web :$SHUTTLE_WEB_PORT"
+'''
+
+[profile]
+common = '''
+  :
+'''
+
+[options]
+# systems left default

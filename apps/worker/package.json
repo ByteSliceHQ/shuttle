@@ -1,0 +1,28 @@
+{
+  "name": "@shuttle/worker",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Cloudflare-hosted Looms coding harness (Shuttle)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8790",
+    "deploy": "wrangler deploy",
+    "build": "bun x tsc -p tsconfig.json --noEmit",
+    "check-types": "bun x tsc -p tsconfig.json --noEmit",
+    "test": "bun test src"
+  },
+  "dependencies": {
+    "@cloudflare/sandbox": "^1.0.3",
+    "@openrouter/ai-sdk-provider": "^3.0.0",
+    "@swirls/looms": "^0.11.0",
+    "ai": "^7.0.0",
+    "effect": "4.0.0-rc.112",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260914.1",
+    "typescript": "7.0.2",
+    "wrangler": "^4.131.2"
+  }
+}
