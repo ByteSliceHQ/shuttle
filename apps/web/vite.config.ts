@@ -45,6 +45,8 @@ export default defineConfig({
       '/runs': api,
       '/sessions': api,
       '/playbook': api,
+      '/workspace': api,
+      '/github': api,
     },
   },
 })

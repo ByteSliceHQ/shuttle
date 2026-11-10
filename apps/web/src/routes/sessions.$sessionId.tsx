@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { BookOpen, Check, ChevronLeft, Copy, FileText, Users } from 'lucide-react'
+import { BookOpen, Check, Copy, FileText, Folder, Users } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { AgentTree } from '@/components/agent-tree'
@@ -21,9 +21,10 @@ import {
   type BriefRevision,
   type SessionFeed,
 } from '@/lib/session-feed'
+import { fetchWorkspace, workspaceTree } from '@/lib/workspace'
+import { RepoChip } from '@/routes/folders.$folderId'
 import type { RunStatus } from '@swirls/looms/core'
 import {
-  LoomsProvider,
   type LoomsConnectionStatus,
   useEventCounts,
   useLiveFold,
@@ -40,12 +41,7 @@ export const Route = createFileRoute('/sessions/$sessionId')({
 
 function SessionPage() {
   const { sessionId } = Route.useParams()
-
-  return (
-    <LoomsProvider endpoint="">
-      <SessionWorkspace key={sessionId} runId={sessionId} />
-    </LoomsProvider>
-  )
+  return <SessionWorkspace key={sessionId} runId={sessionId} />
 }
 
 function SessionWorkspace({ runId }: { runId: string }) {
@@ -163,18 +159,24 @@ function SessionHeader({
   playbookVersion: number
 }) {
   const [copied, setCopied] = useState(false)
+  const [workspaceRunId, setWorkspaceRunId] = useState<string | null>(null)
+
+  useEffect(() => {
+    void fetchWorkspace()
+      .then((result) => setWorkspaceRunId(result.runId))
+      .catch(() => setWorkspaceRunId(null))
+  }, [])
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
-      <Button variant="ghost" size="icon-sm" asChild>
-        <Link to="/" aria-label="All sessions">
-          <ChevronLeft />
-        </Link>
-      </Button>
       <div className="flex min-w-0 flex-1 items-center gap-2.5">
-        <h1 className="min-w-0 truncate text-[13px] font-medium" title={goal}>
-          {goal ?? 'Coding session'}
-        </h1>
+        {workspaceRunId ? (
+          <SessionFolderContext workspaceRunId={workspaceRunId} sessionRunId={runId} goal={goal} />
+        ) : (
+          <h1 className="min-w-0 truncate text-[13px] font-medium" title={goal}>
+            {goal ?? 'Coding session'}
+          </h1>
+        )}
         <StatusBadge status={status} />
         <ConnectionIndicator connection={connection} />
       </div>
@@ -200,6 +202,47 @@ function SessionHeader({
         {shortId(runId)}
       </Button>
     </header>
+  )
+}
+
+function SessionFolderContext({
+  workspaceRunId,
+  sessionRunId,
+  goal,
+}: {
+  workspaceRunId: string
+  sessionRunId: string
+  goal: string | undefined
+}) {
+  const store = useRunStore(workspaceRunId)
+  const tree = useProjection(store, workspaceTree)
+  const sessionMeta = tree.sessions[sessionRunId]
+  const folder = sessionMeta ? tree.folders[sessionMeta.folderId] : undefined
+
+  return (
+    <>
+      {folder ? (
+        <Link
+          to="/folders/$folderId"
+          params={{ folderId: folder.folderId }}
+          className="text-muted-foreground hover:text-foreground inline-flex max-w-36 items-center gap-1 truncate text-[12px]"
+        >
+          <Folder className="size-3.5 shrink-0" />
+          <span className="truncate">{folder.name}</span>
+          <span className="text-muted-foreground/60">/</span>
+        </Link>
+      ) : null}
+      <h1 className="min-w-0 truncate text-[13px] font-medium" title={goal}>
+        {goal ?? sessionMeta?.title ?? 'Coding session'}
+      </h1>
+      {folder && folder.repos.length > 0 ? (
+        <div className="hidden max-w-md flex-wrap items-center gap-1.5 lg:flex">
+          {folder.repos.slice(0, 2).map((repo) => (
+            <RepoChip key={repo.fullName} repo={repo} />
+          ))}
+        </div>
+      ) : null}
+    </>
   )
 }
 

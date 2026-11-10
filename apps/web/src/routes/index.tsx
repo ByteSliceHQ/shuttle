@@ -2,22 +2,34 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import {
   ArrowRight,
   BookOpen,
-  GitBranch,
+  Folder,
   LoaderCircle,
   MessageSquareMore,
   Network,
-  SquareStack,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { EmptyState, Kbd } from '@/components/ui/panel'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { fetchSessions, startSession, type IndexedSession } from '@/lib/api'
-import { errorMessage, shortId } from '@/lib/cn'
-import { recentSessions, rememberSession } from '@/lib/recent-sessions'
-import { relativeTime, runCreatedAt } from '@/lib/time'
+import { errorMessage } from '@/lib/cn'
+import { rememberSession } from '@/lib/recent-sessions'
+import {
+  createWorkspaceFolder,
+  fetchWorkspace,
+  rememberLastFolder,
+  startWorkspaceSession,
+  workspaceTree,
+} from '@/lib/workspace'
+import { preferredFolderId } from '@/routes/folders.$folderId'
+import { useProjection, useRunStore } from '@swirls/looms/react'
 
 export const Route = createFileRoute('/')({
   component: HomePage,
@@ -25,52 +37,54 @@ export const Route = createFileRoute('/')({
 
 const DEFAULT_GOAL = 'Add a zod schema for greet() and cover it with a small test.'
 
-interface SessionRow {
-  readonly runId: string
-  readonly goal?: string
-  readonly status?: string
-  readonly at?: number
-}
-
 function HomePage() {
-  const navigate = useNavigate()
-  const [goal, setGoal] = useState(DEFAULT_GOAL)
-  const [repoUrl, setRepoUrl] = useState('')
-  const [showRepo, setShowRepo] = useState(false)
-  const [indexed, setIndexed] = useState<readonly IndexedSession[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [now] = useState(() => Date.now())
+  const [workspaceRunId, setWorkspaceRunId] = useState<string | null>(null)
 
   useEffect(() => {
-    void fetchSessions()
-      .then((result) => setIndexed(result.sessions))
-      .catch(() => setIndexed([]))
+    void fetchWorkspace().then((result) => setWorkspaceRunId(result.runId))
   }, [])
 
-  const sessions = useMemo<readonly SessionRow[]>(() => {
-    const local = recentSessions()
-
-    const byId = new Map<string, SessionRow>(
-      local.map((entry) => [
-        entry.runId,
-        { runId: entry.runId, goal: entry.goal, at: entry.openedAt },
-      ]),
+  if (!workspaceRunId) {
+    return (
+      <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
+        Loading workspace…
+      </div>
     )
+  }
 
-    for (const entry of indexed) {
-      const existing = byId.get(entry.runId)
+  return <HomeComposer runId={workspaceRunId} />
+}
 
-      byId.set(entry.runId, {
-        runId: entry.runId,
-        goal: existing?.goal,
-        status: entry.status,
-        at: existing?.at ?? runCreatedAt(entry.runId),
-      })
+function HomeComposer({ runId }: { runId: string }) {
+  const navigate = useNavigate()
+  const store = useRunStore(runId)
+  const tree = useProjection(store, workspaceTree)
+
+  const folders = useMemo(
+    () =>
+      tree.folderOrder
+        .map((id) => tree.folders[id])
+        .filter((folder): folder is NonNullable<typeof folder> =>
+          Boolean(folder && !folder.archived),
+        ),
+    [tree],
+  )
+
+  const [goal, setGoal] = useState(DEFAULT_GOAL)
+  const [folderId, setFolderId] = useState<string>('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const selectedFolderId = folderId || preferredFolderId(tree) || ''
+
+  async function ensureFolder(): Promise<string> {
+    if (selectedFolderId) {
+      return selectedFolderId
     }
 
-    return [...byId.values()].toSorted((left, right) => (right.at ?? 0) - (left.at ?? 0))
-  }, [indexed])
+    const created = await createWorkspaceFolder(runId, 'General')
+    setFolderId(created)
+    return created
+  }
 
   function start() {
     const trimmed = goal.trim()
@@ -82,10 +96,14 @@ function HomePage() {
     setBusy(true)
     setError(null)
 
-    void startSession({ goal: trimmed, repoUrl: repoUrl.trim() || null })
-      .then(({ runId }) => {
-        rememberSession({ runId, goal: trimmed })
-        return navigate({ to: '/sessions/$sessionId', params: { sessionId: runId } })
+    void ensureFolder()
+      .then((resolvedFolderId) => {
+        rememberLastFolder(resolvedFolderId)
+        return startWorkspaceSession({ folderId: resolvedFolderId, goal: trimmed })
+      })
+      .then(({ runId: sessionId }) => {
+        rememberSession({ runId: sessionId, goal: trimmed })
+        return navigate({ to: '/sessions/$sessionId', params: { sessionId } })
       })
       .catch((cause: unknown) => setError(errorMessage(cause)))
       .finally(() => setBusy(false))
@@ -106,9 +124,8 @@ function HomePage() {
             What should the agents build?
           </h1>
           <p className="text-muted-foreground mt-2 max-w-xl text-sm leading-relaxed text-pretty">
-            Every session is a durable Looms run on your Cloudflare account. Interrupt it with
-            questions, ideas, and corrections at any time; a root session routes each one without
-            derailing the work.
+            Sessions live inside folders. Link GitHub repos to a folder and every agent spawned
+            there gets worktrees of those repos.
           </p>
 
           <div className="bg-card mt-6 rounded-xl border p-1.5 shadow-xl shadow-black/20">
@@ -120,23 +137,30 @@ function HomePage() {
               placeholder="Describe the change you want…"
               className="min-h-24 resize-none border-0 bg-transparent text-sm focus-visible:ring-0"
             />
-            {showRepo ? (
-              <div className="px-1.5 pb-1.5">
-                <Input
-                  autoFocus
-                  value={repoUrl}
-                  onChange={(event) => setRepoUrl(event.target.value)}
-                  placeholder="https://github.com/org/repo"
-                  aria-label="Repository URL"
-                  className="font-mono text-xs"
-                />
-              </div>
-            ) : null}
-            <div className="flex items-center gap-2 px-1.5 pb-0.5">
-              <Button variant="ghost" size="sm" onClick={() => setShowRepo(!showRepo)}>
-                <GitBranch />
-                {showRepo ? 'Use the demo workspace' : 'Use a repository'}
-              </Button>
+            <div className="flex flex-wrap items-center gap-2 px-1.5 pb-0.5">
+              {folders.length > 0 ? (
+                <Select
+                  value={selectedFolderId || undefined}
+                  onValueChange={(value) => setFolderId(value)}
+                >
+                  <SelectTrigger className="h-7 w-auto min-w-36 gap-1.5 text-xs">
+                    <Folder className="text-muted-foreground size-3.5" />
+                    <SelectValue placeholder="Folder" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {folders.map((folder) => (
+                      <SelectItem key={folder.folderId} value={folder.folderId}>
+                        {folder.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <span className="text-muted-foreground inline-flex items-center gap-1.5 text-[11px]">
+                  <Folder className="size-3.5" />
+                  Creates a General folder
+                </span>
+              )}
               <span className="text-muted-foreground ml-auto hidden items-center gap-1 text-[11px] sm:inline-flex">
                 <Kbd>⌘</Kbd>
                 <Kbd>↵</Kbd>
@@ -163,44 +187,35 @@ function HomePage() {
           </Feature>
         </section>
 
-        <section>
-          <div className="mb-2 flex items-center gap-2">
-            <SquareStack className="text-muted-foreground size-3.5" />
-            <h2 className="text-[13px] font-medium">Recent sessions</h2>
-            <span className="text-muted-foreground font-mono text-[11px] tabular-nums">
-              {sessions.length || ''}
-            </span>
+        {folders.length === 0 ? (
+          <div className="rounded-xl border border-dashed">
+            <EmptyState icon={<Folder />} title="No folders yet">
+              Start a session above, or create a folder from the sidebar.
+            </EmptyState>
           </div>
-          {sessions.length === 0 ? (
-            <div className="rounded-xl border border-dashed">
-              <EmptyState icon={<SquareStack />} title="No sessions yet">
-                Start one above. Bind a D1 replica to list sessions across browsers.
-              </EmptyState>
-            </div>
-          ) : (
+        ) : (
+          <section>
+            <h2 className="mb-2 text-[13px] font-medium">Folders</h2>
             <ul className="bg-card/40 divide-y overflow-hidden rounded-xl border">
-              {sessions.map((session) => (
-                <li key={session.runId}>
+              {folders.map((folder) => (
+                <li key={folder.folderId}>
                   <Link
-                    to="/sessions/$sessionId"
-                    params={{ sessionId: session.runId }}
-                    className="hover:bg-accent/40 group flex items-center gap-3 px-4 py-3 transition-colors duration-150"
+                    to="/folders/$folderId"
+                    params={{ folderId: folder.folderId }}
+                    className="hover:bg-accent/40 flex items-center gap-3 px-4 py-3 transition-colors"
                   >
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px]">{session.goal ?? 'Coding session'}</p>
-                      <p className="text-muted-foreground mt-0.5 flex items-center gap-2 text-[11px]">
-                        <span className="font-mono">{shortId(session.runId)}</span>
-                        {session.at ? <span>{relativeTime(session.at, now)}</span> : null}
-                        {session.status ? <span>{session.status}</span> : null}
-                      </p>
-                    </div>
-                    <ArrowRight className="text-muted-foreground size-3.5 -translate-x-1 opacity-0 transition-[opacity,translate] duration-150 group-hover:translate-x-0 group-hover:opacity-100" />
+                    <Folder className="text-muted-foreground size-3.5" />
+                    <span className="min-w-0 flex-1 truncate text-[13px]">{folder.name}</span>
+                    <span className="text-muted-foreground text-[11px]">
+                      {folder.repos.length} repo{folder.repos.length === 1 ? '' : 's'}
+                    </span>
+                    <ArrowRight className="text-muted-foreground size-3.5" />
                   </Link>
                 </li>
               ))}
             </ul>
-          )}
-        </section>
+          </section>
+        )}
       </div>
     </div>
   )
@@ -211,9 +226,9 @@ function Feature({
   title,
   children,
 }: {
-  icon: ReactNode
+  icon: React.ReactNode
   title: string
-  children: ReactNode
+  children: React.ReactNode
 }) {
   return (
     <div className="bg-card/40 rounded-xl border p-4">
