@@ -10,13 +10,27 @@ const IntakeInputSchema = z.object({
   hasConductor: z.boolean().default(true),
 })
 
+/**
+ * Unambiguous stop commands ("stop", "cancel that", "abort now!") that can skip
+ * intake. Anything longer ("stop using tailwind") still goes through intake.
+ */
+export function isHardStop(text: string): boolean {
+  return /^(stop|cancel|abort|halt)(\s+(it|that|this|now|please|everything|all|the\s+workers?|workers?))*\s*[.!]*$/i.test(
+    text.trim(),
+  )
+}
+
 /** Local classifier used when Jev is unavailable (no TYPESAFE_AI_API_KEY). */
 export function classifyHeuristic(text: string): InterjectionKind {
   const trimmed = text.trim()
-  const lower = trimmed.toLowerCase()
 
-  if (/^(stop|cancel|abort)\b/.test(lower) || lower === 'stop') {
+  if (isHardStop(trimmed)) {
     return 'stop'
+  }
+
+  // "stop using tailwind" redirects the work rather than halting it.
+  if (/^(stop|cancel|abort|halt)\b/i.test(trimmed)) {
+    return 'correction'
   }
 
   if (
@@ -79,11 +93,11 @@ export const intake = defineEvaluator({
   // Fast-path only: cancel/stop should not wait on a model round-trip.
   // Everything else goes through Jev (or the heuristic stub when no API key).
   skipModel: ({ text }) => {
-    const kind = classifyHeuristic(text)
-
-    if (kind !== 'stop') {
+    if (!isHardStop(text)) {
       return undefined
     }
+
+    const kind = 'stop' as const
 
     return {
       route: kind,

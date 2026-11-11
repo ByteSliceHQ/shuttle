@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { classifyHeuristic, intake } from './intake'
+import { classifyHeuristic, intake, isHardStop } from './intake'
 
 describe('intake heuristics', () => {
   test('classifies questions', () => {
@@ -17,6 +17,19 @@ describe('intake heuristics', () => {
 
   test('classifies stop', () => {
     expect(classifyHeuristic('stop')).toBe('stop')
+    expect(classifyHeuristic('Cancel that!')).toBe('stop')
+  })
+
+  test('treats "stop doing X" as a correction, not a hard stop', () => {
+    expect(isHardStop('stop using tailwind, use css modules')).toBe(false)
+    expect(classifyHeuristic('stop using tailwind, use css modules')).toBe('correction')
+  })
+
+  test('isHardStop accepts short stop commands only', () => {
+    expect(isHardStop('stop')).toBe(true)
+    expect(isHardStop('  stop now. ')).toBe(true)
+    expect(isHardStop('abort the workers')).toBe(true)
+    expect(isHardStop('stop the build from failing')).toBe(false)
   })
 
   test('skipModel only fast-paths stop', () => {

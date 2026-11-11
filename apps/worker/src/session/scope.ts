@@ -30,6 +30,12 @@ export const shuttleCatalog = defineEventCatalog('shuttle', {
     messageId: Schema.String,
     childThreadId: Schema.String,
   }),
+  'intake.bypassed': Schema.Struct({
+    messageId: Schema.String,
+    kind: InterjectionKindSchema,
+    targetThreadId: Schema.NullOr(Schema.String),
+    text: Schema.String,
+  }),
   routed: Schema.Struct({
     messageId: Schema.String,
     kind: InterjectionKindSchema,

@@ -97,6 +97,17 @@ async function signal(runId: string, name: string, input: object, failure: strin
   }
 }
 
+export async function stopSession(runId: string, threadId: string): Promise<void> {
+  const response = await fetch(
+    `/sessions/${encodeURIComponent(runId)}/stop?threadId=${encodeURIComponent(threadId)}`,
+    { method: 'POST' },
+  )
+
+  if (!response.ok) {
+    throw new Error(`Failed to stop agent: ${response.status} ${await response.text()}`)
+  }
+}
+
 export async function say(
   runId: string,
   text: string,

@@ -15,6 +15,7 @@ import {
   type ThreadDefinition,
 } from '@swirls/looms/core'
 
+import { isHardStop } from '../agents/intake'
 import {
   buildConductorInput,
   conductorChildThreadId,
@@ -159,6 +160,14 @@ function steerEvent(threadId: string, content: string, interrupt: boolean, messa
     },
     threadId,
   }
+}
+
+function bypassIntakeKind(message: PendingMessage): InterjectionKind | null {
+  if (message.forceKind) {
+    return message.forceKind
+  }
+
+  return isHardStop(message.text) ? 'stop' : null
 }
 
 /** Drop a finished child from workers/narrators, and demote the conductor if it matches. */
@@ -338,6 +347,24 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
               forceKind: pending.forceKind,
               targetThreadId: pending.targetThreadId,
             },
+          }
+        }
+
+        case 'shuttle.intake.bypassed': {
+          const payload = event.payload
+
+          return {
+            ...state,
+            pendingMessages: state.pendingMessages.filter(
+              (message) => message.messageId !== payload.messageId,
+            ),
+            pendingRoute: {
+              messageId: payload.messageId,
+              kind: payload.kind,
+              targetThreadId: payload.targetThreadId,
+              text: payload.text,
+            },
+            mailboxEpoch: state.mailboxEpoch + 1,
           }
         }
 
@@ -579,6 +606,24 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
       const next = state.pendingMessages[0]
 
       if (next) {
+        const bypassKind = bypassIntakeKind(next)
+
+        if (bypassKind) {
+          effects.push(
+            emit(
+              shuttleModule.input('intake.bypassed', {
+                messageId: next.messageId,
+                kind: bypassKind,
+                targetThreadId: next.targetThreadId ?? null,
+                text: next.text,
+              }),
+              `intake_bypass_${next.messageId}`,
+            ),
+          )
+
+          return effects
+        }
+
         const childThreadId = deterministicThreadId(ctx.threadId, 'intake', next.messageId)
 
         effects.push(
@@ -742,6 +787,7 @@ function routeForEffects(
           definitionName: 'narrator',
           input: {
             text: route.text,
+            messageId: route.messageId,
             sessionRunId: runId,
             brief: state.briefText,
             workers: state.workerThreadIds,

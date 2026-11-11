@@ -140,6 +140,62 @@ describe('shuttle session routing', () => {
     }
   })
 
+  test('routes a mid-work question while the conductor turn is still in flight', async () => {
+    let releaseTurn: (() => void) | undefined
+    let turnStarted = false
+
+    const stubConductor = defineAgent({
+      name: 'conductor',
+      input: TextInput,
+      instructions: 'Conduct.',
+      conversational: true,
+      maxTurns: 500,
+      runTurn: async ({ messages, input }) => {
+        const text = lastUserText(messages) || String(input.text ?? '')
+
+        if (text.includes('Build a todo app')) {
+          turnStarted = true
+
+          await new Promise<void>((resolve) => {
+            releaseTurn = resolve
+          })
+        }
+
+        return {
+          message: { role: 'assistant', content: `ack: ${text.slice(0, 40)}` },
+          done: true,
+        }
+      },
+    })
+
+    const looms = createSessionLooms(stubConductor)
+
+    try {
+      const { runId } = await startCodingSession(looms)
+
+      await waitFor(() => turnStarted)
+      expect(releaseTurn).toBeDefined()
+
+      // Do not await: signal joins the in-flight wake and would otherwise wait on the
+      // blocked conductor turn. Non-blocking wake should still plan intake mid-flight.
+      void looms
+        .signal(runId, [say({ messageId: 'q-mid', text: 'still there?' })])
+        .catch(() => undefined)
+
+      // Intake + route must finish before the blocked conductor turn is released.
+      await waitFor(async () => {
+        const chips = (await looms.project(runId, routing)).chips
+        return chips.some((chip) => chip.messageId === 'q-mid' && chip.kind === 'question')
+      })
+
+      expect(releaseTurn).toBeDefined()
+
+      releaseTurn?.()
+    } finally {
+      await looms.stop()
+    }
+  })
+
   test('a follow-up task wakes an idle conversational conductor', async () => {
     const seen: string[] = []
 
@@ -177,6 +233,52 @@ describe('shuttle session routing', () => {
 
       expect(chips.some((chip) => chip.kind === 'task' && chip.summary.includes('steered'))).toBe(
         true,
+      )
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('heuristic stop bypasses intake and stops quickly', async () => {
+    const seen: string[] = []
+
+    const stubConductor = defineAgent({
+      name: 'conductor',
+      input: TextInput,
+      instructions: 'Conduct.',
+      conversational: true,
+      maxTurns: 500,
+      runTurn: ({ messages, input }) => {
+        const text = lastUserText(messages) || String(input.text ?? '')
+        seen.push(text)
+
+        return { message: { role: 'assistant', content: `ack: ${text.slice(0, 40)}` }, done: true }
+      },
+    })
+
+    const looms = createSessionLooms(stubConductor)
+
+    try {
+      const { runId } = await startCodingSession(looms)
+
+      await waitFor(() => seen.some((text) => text.includes('Build a todo app')))
+
+      const before = await looms.getEvents(runId)
+      const intakeBefore = before.filter((event) => event.type === 'shuttle.intake.started').length
+
+      await looms.signal(runId, [say({ messageId: 'stop-heuristic', text: 'stop now' })])
+
+      await waitFor(async () => {
+        const chips = (await looms.project(runId, routing)).chips
+        return chips.some((chip) => chip.kind === 'stop')
+      })
+
+      const after = await looms.getEvents(runId)
+
+      expect(after.some((event) => event.type === 'shuttle.intake.bypassed')).toBe(true)
+
+      expect(after.filter((event) => event.type === 'shuttle.intake.started').length).toBe(
+        intakeBefore,
       )
     } finally {
       await looms.stop()

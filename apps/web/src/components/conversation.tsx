@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router'
 import {
   ArrowRight,
   Check,
+  CircleStop,
   ChevronRight,
   CornerDownRight,
   LoaderCircle,
@@ -16,13 +17,20 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { AgentIdentity } from '@/lib/agents'
 import { agentRole } from '@/lib/agents'
-import { answerQuestion, reroute } from '@/lib/api'
+import { answerQuestion, reroute, stopSession } from '@/lib/api'
 import { cn, compactJson, errorMessage } from '@/lib/cn'
+import { classifyHeuristic } from '@/lib/intake-heuristic'
 import { jsonFields, jsonText } from '@/lib/json'
-import { routeStyles } from '@/lib/routes'
+import { provisionalRouteSummary, routeStyles } from '@/lib/routes'
+import {
+  deriveRouteWaitFallback,
+  type RouteWaitFallback,
+  type SessionActivityState,
+} from '@/lib/session-activity'
 import {
   interjectionKinds,
   type FeedItem,
+  type InterjectionKind,
   type RouteDelivery,
   type RouteInfo,
   type SessionFeed,
@@ -31,6 +39,7 @@ import {
   type ToolCallItem,
 } from '@/lib/session-feed'
 import { clockTime } from '@/lib/time'
+import { useNow } from '@/lib/use-now'
 
 import { FollowList } from './follow-list'
 import { Markdown } from './markdown'
@@ -61,11 +70,17 @@ type Row =
 interface ConversationContext {
   readonly runId: string
   readonly feed: SessionFeed
+  readonly activity: SessionActivityState
   readonly identities: ReadonlyMap<string, AgentIdentity>
   readonly onInspect: (threadId: string, seq?: number) => void
   readonly thoughtOpen: ReadonlyMap<string, boolean>
   readonly setThoughtOpen: (key: string, open: boolean) => void
   readonly liveByToolCardId: ReadonlyMap<string, StreamingTurn>
+  readonly inlineNarratorByMessageId: ReadonlyMap<
+    string,
+    readonly Extract<FeedItem, { kind: 'agent' }>[]
+  >
+  readonly streaming: Readonly<Record<string, StreamingTurn>>
 }
 
 function thoughtKey(threadId: string, turn: number): string {
@@ -139,17 +154,19 @@ function rowSpeakerThreadId(row: Row | undefined): string | undefined {
 export function Conversation({
   runId,
   feed,
+  activity,
   streaming,
   identities,
   onInspect,
 }: {
   runId: string
   feed: SessionFeed
+  activity: SessionActivityState
   streaming: Readonly<Record<string, StreamingTurn>>
   identities: ReadonlyMap<string, AgentIdentity>
   onInspect: (threadId: string, seq?: number) => void
 }) {
-  const { rows, liveByToolCardId } = useMemo(() => {
+  const { rows, liveByToolCardId, inlineNarratorByMessageId } = useMemo(() => {
     let lastUserIndex = -1
 
     for (let index = feed.items.length - 1; index >= 0; index -= 1) {
@@ -179,6 +196,10 @@ export function Conversation({
     const liveRows: Row[] = []
 
     for (const [threadId, turn] of Object.entries(streaming)) {
+      if (feed.narrators[threadId]) {
+        continue
+      }
+
       const hasThinking = turn.thinking.trim().length > 0
       const hasText = turn.text.trim().length > 0
 
@@ -206,11 +227,26 @@ export function Conversation({
       })
     }
 
-    return {
-      rows: [...feed.items, ...liveRows],
-      liveByToolCardId: attached,
+    const narratorRepliesByMessageId = new Map<string, Extract<FeedItem, { kind: 'agent' }>[]>()
+
+    for (const item of feed.items) {
+      if (item.kind === 'agent' && item.replyTo) {
+        const list = narratorRepliesByMessageId.get(item.replyTo) ?? []
+        list.push(item)
+        narratorRepliesByMessageId.set(item.replyTo, list)
+      }
     }
-  }, [feed.items, streaming])
+
+    const visibleItems = feed.items.filter(
+      (item) => !(item.kind === 'agent' && item.replyTo !== undefined),
+    )
+
+    return {
+      rows: [...visibleItems, ...liveRows],
+      liveByToolCardId: attached,
+      inlineNarratorByMessageId: narratorRepliesByMessageId,
+    }
+  }, [feed.items, feed.narrators, streaming])
 
   // History replayed on load renders still; live arrivals settle in once, even if virtualization remounts them.
   const [mountedAt] = useState(() => Date.now())
@@ -237,13 +273,27 @@ export function Conversation({
     () => ({
       runId,
       feed,
+      activity,
       identities,
       onInspect,
       thoughtOpen,
       setThoughtOpen,
       liveByToolCardId,
+      inlineNarratorByMessageId,
+      streaming,
     }),
-    [runId, feed, identities, onInspect, thoughtOpen, setThoughtOpen, liveByToolCardId],
+    [
+      runId,
+      feed,
+      activity,
+      identities,
+      onInspect,
+      thoughtOpen,
+      setThoughtOpen,
+      liveByToolCardId,
+      inlineNarratorByMessageId,
+      streaming,
+    ],
   )
 
   return (
@@ -388,68 +438,262 @@ function UserMessage({
   className?: string
 }) {
   return (
-    <div className={cn('group/user flex flex-col items-end gap-1.5', className)}>
-      <div className="text-muted-foreground flex items-center gap-2 pr-1 text-[11px]">
-        <span className="text-foreground/80 font-medium">{item.goal ? 'Goal' : 'You'}</span>
-        <span className="tabular-nums">{clockTime(item.ts)}</span>
-      </div>
-      <div
-        className={cn(
-          'max-w-[85%] rounded-2xl rounded-tr-md px-3.5 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap',
-          item.goal
-            ? 'bg-brand/12 text-foreground ring-brand/25 ring-1 ring-inset'
-            : 'bg-secondary text-secondary-foreground',
+    <div className={cn('group/user flex w-full flex-col gap-1.5', className)}>
+      <div className="flex flex-col items-end gap-1.5">
+        <div className="text-muted-foreground flex items-center gap-2 pr-1 text-[11px]">
+          <span className="text-foreground/80 font-medium">{item.goal ? 'Goal' : 'You'}</span>
+          <span className="tabular-nums">{clockTime(item.ts)}</span>
+        </div>
+        <div
+          className={cn(
+            'max-w-[85%] rounded-2xl rounded-tr-md px-3.5 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap',
+            item.goal
+              ? 'bg-brand/12 text-foreground ring-brand/25 ring-1 ring-inset'
+              : 'bg-secondary text-secondary-foreground',
+          )}
+        >
+          {item.text}
+        </div>
+        {item.goal ? null : (
+          <RouteChip
+            runId={context.runId}
+            messageId={item.messageId}
+            messageTs={item.ts}
+            text={item.text}
+            route={route}
+            deliveries={deliveries}
+            classifying={classifying}
+            forcedKind={item.forced}
+            identities={context.identities}
+            context={context}
+            onInspect={context.onInspect}
+          />
         )}
-      >
-        {item.text}
       </div>
-      {item.goal ? null : (
-        <RouteChip
-          runId={context.runId}
-          messageId={item.messageId}
-          route={route}
-          deliveries={deliveries}
-          classifying={classifying}
-          forced={item.forced !== undefined}
-          identities={context.identities}
+      {!item.goal ? <InlineNarratorReplies messageId={item.messageId} context={context} /> : null}
+    </div>
+  )
+}
+
+function InlineNarratorReplies({
+  messageId,
+  context,
+}: {
+  messageId: string
+  context: ConversationContext
+}) {
+  const narratorThreadId = context.feed.narratorFor[messageId]
+  const settled = context.inlineNarratorByMessageId.get(messageId) ?? []
+  const streamTurn = narratorThreadId ? context.streaming[narratorThreadId] : undefined
+
+  const hasStream =
+    streamTurn !== undefined &&
+    (streamTurn.thinking.trim().length > 0 || streamTurn.text.trim().length > 0)
+
+  if (settled.length === 0 && !hasStream) {
+    return null
+  }
+
+  return (
+    <div className="mt-1 w-full space-y-2 pl-0 sm:pl-2">
+      {settled.map((item) => (
+        <AgentBubble
+          key={item.id}
+          identity={context.identities.get(item.threadId)}
+          threadId={item.threadId}
+          turn={item.thought?.turn}
+          text={item.text}
+          thought={item.thought}
+          ts={item.ts}
+          seq={item.seq}
+          context={context}
           onInspect={context.onInspect}
         />
-      )}
+      ))}
+      {hasStream && narratorThreadId && streamTurn ? (
+        <AgentBubble
+          identity={context.identities.get(narratorThreadId)}
+          threadId={narratorThreadId}
+          turn={streamTurn.turn}
+          text={streamTurn.text}
+          thinking={streamTurn.thinking}
+          thinkingStartedAt={streamTurn.thinkingStartedAt}
+          thinkingEndedAt={streamTurn.thinkingEndedAt}
+          streaming
+          context={context}
+          onInspect={context.onInspect}
+        />
+      ) : null}
     </div>
+  )
+}
+
+function RouteWaitFallbackRow({
+  runId,
+  wait,
+  identities,
+  onInspect,
+}: {
+  runId: string
+  wait: RouteWaitFallback
+  identities: ReadonlyMap<string, AgentIdentity>
+  onInspect: (threadId: string, seq?: number) => void
+}) {
+  const [pending, setPending] = useState(false)
+  const label = identities.get(wait.threadId)?.label ?? 'worker'
+
+  return (
+    <span className="text-muted-foreground inline-flex max-w-full flex-wrap items-center justify-end gap-2 pr-1 text-[11px]">
+      <button
+        type="button"
+        onClick={() => onInspect(wait.threadId)}
+        className="hover:text-foreground text-left"
+      >
+        Waiting for {label} to finish{' '}
+        <span className="text-foreground/90 font-mono">{wait.toolName}</span>
+        <span className="tabular-nums"> · {formatSeconds(wait.elapsedMs)}</span>
+      </button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={pending}
+        className="h-6 gap-1 px-2 text-[11px]"
+        onClick={() => {
+          setPending(true)
+          void stopSession(runId, wait.threadId).finally(() => setPending(false))
+        }}
+      >
+        {pending ? (
+          <LoaderCircle className="size-3 animate-spin" />
+        ) : (
+          <CircleStop className="size-3" />
+        )}
+        Stop
+      </Button>
+    </span>
+  )
+}
+
+/** Owns the 1s clock so only unrouted messages re-render while waiting. */
+function PendingRouteChip({
+  runId,
+  messageTs,
+  text,
+  classifying,
+  forcedKind,
+  identities,
+  context,
+  onInspect,
+}: {
+  runId: string
+  messageTs: number
+  text: string
+  classifying: boolean
+  forcedKind?: InterjectionKind
+  identities: ReadonlyMap<string, AgentIdentity>
+  context: ConversationContext
+  onInspect: (threadId: string, seq?: number) => void
+}) {
+  const now = useNow(1_000)
+
+  const waitFallback = deriveRouteWaitFallback({
+    messageTs,
+    hasRoute: false,
+    now,
+    activity: context.activity,
+    feed: context.feed,
+  })
+
+  const provisionalKind = forcedKind ?? classifyHeuristic(text)
+  const style = routeStyles[provisionalKind]
+  const Icon = style.icon
+
+  return (
+    <div className="flex max-w-[85%] flex-col items-end gap-1.5">
+      <span
+        className={cn(
+          'inline-flex h-6 items-center gap-1.5 rounded-full bg-current/10 px-2 text-[11px] font-medium ring-1 ring-current/15 ring-inset',
+          style.tone,
+        )}
+        title={style.description}
+      >
+        {classifying ? (
+          <LoaderCircle className="size-3 animate-spin" />
+        ) : (
+          <Icon className="size-3" />
+        )}
+        <span>
+          {style.label}
+          <span className="opacity-70"> · {provisionalRouteSummary(provisionalKind)}</span>
+        </span>
+      </span>
+      {waitFallback ? (
+        <RouteWaitFallbackRow
+          runId={runId}
+          wait={waitFallback}
+          identities={identities}
+          onInspect={onInspect}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function RunningElapsed({ startedAt }: { startedAt: number }) {
+  const now = useNow(1_000)
+
+  return (
+    <span className="text-status-running ml-auto shrink-0 tabular-nums">
+      {formatSeconds(Math.max(0, now - startedAt))}
+    </span>
   )
 }
 
 function RouteChip({
   runId,
   messageId,
+  messageTs,
+  text,
   route,
   deliveries,
   classifying,
-  forced,
+  forcedKind,
   identities,
+  context,
   onInspect,
 }: {
   runId: string
   messageId: string
+  messageTs: number
+  text: string
   route: RouteInfo | undefined
   deliveries: readonly RouteDelivery[]
   classifying: boolean
-  forced: boolean
+  forcedKind?: InterjectionKind
   identities: ReadonlyMap<string, AgentIdentity>
+  context: ConversationContext
   onInspect: (threadId: string, seq?: number) => void
 }) {
   if (!route) {
     return (
-      <span className="text-muted-foreground inline-flex h-6 items-center gap-1.5 pr-1 text-[11px]">
-        <LoaderCircle className="size-3 animate-spin" />
-        {classifying ? 'Intake is classifying…' : 'Queued for intake'}
-      </span>
+      <PendingRouteChip
+        runId={runId}
+        messageTs={messageTs}
+        text={text}
+        classifying={classifying}
+        forcedKind={forcedKind}
+        identities={identities}
+        context={context}
+        onInspect={onInspect}
+      />
     )
   }
 
   const style = routeStyles[route.kind]
   const Icon = style.icon
   const targets = [...new Map(deliveries.map((entry) => [entry.threadId, entry])).values()]
+  const forced = forcedKind !== undefined
 
   return (
     <div className="flex max-w-[85%] flex-wrap items-center justify-end gap-1.5 text-[11px]">
@@ -963,6 +1207,9 @@ function ToolActivity({
                   <span className="text-muted-foreground min-w-0 truncate font-mono text-[11px]">
                     {call.error ?? toolArgsPreview(call)}
                   </span>
+                  {call.status === 'running' && call.startedAt !== undefined ? (
+                    <RunningElapsed startedAt={call.startedAt} />
+                  ) : null}
                 </button>
               </li>
             ))}

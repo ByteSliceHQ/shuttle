@@ -37,6 +37,7 @@ export interface ToolCallItem {
   readonly args: JsonValue
   readonly seq: number
   readonly status: 'running' | 'ok' | 'error'
+  readonly startedAt?: number
   readonly result?: JsonValue
   readonly error?: string
 }
@@ -258,6 +259,7 @@ function onToolCall(feed: SessionFeed, event: SessionEvent): SessionFeed {
     args: call.arguments ?? null,
     seq: event.seq,
     status: 'running',
+    startedAt: event.ts,
   }
 
   const newSteps: ActivityStep[] = thought

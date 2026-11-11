@@ -69,3 +69,26 @@ export const routeStyles: Record<InterjectionKind, RouteStyle> = {
     example: 'Stop, that approach is wrong.',
   },
 }
+
+/** Shown on RouteChip before `shuttle.routed` confirms intake. */
+export function provisionalRouteSummary(kind: InterjectionKind): string {
+  switch (kind) {
+    case 'question':
+      return 'answering without interrupting'
+    case 'idea':
+      return 'folding into the brief'
+    case 'constraint':
+      return 'adding to the brief'
+    case 'correction':
+      return 'interrupting the worker'
+    case 'task':
+      return 'steering the conductor'
+    case 'stop':
+      return 'stopping the agent'
+
+    default: {
+      const exhaustive: never = kind
+      return exhaustive
+    }
+  }
+}

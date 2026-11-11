@@ -1,5 +1,7 @@
 import type { AnyEventEnvelope, ProjectionDefinition, ThreadNode } from '@swirls/looms/core'
 
+import type { SessionFeed, ToolCallItem } from './session-feed'
+
 export type SessionActivity = 'working' | 'needs_input' | 'idle' | 'error'
 
 export type SessionIndicatorTone =
@@ -915,6 +917,105 @@ export interface FolderIndicatorRollup {
   readonly tone: 'needs_input' | 'failed' | 'working' | 'ready'
   readonly count: number
   readonly label: string
+}
+
+const ROUTE_WAIT_FALLBACK_MS = 5_000
+
+export interface RouteWaitFallback {
+  readonly threadId: string
+  readonly toolName: string
+  readonly elapsedMs: number
+}
+
+/** An agent thread (not a narrator) that is mid-turn or executing a tool, for route wait UX. */
+export function findInFlightToolCall(
+  activity: Omit<SessionActivityState, 'activity'>,
+): { readonly threadId: string; readonly toolName: string } | null {
+  let pick: { threadId: string; toolName: string } | null = null
+
+  for (const [threadId, thread] of Object.entries(activity.threads)) {
+    if (thread.kind !== 'agent' || thread.definitionName === 'narrator') {
+      continue
+    }
+
+    if (thread.inTurn) {
+      return { threadId, toolName: 'turn' }
+    }
+
+    if (!pick && Object.values(thread.openToolCalls).includes('executing')) {
+      pick = { threadId, toolName: 'tool' }
+    }
+  }
+
+  return pick
+}
+
+/** Prefer feed tool rows when names and timestamps are available. */
+export function findRunningToolInFeed(feed: SessionFeed): {
+  readonly threadId: string
+  readonly call: ToolCallItem
+} | null {
+  for (let index = feed.items.length - 1; index >= 0; index -= 1) {
+    const item = feed.items[index]
+
+    if (item?.kind !== 'tools') {
+      continue
+    }
+
+    const running = item.calls.filter((call) => call.status === 'running')
+
+    if (running.length === 0) {
+      continue
+    }
+
+    return { threadId: item.threadId, call: running[running.length - 1]! }
+  }
+
+  return null
+}
+
+export function shouldShowRouteWaitFallback(
+  messageTs: number,
+  hasRoute: boolean,
+  now: number,
+): boolean {
+  return !hasRoute && now - messageTs >= ROUTE_WAIT_FALLBACK_MS
+}
+
+export function deriveRouteWaitFallback(input: {
+  readonly messageTs: number
+  readonly hasRoute: boolean
+  readonly now: number
+  readonly activity: SessionActivityState
+  readonly feed: SessionFeed
+}): RouteWaitFallback | null {
+  if (!shouldShowRouteWaitFallback(input.messageTs, input.hasRoute, input.now)) {
+    return null
+  }
+
+  const fromFeed = findRunningToolInFeed(input.feed)
+
+  if (fromFeed) {
+    const elapsedMs = Math.max(0, input.now - (fromFeed.call.startedAt ?? input.messageTs))
+
+    return {
+      threadId: fromFeed.threadId,
+      toolName: fromFeed.call.name,
+      elapsedMs,
+    }
+  }
+
+  const fromActivity = findInFlightToolCall(input.activity)
+
+  if (!fromActivity) {
+    return null
+  }
+
+  return {
+    threadId: fromActivity.threadId,
+    toolName: fromActivity.toolName,
+    elapsedMs: Math.max(0, input.now - input.messageTs),
+  }
 }
 
 /**

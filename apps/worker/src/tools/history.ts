@@ -5,12 +5,18 @@ import type { JsonValue } from '@swirls/looms/core'
 
 import type { ShuttleEnv } from '../env'
 import { loomsStub } from '../looms-stub'
+import {
+  workAgentsForRead,
+  workInitialState,
+  type WorkProjectionState,
+} from '../session/work-projection'
 
 function asJson(value: HistoryQueryResult): JsonValue {
   return {
     available: value.available,
     rows: value.rows as JsonValue[],
     ...(value.note ? { note: value.note } : {}),
+    ...(value.readAt !== undefined ? { readAt: value.readAt } : {}),
   }
 }
 
@@ -18,6 +24,7 @@ export interface HistoryQueryResult {
   readonly available: boolean
   readonly rows: readonly Record<string, unknown>[]
   readonly note?: string
+  readonly readAt?: number
 }
 
 async function queryReplica(
@@ -82,6 +89,37 @@ async function eventsFromDurableObject(
     available: true,
     rows,
     note: env.REPLICA ? undefined : 'Served from the run Durable Object (D1 REPLICA not bound).',
+  }
+}
+
+function isDeltaEventType(type: string): boolean {
+  return type.endsWith('_delta')
+}
+
+async function workFromDurableObject(
+  env: ShuttleEnv,
+  runId: string,
+): Promise<{ available: boolean; state: WorkProjectionState; note?: string }> {
+  const stub = loomsStub(env.LOOMS_RUN, runId)
+
+  const response = await stub.fetch(
+    new Request(`https://shuttle.internal/runs/${encodeURIComponent(runId)}/projections/work`),
+  )
+
+  if (!response.ok) {
+    return {
+      available: false,
+      state: workInitialState,
+      note: `Could not read work projection (${response.status}).`,
+    }
+  }
+
+  const body = (await response.json()) as { value?: WorkProjectionState }
+
+  return {
+    available: true,
+    state: body.value ?? workInitialState,
+    note: env.REPLICA ? undefined : 'Served from the work projection (D1 REPLICA not bound).',
   }
 }
 
@@ -181,15 +219,19 @@ async function frictionFromDurableObject(
 export function createHistoryTools(env: ShuttleEnv, runId: string) {
   const queryEvents = defineTool({
     name: 'query_events',
-    description: 'Query recent events for this session (or a child run) from the D1 replica',
+    description:
+      'Query recent durable events for this session. Streaming delta events (types ending in _delta, including shuttle.turn.thinking_delta) are excluded by default; set includeDeltas to include them.',
     input: z.object({
       runId: z.string().optional(),
       typePrefix: z.string().optional(),
       limit: z.number().int().min(1).max(100).optional(),
+      includeDeltas: z.boolean().optional(),
     }),
     handler: async (input) => {
       const targetRunId = input.runId ?? runId
       const limit = input.limit ?? 40
+      const includeDeltas = input.includeDeltas ?? false
+      const overshoot = includeDeltas ? limit : limit * 3
 
       if (input.typePrefix) {
         const fromReplica = await queryReplica(
@@ -199,11 +241,18 @@ export function createHistoryTools(env: ShuttleEnv, runId: string) {
            WHERE run_id = ? AND type LIKE ?
            ORDER BY seq DESC
            LIMIT ?`,
-          [targetRunId, `${input.typePrefix}%`, limit],
+          [targetRunId, `${input.typePrefix}%`, overshoot],
         )
 
         if (fromReplica) {
-          return asJson(fromReplica)
+          const rows = includeDeltas
+            ? fromReplica.rows
+            : fromReplica.rows.filter((row) => !isDeltaEventType(String(row.type ?? '')))
+
+          return asJson({
+            ...fromReplica,
+            rows: rows.slice(0, limit),
+          })
         }
       } else {
         const fromReplica = await queryReplica(
@@ -213,19 +262,30 @@ export function createHistoryTools(env: ShuttleEnv, runId: string) {
            WHERE run_id = ?
            ORDER BY seq DESC
            LIMIT ?`,
-          [targetRunId, limit],
+          [targetRunId, overshoot],
         )
 
         if (fromReplica) {
-          return asJson(fromReplica)
+          const rows = includeDeltas
+            ? fromReplica.rows
+            : fromReplica.rows.filter((row) => !isDeltaEventType(String(row.type ?? '')))
+
+          return asJson({
+            ...fromReplica,
+            rows: rows.slice(0, limit),
+          })
         }
       }
 
-      const fromDo = await eventsFromDurableObject(env, targetRunId, limit)
+      const fromDo = await eventsFromDurableObject(env, targetRunId, overshoot)
 
-      const rows = input.typePrefix
+      let rows = input.typePrefix
         ? fromDo.rows.filter((row) => String(row.type ?? '').startsWith(input.typePrefix!))
         : fromDo.rows
+
+      if (!includeDeltas) {
+        rows = rows.filter((row) => !isDeltaEventType(String(row.type ?? '')))
+      }
 
       return asJson({
         ...fromDo,
@@ -302,5 +362,36 @@ export function createHistoryTools(env: ShuttleEnv, runId: string) {
     },
   })
 
-  return { queryEvents, runTree, friction }
+  const sessionStatus = defineTool({
+    name: 'session_status',
+    description:
+      'Read the live work projection for this session: each agent thread, task, status, recent tools, files touched, and stuck signals (with tool elapsed time computed at read time).',
+    input: z.object({
+      runId: z.string().optional(),
+    }),
+    handler: async (input) => {
+      const targetRunId = input.runId ?? runId
+      const now = Date.now()
+      const work = await workFromDurableObject(env, targetRunId)
+
+      if (!work.available) {
+        return asJson({
+          available: false,
+          rows: [],
+          note: work.note,
+        })
+      }
+
+      const agents = workAgentsForRead(work.state, now)
+
+      return asJson({
+        available: true,
+        rows: agents as unknown as Record<string, unknown>[],
+        readAt: now,
+        ...(work.note ? { note: work.note } : {}),
+      })
+    },
+  })
+
+  return { queryEvents, runTree, friction, sessionStatus }
 }

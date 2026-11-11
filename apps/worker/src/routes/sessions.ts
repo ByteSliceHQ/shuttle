@@ -24,6 +24,12 @@ export async function handleShuttleRoutes(
     return sessionLlmModel(request, env, decodeURIComponent(modelMatch[1] ?? ''))
   }
 
+  const stopMatch = url.pathname.match(/^\/sessions\/([^/]+)\/stop$/)
+
+  if (request.method === 'POST' && stopMatch) {
+    return sessionStop(request, env, decodeURIComponent(stopMatch[1] ?? ''))
+  }
+
   if (request.method === 'GET' && url.pathname === '/playbook') {
     return getPlaybook(env)
   }
@@ -33,6 +39,39 @@ export async function handleShuttleRoutes(
   }
 
   return null
+}
+
+async function sessionStop(request: Request, env: ShuttleEnv, runId: string): Promise<Response> {
+  if (!runId) {
+    return Response.json({ error: 'Invalid session id' }, { status: 400 })
+  }
+
+  const body = (await request.json().catch(() => null)) as { threadId?: unknown } | null
+  const fromQuery = new URL(request.url).searchParams.get('threadId')
+
+  const threadId =
+    (typeof fromQuery === 'string' && fromQuery.trim().length > 0 ? fromQuery.trim() : null) ??
+    (typeof body?.threadId === 'string' && body.threadId.trim().length > 0
+      ? body.threadId.trim()
+      : null)
+
+  if (!threadId) {
+    return Response.json({ error: 'threadId is required' }, { status: 400 })
+  }
+
+  const stub = loomsStub(env.LOOMS_RUN, runId)
+  const idempotencyKey = `ui-stop:${threadId}:${Date.now()}`
+
+  await stub.signal([
+    {
+      type: 'agent.turn.stopped',
+      threadId,
+      payload: {},
+      idempotencyKey,
+    },
+  ])
+
+  return Response.json({ ok: true, threadId })
 }
 
 async function sessionLlmModel(

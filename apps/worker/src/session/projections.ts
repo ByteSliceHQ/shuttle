@@ -2,6 +2,8 @@ import { Schema } from 'effect'
 
 import { shuttleModule } from './scope'
 
+export { work } from './work-projection'
+
 const LessonSchema = Schema.Struct({
   id: Schema.String,
   text: Schema.String,

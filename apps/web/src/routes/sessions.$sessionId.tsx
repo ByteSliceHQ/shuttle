@@ -123,6 +123,7 @@ function SessionWorkspace({ runId }: { runId: string }) {
             <Conversation
               runId={runId}
               feed={feed}
+              activity={activityState}
               streaming={streaming}
               identities={identities}
               onInspect={inspect}

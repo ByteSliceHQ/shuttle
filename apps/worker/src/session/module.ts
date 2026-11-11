@@ -12,7 +12,7 @@ import {
 import { bindThinkingObserver, clearThinkingObserver } from '../llm'
 import { createBindSandboxEffect } from './bind-sandbox'
 import { codingSession } from './definitions'
-import { brief, routing, transcript } from './projections'
+import { brief, routing, transcript, work } from './projections'
 import { shuttleModule } from './scope'
 import { reroute, say } from './signals'
 import { createSessionThread } from './thread'
@@ -96,6 +96,7 @@ export function shuttleSession(options: ShuttleSessionOptions = {}) {
       brief,
       routing,
       transcript,
+      work,
     },
     signals: {
       say,
@@ -108,5 +109,5 @@ export function shuttleSession(options: ShuttleSessionOptions = {}) {
   }))
 }
 
-export { say, reroute, brief, routing, transcript, codingSession }
+export { say, reroute, brief, routing, transcript, work, codingSession }
 export type { InterjectionKind, SessionState } from './thread'

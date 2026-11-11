@@ -157,7 +157,7 @@ export function Composer({
             onBlur={() => setInputFocused(false)}
             rows={1}
             disabled={disabled}
-            placeholder="Interject anytime: ask, suggest, constrain, correct…"
+            placeholder="Ask anything. Questions don't interrupt the agents."
             aria-label="Message the session"
             className="placeholder:text-muted-foreground/70 block field-sizing-content max-h-48 min-h-11 w-full resize-none bg-transparent px-3.5 pt-2.5 pb-1.5 text-[13.5px] leading-relaxed outline-none disabled:opacity-50"
           />
