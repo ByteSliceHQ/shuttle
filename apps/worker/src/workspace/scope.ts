@@ -25,10 +25,11 @@ const LessonSchema = Schema.Struct({
   scope: Schema.optional(Schema.String),
 })
 
-const SessionActivitySchema = Schema.Union([
+export const SessionActivitySchema = Schema.Union([
   Schema.Literal('working'),
   Schema.Literal('needs_input'),
   Schema.Literal('idle'),
+  Schema.Literal('error'),
 ])
 
 export const TabKindSchema = Schema.Union([
@@ -135,7 +136,7 @@ export type LinkedRepo = {
   readonly private: boolean
 }
 
-export type SessionActivity = 'working' | 'needs_input' | 'idle'
+export type SessionActivity = 'working' | 'needs_input' | 'idle' | 'error'
 
 export type ArtifactTabKind = 'events' | 'files' | 'file' | 'changes' | 'terminal' | 'browser'
 

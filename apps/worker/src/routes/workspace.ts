@@ -8,11 +8,12 @@ import { linkRepo, requestSession, unlinkRepo, type LinkedRepo } from '../worksp
 export async function handleWorkspaceRoutes(
   request: Request,
   env: ShuttleEnv,
+  ctx?: ExecutionContext,
 ): Promise<Response | null> {
   const url = new URL(request.url)
 
   if (request.method === 'GET' && url.pathname === '/workspace') {
-    return getWorkspace(env)
+    return getWorkspace(env, ctx)
   }
 
   if (request.method === 'POST' && url.pathname === '/workspace/sessions') {
@@ -36,10 +37,50 @@ export async function handleWorkspaceRoutes(
   return null
 }
 
-async function getWorkspace(env: ShuttleEnv): Promise<Response> {
+async function getWorkspace(env: ShuttleEnv, ctx?: ExecutionContext): Promise<Response> {
   await ensureWorkspaceQuietly(env)
   const runId = workspaceRunId(env)
+  ctx?.waitUntil(reconcileActiveWorkspaceSessions(env, runId))
   return Response.json({ runId })
+}
+
+async function reconcileActiveWorkspaceSessions(
+  env: ShuttleEnv,
+  workspaceId: string,
+): Promise<void> {
+  try {
+    const stub = loomsStub(env.LOOMS_RUN, workspaceId)
+
+    const response = await stub.fetch(
+      new Request(`https://shuttle.internal/runs/${workspaceId}/projections/workspaceTree`, {
+        method: 'GET',
+      }),
+    )
+
+    if (!response.ok) {
+      return
+    }
+
+    const body = (await response.json()) as {
+      value?: {
+        sessions?: Record<string, { runId?: unknown; status?: unknown; activity?: unknown }>
+      }
+    }
+
+    const activeRunIds = Object.values(body.value?.sessions ?? {}).flatMap((session) =>
+      typeof session.runId === 'string' &&
+      session.status === 'running' &&
+      session.activity === 'working'
+        ? [session.runId]
+        : [],
+    )
+
+    await Promise.allSettled(
+      activeRunIds.map((sessionRunId) => loomsStub(env.LOOMS_RUN, sessionRunId).status()),
+    )
+  } catch {
+    // Best-effort background reconciliation; live sessions still self-report via projectors.
+  }
 }
 
 async function createWorkspaceSession(request: Request, env: ShuttleEnv): Promise<Response> {

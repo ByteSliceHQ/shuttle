@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
 
-import { TabKindSchema, workspaceModule } from './scope'
+import { SessionActivitySchema, TabKindSchema, workspaceModule } from './scope'
 
 const LinkedRepoSchema = Schema.Struct({
   installationId: Schema.Finite,
@@ -25,12 +25,6 @@ const GithubAccountSchema = Schema.Struct({
 
 /** Matches the sidebar's inline input `maxLength`. */
 const DisplayNameSchema = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120))
-
-const SessionActivitySchema = Schema.Union([
-  Schema.Literal('working'),
-  Schema.Literal('needs_input'),
-  Schema.Literal('idle'),
-])
 
 export const createFolder = workspaceModule.signal({
   description: 'Create a workspace folder.',

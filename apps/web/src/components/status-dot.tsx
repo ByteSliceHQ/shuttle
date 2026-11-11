@@ -1,21 +1,87 @@
 import { cn } from '@/lib/cn'
-import { isLive, statusClass, statusDotClass } from '@/lib/status'
+import { statusClass, statusDotClass, statusLabel, statusTone } from '@/lib/status'
 
-/** Live statuses get a soft halo instead of a blink so the tree stays calm while agents work. */
+/** Thread and header indicator; only genuinely executing work animates. */
 export function StatusDot({ status, className }: { status: string; className?: string }) {
-  return (
-    <span className={cn('relative inline-flex size-1.5 shrink-0', className)} aria-hidden>
-      {isLive(status) ? (
+  const tone = statusTone(status)
+
+  switch (tone) {
+    case 'running':
+      return (
+        <svg
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden
+          className={cn('text-status-running spinner-ring size-3 shrink-0', className)}
+        >
+          <circle
+            cx="8"
+            cy="8"
+            r="5.5"
+            stroke="currentColor"
+            strokeOpacity="0.22"
+            strokeWidth="1.75"
+          />
+          <path
+            d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+          />
+        </svg>
+      )
+
+    case 'waiting':
+      return (
+        <svg
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden
+          className={cn('text-status-waiting size-3 shrink-0', className)}
+        >
+          <circle
+            cx="8"
+            cy="8"
+            r="5.75"
+            stroke="currentColor"
+            strokeOpacity="0.6"
+            strokeWidth="1.5"
+          />
+          <circle cx="8" cy="8" r="2.65" fill="currentColor" />
+        </svg>
+      )
+
+    case 'delegating':
+      return (
         <span
+          aria-hidden
           className={cn(
-            statusDotClass(status),
-            'absolute inset-0 size-full animate-ping opacity-60 motion-reduce:animate-none',
+            'border-status-running/60 inline-block size-2 shrink-0 rounded-full border-[1.5px]',
+            className,
           )}
         />
-      ) : null}
-      <span className={cn(statusDotClass(status), 'relative')} />
-    </span>
-  )
+      )
+
+    case 'idle':
+      return (
+        <span
+          aria-hidden
+          className={cn(
+            'border-muted-foreground/45 inline-block size-2 shrink-0 rounded-full border',
+            className,
+          )}
+        />
+      )
+
+    case 'completed':
+    case 'failed':
+      return <span aria-hidden className={cn(statusDotClass(status), className)} />
+
+    default: {
+      const exhaustive: never = tone
+      return exhaustive
+    }
+  }
 }
 
 export function StatusBadge({ status, className }: { status: string; className?: string }) {
@@ -28,7 +94,7 @@ export function StatusBadge({ status, className }: { status: string; className?:
       )}
     >
       <StatusDot status={status} />
-      {status}
+      {statusLabel(status)}
     </span>
   )
 }

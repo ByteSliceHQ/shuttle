@@ -48,14 +48,14 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
 }
 
 export default {
-  async fetch(request: Request, env: ShuttleEnv): Promise<Response> {
+  async fetch(request: Request, env: ShuttleEnv, ctx: ExecutionContext): Promise<Response> {
     const preview = await handlePreviewHost(request, env)
 
     if (preview) {
       return preview
     }
 
-    const workspace = await handleWorkspaceRoutes(request, env)
+    const workspace = await handleWorkspaceRoutes(request, env, ctx)
 
     if (workspace) {
       return workspace

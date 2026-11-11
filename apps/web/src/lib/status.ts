@@ -1,12 +1,16 @@
 import { cn } from './cn'
 
-type StatusTone = 'running' | 'waiting' | 'completed' | 'failed' | 'idle'
+export type StatusTone = 'running' | 'delegating' | 'waiting' | 'completed' | 'failed' | 'idle'
 
-function statusTone(status: string): StatusTone {
+export function statusTone(status: string): StatusTone {
   switch (status) {
+    case 'working':
     case 'running':
     case 'pending':
       return 'running'
+    case 'delegating':
+      return 'delegating'
+    case 'needs_input':
     case 'waiting':
     case 'blocked':
       return 'waiting'
@@ -14,6 +18,7 @@ function statusTone(status: string): StatusTone {
     case 'approved':
       return 'completed'
     case 'failed':
+    case 'error':
     case 'rejected':
       return 'failed'
     default:
@@ -23,18 +28,38 @@ function statusTone(status: string): StatusTone {
 
 const textClass: Record<StatusTone, string> = {
   running: 'text-status-running',
+  delegating: 'text-status-running/80',
   waiting: 'text-status-waiting',
   completed: 'text-status-completed',
   failed: 'text-status-failed',
-  idle: 'text-status-cancelled',
+  idle: 'text-muted-foreground',
 }
 
 const dotClass: Record<StatusTone, string> = {
   running: 'bg-status-running',
+  delegating: 'border-status-running/60 border-[1.5px]',
   waiting: 'bg-status-waiting',
   completed: 'bg-status-completed',
   failed: 'bg-status-failed',
-  idle: 'bg-status-cancelled',
+  idle: 'border-muted-foreground/45 border',
+}
+
+const LABELS: Record<string, string> = {
+  working: 'Working',
+  running: 'Working',
+  starting: 'Starting',
+  delegating: 'Delegating',
+  needs_input: 'Needs input',
+  waiting: 'Waiting',
+  idle: 'Idle',
+  completed: 'Completed',
+  failed: 'Failed',
+  error: 'Failed',
+  cancelled: 'Cancelled',
+}
+
+export function statusLabel(status: string): string {
+  return LABELS[status] ?? status
 }
 
 export function statusClass(status: string): string {

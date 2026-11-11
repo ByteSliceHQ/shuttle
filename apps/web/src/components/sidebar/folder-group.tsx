@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 
+import { ActivityDot } from '@/components/sidebar/activity-dot'
 import { InlineNameInput } from '@/components/sidebar/inline-name-input'
 import {
   revealOnRowHover,
@@ -25,6 +26,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/cn'
+import { isSessionUnread, type SeenSessionsSnapshot } from '@/lib/seen-sessions'
+import { resolveFolderIndicator, resolveSessionIndicator } from '@/lib/session-activity'
 import {
   archiveWorkspaceFolder,
   archiveWorkspaceSession,
@@ -45,6 +48,8 @@ export function FolderGroup({
   open,
   onToggle,
   pathname,
+  activeRunId,
+  seenSnapshot,
   now,
   onLinkRepo,
 }: {
@@ -54,6 +59,8 @@ export function FolderGroup({
   open: boolean
   onToggle: () => void
   pathname: string
+  activeRunId: string | null
+  seenSnapshot: SeenSessionsSnapshot
   now: number
   onLinkRepo: () => void
 }) {
@@ -66,6 +73,38 @@ export function FolderGroup({
   const folderActive = pathname === `/folders/${folder.folderId}`
   const FolderIcon = folder.archived ? Archive : open ? FolderOpen : Folder
   const repoCount = folder.repos.length
+
+  const activeFolderSessions = folder.archived
+    ? []
+    : sessions.filter((session) => !session.archived)
+
+  const collapsedRollup = !open
+    ? resolveFolderIndicator(
+        activeFolderSessions.map((session) =>
+          resolveSessionIndicator({
+            activity: session.activity,
+            status: session.status,
+            unread: isSessionUnread(session, { activeRunId, snapshot: seenSnapshot }),
+          }),
+        ),
+      )
+    : null
+
+  const hiddenRollup =
+    open && !showAll && hidden > 0
+      ? resolveFolderIndicator(
+          sessions
+            .slice(SESSION_PREVIEW)
+            .filter((session) => !session.archived)
+            .map((session) =>
+              resolveSessionIndicator({
+                activity: session.activity,
+                status: session.status,
+                unread: isSessionUnread(session, { activeRunId, snapshot: seenSnapshot }),
+              }),
+            ),
+        )
+      : null
 
   return (
     <div className="mb-0.5">
@@ -117,19 +156,21 @@ export function FolderGroup({
             </Link>
 
             <div className="relative mr-1 flex h-6 w-[3.25rem] shrink-0 items-center justify-end">
-              {repoCount > 0 ? (
-                <span
-                  title={repoCountLabel(repoCount)}
-                  aria-label={repoCountLabel(repoCount)}
-                  className={cn(
-                    'text-muted-foreground inline-flex items-center gap-0.5 font-mono text-[10px] tabular-nums',
-                    yieldOnRowHover,
-                  )}
-                >
-                  <GitBranch className="size-2.5" />
-                  {repoCount}
-                </span>
-              ) : null}
+              <div className={cn('inline-flex items-center gap-1.5', yieldOnRowHover)}>
+                {collapsedRollup ? (
+                  <ActivityDot tone={collapsedRollup.tone} label={collapsedRollup.label} />
+                ) : null}
+                {repoCount > 0 ? (
+                  <span
+                    title={repoCountLabel(repoCount)}
+                    aria-label={repoCountLabel(repoCount)}
+                    className="text-muted-foreground inline-flex items-center gap-0.5 font-mono text-[10px] tabular-nums"
+                  >
+                    <GitBranch className="size-2.5" />
+                    {repoCount}
+                  </span>
+                ) : null}
+              </div>
               <div className={cn('absolute inset-y-0 right-0 flex items-center', revealOnRowHover)}>
                 {folder.archived ? null : (
                   <Link
@@ -176,8 +217,10 @@ export function FolderGroup({
 
       {open ? (
         <div className="ml-[1.125rem] border-l border-white/5 pl-1">
-          {visible.map((session) =>
-            renamingSessionId === session.runId ? (
+          {visible.map((session) => {
+            const unread = isSessionUnread(session, { activeRunId, snapshot: seenSnapshot })
+
+            return renamingSessionId === session.runId ? (
               <div key={session.runId} className="py-0.5 pr-1">
                 <InlineNameInput
                   initialValue={session.title}
@@ -196,9 +239,10 @@ export function FolderGroup({
                 title={session.title}
                 activity={session.activity}
                 status={session.status}
+                unread={unread}
                 updatedAt={session.updatedAt}
                 now={now}
-                active={pathname === `/sessions/${session.runId}`}
+                active={activeRunId === session.runId}
                 dimmed={session.archived}
                 onRename={() => setRenamingSessionId(session.runId)}
                 onArchive={
@@ -207,8 +251,8 @@ export function FolderGroup({
                     : () => void archiveWorkspaceSession(runId, session.runId)
                 }
               />
-            ),
-          )}
+            )
+          })}
 
           {sessions.length === 0 && !folder.archived ? (
             <Link
@@ -226,8 +270,11 @@ export function FolderGroup({
             <button
               type="button"
               onClick={() => setShowAll((value) => !value)}
-              className="text-muted-foreground hover:text-foreground flex h-7 items-center rounded-md px-2 text-[11px] transition-colors duration-100"
+              className="text-muted-foreground hover:text-foreground flex h-7 items-center gap-1.5 rounded-md px-1.5 text-[11px] transition-colors duration-100"
             >
+              {hiddenRollup ? (
+                <ActivityDot tone={hiddenRollup.tone} label={hiddenRollup.label} />
+              ) : null}
               {showAll ? 'Show less' : `Show ${hidden} more`}
             </button>
           ) : null}

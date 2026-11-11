@@ -60,6 +60,36 @@ describe('workspaceTree reducer', () => {
     expect(state.folders.f1?.repos[0]?.fullName).toBe('byteslicehq/shuttle')
     expect(state.sessions.s1?.activity).toBe('needs_input')
     expect(state.sessions.s1?.status).toBe('running')
+
+    state = workspaceTree.reduce(
+      state,
+      event('workspace.session.activity', {
+        runId: 's1',
+        activity: 'working',
+        at: 120,
+      }),
+    )
+
+    state = workspaceTree.reduce(
+      state,
+      event('workspace.session.activity', {
+        runId: 's1',
+        activity: 'idle',
+        at: 180,
+      }),
+    )
+
+    state = workspaceTree.reduce(
+      state,
+      event('workspace.session.renamed', {
+        runId: 's1',
+        title: 'Refactored sidebar',
+      }),
+    )
+
+    expect(state.sessions.s1?.activity).toBe('idle')
+    expect(state.sessions.s1?.lastCompletedAt).toBe(180)
+    expect(state.sessions.s1?.title).toBe('Refactored sidebar')
   })
 })
 

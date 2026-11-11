@@ -113,11 +113,18 @@ function worstCase(now: number): WorkspaceTree {
     ),
     session('fx-s2', platform.folderId, 'Fix', now - 3 * MINUTE, { activity: 'needs_input' }),
     session(
+      'fx-s2b',
+      platform.folderId,
+      'Extract Stripe signature verification into shared middleware with replay tests',
+      now - 8 * MINUTE,
+      { activity: 'idle', unread: true },
+    ),
+    session(
       'fx-s3',
       platform.folderId,
       'Bump @northwind/design-tokens to 4.0.0-beta.12 across every package',
       now - 5 * HOUR,
-      { status: 'failed' },
+      { activity: 'error' },
     ),
     session(
       'fx-s4',
@@ -135,8 +142,12 @@ function worstCase(now: number): WorkspaceTree {
     session('fx-s7', platform.folderId, 'Rename getUserById to findUser', now - 40 * DAY, {
       status: 'requested',
     }),
-    session('fx-s8', 'fx-cjk', '修复登录页面在移动端的布局问题', now - 2 * HOUR),
-    session('fx-s9', 'fx-rtl', 'إصلاح خطأ في صفحة تسجيل الدخول', now - DAY),
+    session('fx-s8', 'fx-cjk', '修复登录页面在移动端的布局问题', now - 2 * HOUR, {
+      unread: true,
+    }),
+    session('fx-s9', 'fx-rtl', 'إصلاح خطأ في صفحة تسجيل الدخول', now - DAY, {
+      status: 'failed',
+    }),
     session('fx-s10', 'fx-archived', 'Ship launch checklist', now - 60 * DAY, {
       archived: true,
       status: 'completed',
@@ -174,7 +185,17 @@ function huge(now: number): WorkspaceTree {
       `fx-folder-${index % folders.length}`,
       `Session ${index + 1}: tighten retries in the ingest worker`,
       now - index * 37 * MINUTE,
-      { activity: index % 17 === 0 ? 'working' : 'idle' },
+      {
+        activity:
+          index % 29 === 0
+            ? 'needs_input'
+            : index % 17 === 0
+              ? 'working'
+              : index % 41 === 0
+                ? 'error'
+                : 'idle',
+        unread: index % 23 === 0 && index % 17 !== 0 && index % 29 !== 0 && index % 41 !== 0,
+      },
     ),
   )
 

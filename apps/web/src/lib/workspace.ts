@@ -29,6 +29,8 @@ export interface WorkspaceSession {
   readonly createdAt: number
   readonly updatedAt: number
   readonly archived: boolean
+  readonly lastCompletedAt?: number
+  readonly unread?: boolean
 }
 
 export interface GithubInstallation {
@@ -227,7 +229,8 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
           return state
         }
 
-        const now = Date.now()
+        const now =
+          typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
 
         return {
           ...state,
@@ -256,6 +259,8 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
           return state
         }
 
+        const at = typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
+
         return {
           ...state,
           sessions: {
@@ -264,7 +269,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
               ...session,
               status: 'running',
               activity: 'working',
-              updatedAt: Date.now(),
+              updatedAt: at,
             },
           },
         }
@@ -278,6 +283,8 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
           return state
         }
 
+        const at = typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
+
         return {
           ...state,
           sessions: {
@@ -285,7 +292,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
             [payload.runId]: {
               ...session,
               title: payload.title,
-              updatedAt: Date.now(),
+              updatedAt: at,
             },
           },
         }
@@ -299,6 +306,8 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
           return state
         }
 
+        const at = typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
+
         return {
           ...state,
           sessions: {
@@ -306,7 +315,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
             [payload.runId]: {
               ...session,
               archived: true,
-              updatedAt: Date.now(),
+              updatedAt: at,
             },
           },
         }
@@ -325,6 +334,8 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
           return state
         }
 
+        const finishedWork = session.activity === 'working' && payload.activity === 'idle'
+
         return {
           ...state,
           sessions: {
@@ -333,6 +344,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
               ...session,
               activity: payload.activity,
               updatedAt: payload.at,
+              ...(finishedWork ? { lastCompletedAt: payload.at } : {}),
             },
           },
         }
@@ -352,15 +364,19 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
           return state
         }
 
+        const nextStatus = payload.status ?? session.status
+        const at = typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
+
         return {
           ...state,
           sessions: {
             ...state.sessions,
             [runId]: {
               ...session,
-              status: payload.status ?? session.status,
-              activity: 'idle',
-              updatedAt: Date.now(),
+              status: nextStatus,
+              activity: nextStatus === 'failed' ? 'error' : 'idle',
+              updatedAt: at,
+              ...(nextStatus === 'completed' ? { lastCompletedAt: at } : {}),
             },
           },
         }

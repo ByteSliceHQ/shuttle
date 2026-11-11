@@ -8,7 +8,7 @@ import { Composer } from '@/components/composer'
 import { Conversation } from '@/components/conversation'
 import { SessionContextButtons } from '@/components/session-context'
 import { RepoChip } from '@/components/sidebar/repo-chip'
-import { useWorkspace } from '@/components/sidebar/workspace-context'
+import { useReportLiveSession, useWorkspace } from '@/components/sidebar/workspace-context'
 import { StatusBadge } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
 import { PanelHeader, PanelTitle } from '@/components/ui/panel'
@@ -16,6 +16,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/componen
 import { agentIdentities } from '@/lib/agents'
 import { shortId } from '@/lib/cn'
 import { rememberSession } from '@/lib/recent-sessions'
+import { sessionActivity, type SessionActivity } from '@/lib/session-activity'
 import { sessionFeed, streamingTurns, type SessionFeed } from '@/lib/session-feed'
 import type { RunStatus } from '@swirls/looms/core'
 import {
@@ -45,7 +46,9 @@ function SessionWorkspace({ runId }: { runId: string }) {
   const events = useRunEvents(store)
   const eventCounts = useEventCounts(store)
   const feed = useProjection(store, sessionFeed)
+  const activityState = useProjection(store, sessionActivity)
   const streaming = useLiveFold(store, streamingTurns)
+  const reportLiveSession = useReportLiveSession()
 
   const [selectedThreadId, setSelectedThreadId] = useState<string | undefined>()
   const [selectedSeq, setSelectedSeq] = useState<number | undefined>()
@@ -62,6 +65,15 @@ function SessionWorkspace({ runId }: { runId: string }) {
       rememberSession({ runId, goal: goalText })
     }
   }, [runId, goalText])
+
+  useEffect(() => {
+    if (summary.startedAt !== undefined) {
+      reportLiveSession(runId, {
+        status: summary.status,
+        activity: activityState.activity,
+      })
+    }
+  }, [runId, summary.startedAt, summary.status, activityState.activity, reportLiveSession])
 
   const labelFor = useCallback(
     (threadId: string | null) => (threadId ? identities.get(threadId)?.label : undefined),
@@ -80,6 +92,7 @@ function SessionWorkspace({ runId }: { runId: string }) {
         runId={runId}
         goal={goalText}
         status={summary.status}
+        activity={summary.startedAt !== undefined ? activityState.activity : 'working'}
         connection={summary.connection}
         feed={feed}
       />
@@ -92,6 +105,7 @@ function SessionWorkspace({ runId }: { runId: string }) {
             </PanelHeader>
             <AgentTree
               root={tree.root}
+              activityState={activityState}
               identities={identities}
               eventCounts={eventCounts}
               totalEventCount={events.length}
@@ -149,22 +163,27 @@ function SessionHeader({
   runId,
   goal,
   status,
+  activity,
   connection,
   feed,
 }: {
   runId: string
   goal: string | undefined
   status: RunStatus
+  activity: SessionActivity
   connection: LoomsConnectionStatus
   feed: SessionFeed
 }) {
   const [copied, setCopied] = useState(false)
 
+  const badgeStatus =
+    status === 'completed' || status === 'failed' || status === 'cancelled' ? status : activity
+
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
       <div className="flex min-w-0 flex-1 items-center gap-2.5">
         <SessionFolderContext sessionRunId={runId} goal={goal} />
-        <StatusBadge status={status} />
+        <StatusBadge status={badgeStatus} />
         <ConnectionIndicator connection={connection} />
       </div>
       <SessionContextButtons feed={feed} />

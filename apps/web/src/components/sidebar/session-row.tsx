@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/cn'
+import { resolveSessionIndicator } from '@/lib/session-activity'
 import { compactRelativeTime, fullDateTime } from '@/lib/time'
 
 /** Hidden until the row is hovered or focused; always shown on touch, where hover never fires. */
@@ -33,6 +34,7 @@ export function SessionRow({
   title,
   activity,
   status,
+  unread,
   updatedAt,
   now,
   active,
@@ -44,6 +46,7 @@ export function SessionRow({
   title: string
   activity: string
   status: string
+  unread?: boolean
   updatedAt: number
   now: number
   active: boolean
@@ -52,6 +55,8 @@ export function SessionRow({
   onArchive?: () => void
 }) {
   const hasMenu = Boolean(onRename || onArchive)
+  const tone = resolveSessionIndicator({ activity, status, unread })
+  const needsAttention = !active && (tone === 'needs_input' || tone === 'ready')
 
   return (
     <div className={cn(sidebarRowClass(active), 'float-in', dimmed && 'opacity-60')}>
@@ -59,10 +64,13 @@ export function SessionRow({
         to="/sessions/$sessionId"
         params={{ sessionId: runId }}
         title={title}
-        className="focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center gap-2 rounded-md pr-1 pl-2 outline-none focus-visible:ring-2"
+        className="focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md pr-1 pl-1.5 outline-none focus-visible:ring-2"
       >
-        <ActivityDot activity={activity} status={status} />
-        <span className="min-w-0 flex-1 truncate" dir="auto">
+        <ActivityDot tone={tone} />
+        <span
+          className={cn('min-w-0 flex-1 truncate', needsAttention && 'text-foreground/90')}
+          dir="auto"
+        >
           {title}
         </span>
       </Link>

@@ -4,6 +4,8 @@ import { useCallback, useMemo, useState } from 'react'
 import type { AgentIdentity } from '@/lib/agents'
 import { agentRole } from '@/lib/agents'
 import { cn } from '@/lib/cn'
+import { resolveThreadActivityTone, type SessionActivityState } from '@/lib/session-activity'
+import { statusLabel } from '@/lib/status'
 import type { ThreadNode } from '@swirls/looms/core'
 
 import { StatusDot } from './status-dot'
@@ -46,6 +48,7 @@ function flatten(root: ThreadNode | null, collapsed: ReadonlySet<string>): FlatN
 
 export function AgentTree({
   root,
+  activityState,
   identities,
   eventCounts,
   totalEventCount,
@@ -53,6 +56,7 @@ export function AgentTree({
   onSelect,
 }: {
   root: ThreadNode | null
+  activityState: SessionActivityState
   identities: ReadonlyMap<string, AgentIdentity>
   eventCounts: ReadonlyMap<string, number>
   totalEventCount: number
@@ -102,6 +106,7 @@ export function AgentTree({
             <TreeRow
               key={row.node.threadId}
               row={row}
+              activityState={activityState}
               identity={identities.get(row.node.threadId)}
               count={eventCounts.get(row.node.threadId) ?? 0}
               selected={selectedThreadId === row.node.threadId}
@@ -118,6 +123,7 @@ export function AgentTree({
 
 function TreeRow({
   row,
+  activityState,
   identity,
   count,
   selected,
@@ -126,6 +132,7 @@ function TreeRow({
   onSelect,
 }: {
   row: FlatNode
+  activityState: SessionActivityState
   identity: AgentIdentity | undefined
   count: number
   selected: boolean
@@ -137,6 +144,7 @@ function TreeRow({
   const role = identity?.role ?? agentRole(node.definitionName)
   const Icon = role.icon
   const hasChildren = node.children.length > 0
+  const tone = resolveThreadActivityTone(activityState, node)
 
   return (
     <div
@@ -145,7 +153,7 @@ function TreeRow({
         selected ? 'bg-accent text-foreground' : 'hover:bg-accent/50',
       )}
       style={{ paddingLeft: 4 + depth * INDENT }}
-      title={`${role.blurb}\n${node.kind}:${node.definitionName} · ${node.status}`}
+      title={`${role.blurb}\n${node.kind}:${node.definitionName} · ${statusLabel(tone)}`}
     >
       {Array.from({ length: depth }, (_, level) => (
         <span
@@ -180,7 +188,7 @@ function TreeRow({
       >
         <Icon className={cn('size-3.5 shrink-0', role.tone)} />
         <span className="min-w-0 truncate font-medium">{identity?.label ?? role.label}</span>
-        <StatusDot status={node.status} className="ml-0.5" />
+        <StatusDot status={tone} className="ml-0.5" />
         <span className="text-muted-foreground ml-auto shrink-0 font-mono text-[10px] tabular-nums">
           {count}
         </span>

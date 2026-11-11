@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useEffectEvent, useMemo, useState } from 'react'
 
+import { ActivityDot } from '@/components/sidebar/activity-dot'
 import { FixtureToggle } from '@/components/sidebar/fixture-toggle'
 import { FolderGroup } from '@/components/sidebar/folder-group'
 import { InlineNameInput } from '@/components/sidebar/inline-name-input'
@@ -29,6 +30,13 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/cn'
 import { recentSessions } from '@/lib/recent-sessions'
+import {
+  isSessionUnread,
+  markSessionSeen,
+  useSeenSessions,
+  type SeenSessionsSnapshot,
+} from '@/lib/seen-sessions'
+import { resolveFolderIndicator, resolveSessionIndicator } from '@/lib/session-activity'
 import { useMediaQuery } from '@/lib/use-media-query'
 import { useNow } from '@/lib/use-now'
 import {
@@ -53,6 +61,11 @@ function readExpanded(): Record<string, boolean> {
   }
 }
 
+function activeSessionRunId(pathname: string): string | null {
+  const match = pathname.match(/^\/sessions\/([^/]+)$/)
+  return match?.[1] ? decodeURIComponent(match[1]) : null
+}
+
 export function AppSidebarShell({ children }: { children: React.ReactNode }) {
   return (
     <LoomsProvider endpoint="">
@@ -71,6 +84,24 @@ function AppSidebar() {
   const navigate = useNavigate()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const narrow = useMediaQuery('(max-width: 767px)')
+  const workspace = useWorkspace()
+  const seenSnapshot = useSeenSessions()
+  const activeRunId = activeSessionRunId(pathname)
+  const activeSession = activeRunId ? workspace?.tree.sessions[activeRunId] : undefined
+
+  useEffect(() => {
+    if (!activeRunId) {
+      return
+    }
+
+    const latestAt = Math.max(
+      Date.now(),
+      activeSession?.lastCompletedAt ?? 0,
+      activeSession?.updatedAt ?? 0,
+    )
+
+    markSessionSeen(activeRunId, latestAt)
+  }, [activeRunId, activeSession?.lastCompletedAt, activeSession?.updatedAt])
 
   const [collapsedPref, setCollapsedPref] = useState(
     () => localStorage.getItem(COLLAPSED_KEY) === '1',
@@ -117,13 +148,28 @@ function AppSidebar() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
-  const rail = <SidebarRail pathname={pathname} onExpand={toggle} />
+  const rail = (
+    <SidebarRail
+      pathname={pathname}
+      activeRunId={activeRunId}
+      workspace={workspace}
+      seenSnapshot={seenSnapshot}
+      onExpand={toggle}
+    />
+  )
 
   if (collapsed) {
     return rail
   }
 
-  const panel = <SidebarPanel pathname={pathname} onCollapse={toggle} />
+  const panel = (
+    <SidebarPanel
+      pathname={pathname}
+      activeRunId={activeRunId}
+      seenSnapshot={seenSnapshot}
+      onCollapse={toggle}
+    />
+  )
 
   if (narrow) {
     return (
@@ -151,12 +197,55 @@ function AppSidebar() {
   return panel
 }
 
-function SidebarRail({ pathname, onExpand }: { pathname: string; onExpand: () => void }) {
+function SidebarRail({
+  pathname,
+  activeRunId,
+  workspace,
+  seenSnapshot,
+  onExpand,
+}: {
+  pathname: string
+  activeRunId: string | null
+  workspace: WorkspaceValue | null
+  seenSnapshot: SeenSessionsSnapshot
+  onExpand: () => void
+}) {
+  const rollup = useMemo(() => {
+    if (!workspace) {
+      return null
+    }
+
+    const tones = Object.values(workspace.tree.sessions)
+      .filter((session) => !session.archived && !workspace.tree.folders[session.folderId]?.archived)
+      .map((session) =>
+        resolveSessionIndicator({
+          activity: session.activity,
+          status: session.status,
+          unread: isSessionUnread(session, { activeRunId, snapshot: seenSnapshot }),
+        }),
+      )
+
+    return resolveFolderIndicator(tones)
+  }, [workspace, activeRunId, seenSnapshot])
+
+  const expandLabel = rollup ? `Expand sidebar · ${rollup.label}` : 'Expand sidebar'
+
   return (
     <aside className="bg-sidebar flex w-12 shrink-0 flex-col items-center gap-1 border-r py-2">
-      <IconTip label="Expand sidebar" shortcut={['⌘', 'B']} side="right">
-        <Button variant="ghost" size="icon-sm" aria-label="Expand sidebar" onClick={onExpand}>
+      <IconTip label={expandLabel} shortcut={['⌘', 'B']} side="right">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={expandLabel}
+          onClick={onExpand}
+          className="relative"
+        >
           <PanelLeftOpen />
+          {rollup ? (
+            <span className="bg-sidebar absolute -top-0.5 -right-0.5 rounded-full p-px">
+              <ActivityDot tone={rollup.tone} label={rollup.label} className="size-3" />
+            </span>
+          ) : null}
         </Button>
       </IconTip>
       <div className="bg-border my-1 h-px w-5" />
@@ -188,7 +277,17 @@ function SidebarRail({ pathname, onExpand }: { pathname: string; onExpand: () =>
   )
 }
 
-function SidebarPanel({ pathname, onCollapse }: { pathname: string; onCollapse: () => void }) {
+function SidebarPanel({
+  pathname,
+  activeRunId,
+  seenSnapshot,
+  onCollapse,
+}: {
+  pathname: string
+  activeRunId: string | null
+  seenSnapshot: SeenSessionsSnapshot
+  onCollapse: () => void
+}) {
   const workspace = useWorkspace()
   const error = useWorkspaceError()
 
@@ -226,7 +325,12 @@ function SidebarPanel({ pathname, onCollapse }: { pathname: string; onCollapse: 
       </nav>
 
       {workspace ? (
-        <FolderTree workspace={workspace} pathname={pathname} />
+        <FolderTree
+          workspace={workspace}
+          pathname={pathname}
+          activeRunId={activeRunId}
+          seenSnapshot={seenSnapshot}
+        />
       ) : (
         <FolderTreeSkeleton error={error} />
       )}
@@ -236,8 +340,18 @@ function SidebarPanel({ pathname, onCollapse }: { pathname: string; onCollapse: 
   )
 }
 
-function FolderTree({ workspace, pathname }: { workspace: WorkspaceValue; pathname: string }) {
-  const { runId, tree } = workspace
+function FolderTree({
+  workspace,
+  pathname,
+  activeRunId,
+  seenSnapshot,
+}: {
+  workspace: WorkspaceValue
+  pathname: string
+  activeRunId: string | null
+  seenSnapshot: SeenSessionsSnapshot
+}) {
+  const { runId, tree, liveSessions } = workspace
   const navigate = useNavigate()
   const now = useNow()
 
@@ -356,6 +470,8 @@ function FolderTree({ workspace, pathname }: { workspace: WorkspaceValue; pathna
                 open={open}
                 onToggle={() => setFolderOpen(folder.folderId, !open)}
                 pathname={pathname}
+                activeRunId={activeRunId}
+                seenSnapshot={seenSnapshot}
                 now={now}
                 onLinkRepo={() => setLinkFolderId(folder.folderId)}
               />
@@ -367,18 +483,21 @@ function FolderTree({ workspace, pathname }: { workspace: WorkspaceValue; pathna
               <div className="flex h-7 items-center px-1.5">
                 <SectionHeading>Unfiled</SectionHeading>
               </div>
-              {unfiled.map((session) => (
-                <SessionRow
-                  key={session.runId}
-                  runId={session.runId}
-                  title={session.goal}
-                  activity="idle"
-                  status="unknown"
-                  updatedAt={session.openedAt}
-                  now={now}
-                  active={pathname === `/sessions/${session.runId}`}
-                />
-              ))}
+              {unfiled.map((session) => {
+                const live = liveSessions[session.runId]
+                return (
+                  <SessionRow
+                    key={session.runId}
+                    runId={session.runId}
+                    title={session.goal}
+                    activity={live?.activity ?? 'idle'}
+                    status={live?.status ?? 'unknown'}
+                    updatedAt={session.openedAt}
+                    now={now}
+                    active={activeRunId === session.runId}
+                  />
+                )
+              })}
             </div>
           ) : null}
         </div>

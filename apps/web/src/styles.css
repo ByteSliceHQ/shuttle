@@ -185,6 +185,12 @@
   }
 }
 
+@keyframes spin-ring {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Anchored overlays grow from their trigger; exits settle quicker than entrances. */
 .pop {
   transform-origin: var(--radix-popper-transform-origin);
@@ -236,6 +242,11 @@
 /* Agents working right now; opacity only so the row never shifts. */
 .breathe {
   animation: breathe 1.6s var(--ease-in-out-strong) infinite;
+}
+
+/* Active thread work in the sidebar; GPU-only rotation off the main thread. */
+.spinner-ring {
+  animation: spin-ring 750ms linear infinite;
 }
 
 /* Expanded thinking prose fades in without resizing the FollowList row abruptly. */
@@ -400,7 +411,8 @@
     animation-name: fade-in;
   }
 
-  .breathe {
+  .breathe,
+  .spinner-ring {
     animation: none;
   }
 

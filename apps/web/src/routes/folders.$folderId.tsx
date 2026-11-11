@@ -12,12 +12,13 @@ import { EmptyState, Kbd } from '@/components/ui/panel'
 import { Textarea } from '@/components/ui/textarea'
 import { errorMessage } from '@/lib/cn'
 import { rememberSession } from '@/lib/recent-sessions'
+import { isSessionUnread, useSeenSessions } from '@/lib/seen-sessions'
+import { resolveSessionIndicator, sessionIndicatorLabel } from '@/lib/session-activity'
 import { compactRelativeTime, fullDateTime } from '@/lib/time'
 import { useNow } from '@/lib/use-now'
 import {
   rememberLastFolder,
   sessionsForFolder,
-  sessionStatusLabel,
   startWorkspaceSession,
   unlinkFolderRepo,
   type WorkspaceFolder,
@@ -60,6 +61,7 @@ function FolderPage() {
 function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: WorkspaceFolder }) {
   const navigate = useNavigate()
   const now = useNow()
+  const seenSnapshot = useSeenSessions()
   const [goal, setGoal] = useState(() => (folder.repos.length === 0 ? DEMO_GOAL : ''))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -185,30 +187,40 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
             </div>
           ) : (
             <ul className="bg-card/40 divide-y overflow-hidden rounded-xl border">
-              {sessions.map((session) => (
-                <li key={session.runId}>
-                  <Link
-                    to="/sessions/$sessionId"
-                    params={{ sessionId: session.runId }}
-                    className="hover:bg-accent/40 group flex items-center gap-3 px-4 py-3 transition-colors duration-100"
-                  >
-                    <ActivityDot activity={session.activity} status={session.status} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px]" dir="auto" title={session.title}>
-                        {session.title}
-                      </p>
-                      <p className="text-muted-foreground mt-0.5 text-[11px]">
-                        <time title={fullDateTime(session.updatedAt)}>
-                          {compactRelativeTime(session.updatedAt, now)}
-                        </time>
-                        {' · '}
-                        {sessionStatusLabel(session.status)}
-                      </p>
-                    </div>
-                    <ArrowRight className="text-muted-foreground size-3.5 shrink-0 -translate-x-1 opacity-0 transition-[opacity,translate] duration-150 group-hover:translate-x-0 group-hover:opacity-100" />
-                  </Link>
-                </li>
-              ))}
+              {sessions.map((session) => {
+                const unread = isSessionUnread(session, { snapshot: seenSnapshot })
+
+                const tone = resolveSessionIndicator({
+                  activity: session.activity,
+                  status: session.status,
+                  unread,
+                })
+
+                return (
+                  <li key={session.runId}>
+                    <Link
+                      to="/sessions/$sessionId"
+                      params={{ sessionId: session.runId }}
+                      className="hover:bg-accent/40 group flex items-center gap-3 px-4 py-3 transition-colors duration-100"
+                    >
+                      <ActivityDot tone={tone} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13px]" dir="auto" title={session.title}>
+                          {session.title}
+                        </p>
+                        <p className="text-muted-foreground mt-0.5 text-[11px]">
+                          <time title={fullDateTime(session.updatedAt)}>
+                            {compactRelativeTime(session.updatedAt, now)}
+                          </time>
+                          {' · '}
+                          {sessionIndicatorLabel(tone)}
+                        </p>
+                      </div>
+                      <ArrowRight className="text-muted-foreground size-3.5 shrink-0 -translate-x-1 opacity-0 transition-[opacity,translate] duration-150 group-hover:translate-x-0 group-hover:opacity-100" />
+                    </Link>
+                  </li>
+                )
+              })}
             </ul>
           )}
         </section>
