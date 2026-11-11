@@ -1,4 +1,4 @@
-import { ensureWorkspaceQuietly } from '../bootstrap'
+import { ensurePlaybookQuietly, ensureWorkspaceQuietly } from '../bootstrap'
 import { playbookRunId, workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { getInstallation, listInstallationRepos } from '../github/app'
@@ -43,8 +43,6 @@ async function getWorkspace(env: ShuttleEnv): Promise<Response> {
 }
 
 async function createWorkspaceSession(request: Request, env: ShuttleEnv): Promise<Response> {
-  await ensureWorkspaceQuietly(env)
-
   const body = (await request.json().catch(() => null)) as {
     folderId?: unknown
     goal?: unknown
@@ -57,7 +55,7 @@ async function createWorkspaceSession(request: Request, env: ShuttleEnv): Promis
     return Response.json({ error: 'folderId and goal are required' }, { status: 400 })
   }
 
-  const playbook = await loadPlaybook(env)
+  const [, playbook] = await Promise.all([ensureWorkspaceQuietly(env), loadPlaybook(env)])
   const runId = `session_${crypto.randomUUID()}`
   const stub = loomsStub(env.LOOMS_RUN, workspaceRunId(env))
 
@@ -158,30 +156,10 @@ async function loadPlaybook(env: ShuttleEnv): Promise<{
   version: number
   lessons: { id: string; text: string; scope?: string }[]
 }> {
+  await ensurePlaybookQuietly(env)
+
   const runId = playbookRunId(env)
   const stub = loomsStub(env.LOOMS_RUN, runId)
-
-  try {
-    const status = await stub.status()
-
-    if (!status) {
-      await stub.launch({
-        kind: 'reflect-playbook',
-        definitionName: 'playbook',
-        input: { title: 'Shuttle playbook' },
-      })
-    }
-  } catch {
-    try {
-      await stub.launch({
-        kind: 'reflect-playbook',
-        definitionName: 'playbook',
-        input: { title: 'Shuttle playbook' },
-      })
-    } catch {
-      // Another request may have created it.
-    }
-  }
 
   const request = new Request(`https://shuttle.internal/runs/${runId}/projections/activePlaybook`, {
     method: 'GET',

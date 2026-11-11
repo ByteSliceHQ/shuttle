@@ -1,8 +1,8 @@
 import { createTypeSafeAi } from '@ai-sdk/typesafe-ai'
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 
-import type { LlmAdapter } from '@swirls/looms/agent'
-import { vercelEvaluator, vercelLlm } from '@swirls/looms/ai-vercel'
+import type { LlmAdapter, LlmCompleteArgs } from '@swirls/looms/agent'
+import { vercelEvaluator } from '@swirls/looms/ai-vercel'
 import type {
   EvaluatorAdapter,
   EvaluatorEvaluateArgs,
@@ -14,42 +14,27 @@ import { d1ReplicaDatabase, sqliteReplica } from '@swirls/looms/projectors/repli
 import { classifyHeuristic, parseIntakeMessage } from './agents/intake'
 import { shuttleAttributes } from './attributes'
 import type { ShuttleEnv } from './env'
+import {
+  createReasoningLlm,
+  createStubThinkingLlm,
+  reasoningEffortFor,
+  type ReasoningEffort,
+} from './llm'
 import { createWorkspaceActivityProjector } from './workspace/activity'
 
 export const DEFAULT_LLM_MODEL = 'anthropic/claude-sonnet-5.5'
 export const DEFAULT_JEV_MODEL = 'jev-latest'
 export const LLM_MODEL_STORAGE_KEY = 'shuttle:llmModel'
 
-const StubLlm: LlmAdapter = {
-  complete: async ({ messages }) => {
-    const last = messages.toReversed().find((message) => message.role === 'user')
-
-    const text =
-      typeof last?.content === 'string'
-        ? last.content
-        : 'Stub LLM: set OPENROUTER_API_KEY for live model calls.'
-
-    return {
-      message: {
-        role: 'assistant',
-        content: `[stub] Acknowledged: ${text.slice(0, 240)}`,
-      },
-      done: true,
-      output: { stub: true },
-    }
-  },
+function reasoningSettingsFor(modelId: string): {
+  effort: ReasoningEffort
+} {
+  return { effort: reasoningEffortFor(modelId) }
 }
 
-/** Offline intake fallback when TYPESAFE_AI_API_KEY is unset. */
-async function heuristicIntakeEvaluate(args: EvaluatorEvaluateArgs) {
-  const kind = classifyHeuristic(parseIntakeMessage(args.state))
-
-  return {
-    answers: {
-      kind: { type: 'choice' as const, value: kind },
-    },
-    usage: { input: 0, output: 0 },
-  }
+function rejectsReasoningParams(cause: unknown): boolean {
+  const message = cause instanceof Error ? cause.message : String(cause)
+  return /reasoning|effort|unsupported|invalid.*param/i.test(message)
 }
 
 export function defaultLlmModel(env: ShuttleEnv): string {
@@ -60,20 +45,46 @@ export function resolveLlm(env: ShuttleEnv, storage?: DurableObjectStorage): Llm
   const apiKey = env.OPENROUTER_API_KEY
 
   if (!apiKey) {
-    return StubLlm
+    return createStubThinkingLlm()
   }
 
   const openrouter = createOpenRouter({ apiKey })
   const fallback = defaultLlmModel(env)
+  /** Models that rejected OpenRouter reasoning params stay on the plain chat path. */
+  const plainChatModels = new Set<string>()
 
   return {
-    complete: async (args) => {
+    complete: async (args: LlmCompleteArgs) => {
       const stored = storage ? await storage.get<string>(LLM_MODEL_STORAGE_KEY) : undefined
       const modelId = stored?.trim() || fallback
-      return vercelLlm({
-        model: openrouter.chat(modelId),
-        stream: true,
-      }).complete(args)
+
+      const withReasoning = !plainChatModels.has(modelId)
+
+      const model = withReasoning
+        ? openrouter.chat(modelId, {
+            reasoning: reasoningSettingsFor(modelId),
+            usage: { include: true },
+          })
+        : openrouter.chat(modelId, {
+            usage: { include: true },
+          })
+
+      const llm = createReasoningLlm({ model, stream: true })
+
+      try {
+        return await llm.complete(args)
+      } catch (cause) {
+        if (!withReasoning || !rejectsReasoningParams(cause)) {
+          throw cause
+        }
+
+        plainChatModels.add(modelId)
+
+        return createReasoningLlm({
+          model: openrouter.chat(modelId, { usage: { include: true } }),
+          stream: true,
+        }).complete(args)
+      }
     },
   }
 }
@@ -105,6 +116,18 @@ export function resolveEvaluator(env: ShuttleEnv): ResolvedEvaluator {
       model,
       provider: createTypeSafeAi({ apiKey }),
     }),
+  }
+}
+
+/** Offline intake fallback when TYPESAFE_AI_API_KEY is unset. */
+async function heuristicIntakeEvaluate(args: EvaluatorEvaluateArgs) {
+  const kind = classifyHeuristic(parseIntakeMessage(args.state))
+
+  return {
+    answers: {
+      kind: { type: 'choice' as const, value: kind },
+    },
+    usage: { input: 0, output: 0 },
   }
 }
 

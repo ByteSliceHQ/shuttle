@@ -185,6 +185,21 @@ function summarizeShuttle(event: SessionEvent): EventSummary | undefined {
       }
     case 'shuttle.reflection.launched':
       return { title: 'reflection launched', detail: jsonText(payload.runId) }
+    case 'shuttle.turn.thinking_delta':
+      return {
+        title: 'thinking delta',
+        detail: jsonText(payload.delta),
+      }
+
+    case 'shuttle.turn.thought': {
+      const durationMs = jsonNumber(payload.durationMs)
+      return {
+        title:
+          durationMs !== undefined ? `thought (${(durationMs / 1000).toFixed(1)}s)` : 'thought',
+        detail: jsonText(payload.text),
+      }
+    }
+
     default:
       return undefined
   }

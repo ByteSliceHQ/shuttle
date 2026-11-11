@@ -238,6 +238,15 @@
   animation: breathe 1.6s var(--ease-in-out-strong) infinite;
 }
 
+/* Expanded thinking prose fades in without resizing the FollowList row abruptly. */
+.thinking-trace-body {
+  transition: opacity 150ms var(--ease-snappy);
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
 /* The narrow-viewport sidebar slides over content instead of squeezing it. */
 .drawer-in {
   transition: transform 300ms var(--ease-drawer);
@@ -393,6 +402,10 @@
 
   .breathe {
     animation: none;
+  }
+
+  .thinking-trace-body {
+    transition: none;
   }
 
   .drawer-in {

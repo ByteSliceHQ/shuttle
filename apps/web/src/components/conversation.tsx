@@ -26,6 +26,8 @@ import {
   type RouteDelivery,
   type RouteInfo,
   type SessionFeed,
+  type StreamingTurn,
+  type ThoughtInfo,
   type ToolCallItem,
 } from '@/lib/session-feed'
 import { clockTime } from '@/lib/time'
@@ -49,7 +51,11 @@ type Row =
       readonly kind: 'stream'
       readonly id: string
       readonly threadId: string
+      readonly turn: number
       readonly text: string
+      readonly thinking: string
+      readonly thinkingStartedAt?: number
+      readonly thinkingEndedAt?: number
     }
 
 interface ConversationContext {
@@ -57,6 +63,77 @@ interface ConversationContext {
   readonly feed: SessionFeed
   readonly identities: ReadonlyMap<string, AgentIdentity>
   readonly onInspect: (threadId: string, seq?: number) => void
+  readonly thoughtOpen: ReadonlyMap<string, boolean>
+  readonly setThoughtOpen: (key: string, open: boolean) => void
+  readonly liveByToolCardId: ReadonlyMap<string, StreamingTurn>
+}
+
+function thoughtKey(threadId: string, turn: number): string {
+  return `${threadId}:${turn}`
+}
+
+function formatSeconds(durationMs: number): string {
+  if (durationMs >= 60_000) {
+    const minutes = Math.floor(durationMs / 60_000)
+    const seconds = Math.round((durationMs % 60_000) / 1000)
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
+  }
+
+  if (durationMs >= 10_000) {
+    return `${Math.round(durationMs / 1000)}s`
+  }
+
+  const fixed = Math.max(0.1, durationMs / 1000).toFixed(1)
+  return fixed.endsWith('.0') ? `${fixed.slice(0, -2)}s` : `${fixed}s`
+}
+
+function formatThoughtLabel(durationMs: number | undefined): string {
+  return durationMs !== undefined ? `Thought for ${formatSeconds(durationMs)}` : 'Thought'
+}
+
+function cleanSnippet(line: string): string {
+  return line
+    .replace(/^[\s>#*-]+/, '')
+    .replace(/[`*_~]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function latestThoughtLine(text: string): string {
+  const lines = text.split('\n')
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const cleaned = cleanSnippet(lines[index] ?? '')
+
+    if (cleaned) {
+      return cleaned
+    }
+  }
+
+  return ''
+}
+
+function rowSpeakerThreadId(row: Row | undefined): string | undefined {
+  if (!row) {
+    return undefined
+  }
+
+  switch (row.kind) {
+    case 'agent':
+    case 'thought':
+    case 'tools':
+    case 'question':
+    case 'stream':
+      return row.threadId
+    case 'user':
+    case 'notice':
+      return undefined
+
+    default: {
+      const exhaustive: never = row
+      return exhaustive
+    }
+  }
 }
 
 export function Conversation({
@@ -68,34 +145,105 @@ export function Conversation({
 }: {
   runId: string
   feed: SessionFeed
-  streaming: Readonly<Record<string, string>>
+  streaming: Readonly<Record<string, StreamingTurn>>
   identities: ReadonlyMap<string, AgentIdentity>
   onInspect: (threadId: string, seq?: number) => void
 }) {
-  const rows = useMemo<readonly Row[]>(() => {
-    const live = Object.entries(streaming)
-      .filter(([, text]) => text.trim().length > 0)
-      .map(([threadId, text]) => ({
-        kind: 'stream' as const,
+  const { rows, liveByToolCardId } = useMemo(() => {
+    let lastUserIndex = -1
+
+    for (let index = feed.items.length - 1; index >= 0; index -= 1) {
+      if (feed.items[index]?.kind === 'user') {
+        lastUserIndex = index
+        break
+      }
+    }
+
+    const latestThreadItem = new Map<string, FeedItem>()
+
+    for (let index = lastUserIndex + 1; index < feed.items.length; index += 1) {
+      const item = feed.items[index]
+
+      if (
+        item &&
+        (item.kind === 'agent' ||
+          item.kind === 'tools' ||
+          item.kind === 'question' ||
+          item.kind === 'thought')
+      ) {
+        latestThreadItem.set(item.threadId, item)
+      }
+    }
+
+    const attached = new Map<string, StreamingTurn>()
+    const liveRows: Row[] = []
+
+    for (const [threadId, turn] of Object.entries(streaming)) {
+      const hasThinking = turn.thinking.trim().length > 0
+      const hasText = turn.text.trim().length > 0
+
+      if (!hasThinking && !hasText) {
+        continue
+      }
+
+      const latest = latestThreadItem.get(threadId)
+
+      // Keep between-tool thinking inside the agent's active tool card instead of popping a temporary bubble.
+      if (!hasText && latest?.kind === 'tools') {
+        attached.set(latest.id, turn)
+        continue
+      }
+
+      liveRows.push({
+        kind: 'stream',
         id: `stream_${threadId}`,
         threadId,
-        text,
-      }))
+        turn: turn.turn,
+        text: turn.text,
+        thinking: turn.thinking,
+        thinkingStartedAt: turn.thinkingStartedAt,
+        thinkingEndedAt: turn.thinkingEndedAt,
+      })
+    }
 
-    return [...feed.items, ...live]
+    return {
+      rows: [...feed.items, ...liveRows],
+      liveByToolCardId: attached,
+    }
   }, [feed.items, streaming])
 
   // History replayed on load renders still; live arrivals settle in once, even if virtualization remounts them.
   const [mountedAt] = useState(() => Date.now())
   const animated = useRef(new Set<string>())
+  const [thoughtOpen, setThoughtOpenState] = useState(() => new Map<string, boolean>())
+
+  const setThoughtOpen = useCallback((key: string, open: boolean) => {
+    setThoughtOpenState((prev) => {
+      if (prev.get(key) === open) {
+        return prev
+      }
+
+      const next = new Map(prev)
+      next.set(key, open)
+      return next
+    })
+  }, [])
 
   const onSettled = useCallback((id: string) => {
     animated.current.add(id)
   }, [])
 
   const context = useMemo<ConversationContext>(
-    () => ({ runId, feed, identities, onInspect }),
-    [runId, feed, identities, onInspect],
+    () => ({
+      runId,
+      feed,
+      identities,
+      onInspect,
+      thoughtOpen,
+      setThoughtOpen,
+      liveByToolCardId,
+    }),
+    [runId, feed, identities, onInspect, thoughtOpen, setThoughtOpen, liveByToolCardId],
   )
 
   return (
@@ -113,27 +261,34 @@ export function Conversation({
           Events stream in from the Durable Object as soon as the run starts.
         </EmptyState>
       }
-      renderItem={(row) => (
-        <div className="mx-auto w-full max-w-3xl py-1.5">
-          <RowView
-            row={row}
-            context={context}
-            animate={('ts' in row ? row.ts >= mountedAt : true) && !animated.current.has(row.id)}
-            onSettled={onSettled}
-          />
-        </div>
-      )}
+      renderItem={(row, index) => {
+        const previousThreadId = rowSpeakerThreadId(index > 0 ? rows[index - 1] : undefined)
+
+        return (
+          <div className="mx-auto w-full max-w-3xl py-1.5">
+            <RowView
+              row={row}
+              previousThreadId={previousThreadId}
+              context={context}
+              animate={('ts' in row ? row.ts >= mountedAt : true) && !animated.current.has(row.id)}
+              onSettled={onSettled}
+            />
+          </div>
+        )
+      }}
     />
   )
 }
 
 const RowView = memo(function RowView({
   row,
+  previousThreadId,
   context,
   animate,
   onSettled,
 }: {
   row: Row
+  previousThreadId: string | undefined
   context: ConversationContext
   animate: boolean
   onSettled: (id: string) => void
@@ -161,8 +316,24 @@ const RowView = memo(function RowView({
       )
     case 'agent':
       return <AgentMessage className={className} item={row} context={context} />
+    case 'thought':
+      return (
+        <ThoughtWhisper
+          className={className}
+          item={row}
+          showIdentity={previousThreadId !== row.threadId}
+          context={context}
+        />
+      )
     case 'tools':
-      return <ToolActivity className={className} item={row} context={context} />
+      return (
+        <ToolActivity
+          className={className}
+          item={row}
+          showIdentity={previousThreadId !== row.threadId}
+          context={context}
+        />
+      )
     case 'question':
       return <QuestionCard className={className} item={row} context={context} />
     case 'notice':
@@ -173,8 +344,13 @@ const RowView = memo(function RowView({
           className={className}
           identity={context.identities.get(row.threadId)}
           threadId={row.threadId}
+          turn={row.turn}
           text={row.text}
+          thinking={row.thinking}
+          thinkingStartedAt={row.thinkingStartedAt}
+          thinkingEndedAt={row.thinkingEndedAt}
           streaming
+          context={context}
           onInspect={context.onInspect}
         />
       )
@@ -358,27 +534,110 @@ function AgentAvatar({ identity, threadId }: { identity?: AgentIdentity; threadI
   )
 }
 
+function ThinkingTrace({
+  text,
+  durationMs,
+  activelyThinking,
+  open,
+  onToggle,
+}: {
+  text: string
+  durationMs?: number
+  activelyThinking: boolean
+  open: boolean
+  onToggle: () => void
+}) {
+  const label = activelyThinking ? 'Thinking…' : formatThoughtLabel(durationMs)
+  const liveSnippet = activelyThinking && !open ? latestThoughtLine(text) : ''
+
+  return (
+    <div className="mt-1 min-w-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+        className="text-muted-foreground/80 hover:text-foreground inline-flex max-w-full min-w-0 items-center gap-1 text-left text-[11.5px] transition-colors duration-100"
+      >
+        <ChevronRight
+          className={cn(
+            'ease-snappy size-3 shrink-0 transition-transform duration-150',
+            open && 'rotate-90',
+          )}
+        />
+        <span
+          className={cn(
+            'shrink-0 whitespace-nowrap tabular-nums',
+            activelyThinking && 'text-status-running breathe',
+          )}
+        >
+          {label}
+        </span>
+        {liveSnippet ? (
+          <span className="text-muted-foreground/65 min-w-0 truncate pl-1">{liveSnippet}</span>
+        ) : null}
+      </button>
+      {open ? (
+        <div className="thinking-trace-body border-border/80 mt-1.5 mb-1 max-h-52 overflow-y-auto border-l py-0.5 pl-3">
+          <Markdown text={text} className="text-muted-foreground text-[12.5px] leading-relaxed" />
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function AgentBubble({
   identity,
   threadId,
+  turn,
   text,
+  thinking,
+  thought,
+  thinkingStartedAt,
+  thinkingEndedAt,
   ts,
   seq,
   replyTo,
   streaming = false,
+  context,
   onInspect,
   className,
 }: {
   identity?: AgentIdentity
   threadId: string
+  turn?: number
   text: string
+  thinking?: string
+  thought?: ThoughtInfo
+  thinkingStartedAt?: number
+  thinkingEndedAt?: number
   ts?: number
   seq?: number
   replyTo?: string
   streaming?: boolean
+  context?: ConversationContext
   onInspect: (threadId: string, seq?: number) => void
   className?: string
 }) {
+  const thinkingText = (thinking ?? thought?.text ?? '').trim()
+  const replyText = text.trim()
+  const activelyThinking = streaming && thinkingText.length > 0 && replyText.length === 0
+  const status = streaming && replyText.length > 0 ? 'typing' : null
+
+  const durationMs =
+    thought?.durationMs ??
+    (thinkingStartedAt !== undefined && thinkingEndedAt !== undefined
+      ? Math.max(0, thinkingEndedAt - thinkingStartedAt)
+      : undefined)
+
+  const key =
+    turn !== undefined
+      ? thoughtKey(threadId, turn)
+      : thought
+        ? thoughtKey(threadId, thought.turn)
+        : null
+
+  const open = key && context ? Boolean(context.thoughtOpen.get(key)) : false
+
   return (
     <div className={cn('flex gap-3', className)}>
       <AgentAvatar identity={identity} threadId={threadId} />
@@ -387,12 +646,16 @@ function AgentBubble({
           <button
             type="button"
             onClick={() => onInspect(threadId, seq)}
-            className="text-foreground/90 hover:text-foreground font-medium hover:underline"
+            className="text-foreground/90 hover:text-foreground shrink-0 font-medium whitespace-nowrap hover:underline"
           >
             {identity?.label ?? 'Agent'}
           </button>
-          {ts !== undefined ? <span className="tabular-nums">{clockTime(ts)}</span> : null}
-          {streaming ? <span className="text-status-running">typing</span> : null}
+          {ts !== undefined ? (
+            <span className="shrink-0 whitespace-nowrap tabular-nums">{clockTime(ts)}</span>
+          ) : null}
+          {status ? (
+            <span className="text-status-running shrink-0 whitespace-nowrap">{status}</span>
+          ) : null}
         </div>
         {replyTo ? (
           <p className="text-muted-foreground mt-1 flex items-center gap-1 truncate text-[11px]">
@@ -400,13 +663,24 @@ function AgentBubble({
             <span className="truncate italic">{replyTo}</span>
           </p>
         ) : null}
-        <Markdown
-          text={text}
-          className={cn(
-            'text-foreground/95 mt-1 text-[13.5px] leading-relaxed',
-            streaming && 'caret',
-          )}
-        />
+        {thinkingText && key && context ? (
+          <ThinkingTrace
+            text={thinkingText}
+            durationMs={activelyThinking ? undefined : durationMs}
+            activelyThinking={activelyThinking}
+            open={open}
+            onToggle={() => context.setThoughtOpen(key, !open)}
+          />
+        ) : null}
+        {replyText ? (
+          <Markdown
+            text={text}
+            className={cn(
+              'text-foreground/95 mt-1 text-[13.5px] leading-relaxed',
+              streaming && 'caret',
+            )}
+          />
+        ) : null}
       </div>
     </div>
   )
@@ -428,12 +702,76 @@ function AgentMessage({
       className={className}
       identity={context.identities.get(item.threadId)}
       threadId={item.threadId}
+      turn={item.thought?.turn}
       text={item.text}
+      thought={item.thought}
       ts={item.ts}
       seq={item.seq}
       replyTo={replyTo}
+      context={context}
       onInspect={context.onInspect}
     />
+  )
+}
+
+/** Borderless fallback for the rare case where a turn settles with only a thought. */
+function ThoughtWhisper({
+  item,
+  showIdentity,
+  context,
+  className,
+}: {
+  item: Extract<FeedItem, { kind: 'thought' }>
+  showIdentity: boolean
+  context: ConversationContext
+  className?: string
+}) {
+  const identity = context.identities.get(item.threadId)
+  const key = thoughtKey(item.threadId, item.turn)
+  const open = Boolean(context.thoughtOpen.get(key))
+  const label = formatThoughtLabel(item.durationMs)
+  return (
+    <div className={cn('pl-10', className)}>
+      <div className="flex min-w-0 items-center gap-1.5 py-0.5 text-[11.5px]">
+        {showIdentity ? (
+          <>
+            <button
+              type="button"
+              onClick={() => context.onInspect(item.threadId, item.seq)}
+              className={cn(
+                'shrink-0 font-medium whitespace-nowrap hover:underline',
+                identity?.role.tone,
+              )}
+            >
+              {identity?.label ?? 'Agent'}
+            </button>
+            <span className="text-muted-foreground/40 shrink-0 select-none">·</span>
+          </>
+        ) : null}
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => context.setThoughtOpen(key, !open)}
+          className="text-muted-foreground/80 hover:text-foreground inline-flex min-w-0 items-center gap-1 text-left transition-colors duration-100"
+        >
+          <ChevronRight
+            className={cn(
+              'ease-snappy size-3 shrink-0 transition-transform duration-150',
+              open && 'rotate-90',
+            )}
+          />
+          <span className="shrink-0 whitespace-nowrap tabular-nums">{label}</span>
+        </button>
+      </div>
+      {open ? (
+        <div className="thinking-trace-body border-border/80 mt-1 ml-1 max-h-52 overflow-y-auto border-l py-0.5 pl-3">
+          <Markdown
+            text={item.text}
+            className="text-muted-foreground text-[12.5px] leading-relaxed"
+          />
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -447,11 +785,11 @@ function toolArgsPreview(call: ToolCallItem): string {
 function ToolStatusIcon({ status }: { status: ToolCallItem['status'] }) {
   switch (status) {
     case 'running':
-      return <LoaderCircle className="text-status-running size-3 animate-spin" />
+      return <LoaderCircle className="text-status-running size-3 shrink-0 animate-spin" />
     case 'ok':
-      return <Check className="text-status-completed size-3" />
+      return <Check className="text-status-completed size-3 shrink-0" />
     case 'error':
-      return <X className="text-status-failed size-3" />
+      return <X className="text-status-failed size-3 shrink-0" />
 
     default: {
       const exhaustive: never = status
@@ -460,30 +798,129 @@ function ToolStatusIcon({ status }: { status: ToolCallItem['status'] }) {
   }
 }
 
+function sumThoughtDuration(thoughts: readonly ThoughtInfo[]): number | undefined {
+  let total = 0
+  let any = false
+
+  for (const thought of thoughts) {
+    if (thought.durationMs !== undefined) {
+      total += thought.durationMs
+      any = true
+    }
+  }
+
+  return any ? total : undefined
+}
+
 function ToolActivity({
   item,
+  showIdentity,
   context,
   className,
 }: {
   item: Extract<FeedItem, { kind: 'tools' }>
+  showIdentity: boolean
   context: ConversationContext
   className?: string
 }) {
   const identity = context.identities.get(item.threadId)
-  const running = item.calls.filter((call) => call.status === 'running').length
+  const liveTurn = context.liveByToolCardId.get(item.id)
+  const liveThinking = liveTurn?.thinking.trim() ?? ''
+  const hasThoughts = item.thoughts.length > 0
+  const showThoughtHeader = hasThoughts || liveThinking.length > 0
+  const showIdentityInCard = showIdentity && !showThoughtHeader
+  const thoughtToggleKey = `tools_thought:${item.id}`
+  const thoughtExpanded = Boolean(context.thoughtOpen.get(thoughtToggleKey))
+  const totalThoughtDurationMs = sumThoughtDuration(item.thoughts)
+
+  const runningCalls = item.calls.filter((call) => call.status === 'running')
+  const running = runningCalls.length
+  const lastRunningCall = runningCalls.at(-1)
   const failed = item.calls.filter((call) => call.status === 'error').length
   // Short bursts stay expanded; long ones collapse until the reader opens them.
   const [choice, setOpen] = useState<boolean | null>(null)
   const open = choice ?? item.calls.length <= 4
 
+  const summary =
+    running > 0
+      ? `running ${lastRunningCall?.name ?? 'tool'}…`
+      : `used ${item.calls.length} tool${item.calls.length === 1 ? '' : 's'}`
+
+  const collapsedDetail = !open && lastRunningCall ? toolArgsPreview(lastRunningCall) : ''
+
   return (
     <div className={cn('pl-10', className)}>
+      {showThoughtHeader ? (
+        <div className="mb-1.5 flex min-w-0 items-center gap-1.5 text-[11.5px]">
+          {showIdentity ? (
+            <>
+              <button
+                type="button"
+                onClick={() => context.onInspect(item.threadId, item.seq)}
+                className={cn(
+                  'shrink-0 font-medium whitespace-nowrap hover:underline',
+                  identity?.role.tone,
+                )}
+              >
+                {identity?.label ?? 'Agent'}
+              </button>
+              <span className="text-muted-foreground/40 shrink-0 select-none">·</span>
+            </>
+          ) : null}
+          <button
+            type="button"
+            aria-expanded={thoughtExpanded}
+            onClick={() => context.setThoughtOpen(thoughtToggleKey, !thoughtExpanded)}
+            className="text-muted-foreground/80 hover:text-foreground inline-flex min-w-0 items-center gap-1 text-left transition-colors duration-100"
+          >
+            <ChevronRight
+              className={cn(
+                'ease-snappy size-3 shrink-0 transition-transform duration-150',
+                thoughtExpanded && 'rotate-90',
+              )}
+            />
+            <span
+              className={cn(
+                'shrink-0 whitespace-nowrap tabular-nums',
+                liveThinking && 'text-status-running breathe',
+              )}
+            >
+              {liveThinking ? 'Thinking…' : formatThoughtLabel(totalThoughtDurationMs)}
+            </span>
+            {liveThinking && !thoughtExpanded ? (
+              <span className="text-muted-foreground/60 min-w-0 truncate pl-1">
+                {latestThoughtLine(liveThinking)}
+              </span>
+            ) : null}
+          </button>
+        </div>
+      ) : null}
+      {thoughtExpanded && showThoughtHeader ? (
+        <div className="thinking-trace-body border-border/80 mb-2 ml-1 max-h-56 space-y-2.5 overflow-y-auto border-l py-0.5 pl-3">
+          {item.thoughts.map((thought) => (
+            <Markdown
+              key={thought.id}
+              text={thought.text}
+              className="text-muted-foreground text-[12.5px] leading-relaxed"
+            />
+          ))}
+          {liveThinking ? (
+            <Markdown
+              text={liveThinking}
+              className="text-muted-foreground text-[12.5px] leading-relaxed"
+            />
+          ) : null}
+        </div>
+      ) : null}
       <div className="bg-card/60 rounded-lg border text-xs">
         <button
           type="button"
           aria-expanded={open}
           onClick={() => setOpen(!open)}
-          className="hover:bg-accent/40 flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left transition-colors duration-100"
+          className={cn(
+            'hover:bg-accent/40 flex h-8 w-full min-w-0 items-center gap-2 px-2.5 text-left transition-colors duration-100',
+            open ? 'rounded-t-lg' : 'rounded-lg',
+          )}
         >
           <ChevronRight
             className={cn(
@@ -491,17 +928,20 @@ function ToolActivity({
               open && 'rotate-90',
             )}
           />
-          <span className={cn('font-medium', identity?.role.tone)}>
-            {identity?.label ?? 'Agent'}
-          </span>
-          <span className="text-muted-foreground">
-            {running > 0
-              ? `running ${item.calls.at(-1)?.name ?? 'tool'}…`
-              : `used ${item.calls.length} tool${item.calls.length === 1 ? '' : 's'}`}
-          </span>
+          {showIdentityInCard ? (
+            <span className={cn('shrink-0 font-medium whitespace-nowrap', identity?.role.tone)}>
+              {identity?.label ?? 'Agent'}
+            </span>
+          ) : null}
+          <span className="text-muted-foreground shrink-0 whitespace-nowrap">{summary}</span>
+          {collapsedDetail ? (
+            <span className="text-muted-foreground/60 min-w-0 truncate font-mono text-[11px]">
+              {collapsedDetail}
+            </span>
+          ) : null}
           {failed > 0 ? (
-            <span className="text-status-failed ml-auto inline-flex items-center gap-1">
-              <TriangleAlert className="size-3" />
+            <span className="text-status-failed ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap">
+              <TriangleAlert className="size-3 shrink-0" />
               {failed} failed
             </span>
           ) : null}
@@ -517,7 +957,7 @@ function ToolActivity({
                   title={call.error ?? compactJson(call.args, 400)}
                 >
                   <ToolStatusIcon status={call.status} />
-                  <span className="text-foreground shrink-0 font-mono text-[11px]">
+                  <span className="text-foreground shrink-0 font-mono text-[11px] whitespace-nowrap">
                     {call.name}
                   </span>
                   <span className="text-muted-foreground min-w-0 truncate font-mono text-[11px]">
@@ -546,6 +986,8 @@ function QuestionCard({
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState<'answer' | 'defer' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const key = item.thought ? thoughtKey(item.threadId, item.thought.turn) : null
+  const thoughtExpanded = key ? Boolean(context.thoughtOpen.get(key)) : false
 
   async function submit(answer: string | null) {
     setPending(answer === null ? 'defer' : 'answer')
@@ -570,18 +1012,29 @@ function QuestionCard({
       >
         <div className="text-muted-foreground flex items-center gap-2 text-[11px]">
           <MessageCircleQuestion
-            className={cn('size-3.5', item.decision ? undefined : 'text-brand')}
+            className={cn('size-3.5 shrink-0', item.decision ? undefined : 'text-brand')}
           />
           <button
             type="button"
             onClick={() => context.onInspect(item.threadId, item.seq)}
-            className="text-foreground/90 hover:text-foreground font-medium hover:underline"
+            className="text-foreground/90 hover:text-foreground shrink-0 font-medium whitespace-nowrap hover:underline"
           >
             {identity?.label ?? 'Agent'} asks
           </button>
-          <span className="tabular-nums">{clockTime(item.ts)}</span>
-          {item.decision ? null : <span className="text-brand ml-auto">Waiting on you</span>}
+          <span className="shrink-0 whitespace-nowrap tabular-nums">{clockTime(item.ts)}</span>
+          {item.decision ? null : (
+            <span className="text-brand ml-auto shrink-0 whitespace-nowrap">Waiting on you</span>
+          )}
         </div>
+        {item.thought && key ? (
+          <ThinkingTrace
+            text={item.thought.text}
+            durationMs={item.thought.durationMs}
+            activelyThinking={false}
+            open={thoughtExpanded}
+            onToggle={() => context.setThoughtOpen(key, !thoughtExpanded)}
+          />
+        ) : null}
         <p className="text-foreground/95 mt-1.5 text-[13.5px] leading-relaxed whitespace-pre-wrap">
           {humanize(item.title, context.identities)}
         </p>
@@ -675,7 +1128,7 @@ function Notice({
         </span>
         {item.runId ? (
           <Link to="/playbook" className="text-foreground shrink-0 font-medium hover:underline">
-            Playbook
+            Open playbook
           </Link>
         ) : null}
       </span>

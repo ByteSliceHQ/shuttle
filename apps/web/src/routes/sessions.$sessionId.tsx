@@ -16,7 +16,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/componen
 import { agentIdentities } from '@/lib/agents'
 import { shortId } from '@/lib/cn'
 import { rememberSession } from '@/lib/recent-sessions'
-import { sessionFeed, streamingText, type SessionFeed } from '@/lib/session-feed'
+import { sessionFeed, streamingTurns, type SessionFeed } from '@/lib/session-feed'
 import type { RunStatus } from '@swirls/looms/core'
 import {
   type LoomsConnectionStatus,
@@ -45,7 +45,7 @@ function SessionWorkspace({ runId }: { runId: string }) {
   const events = useRunEvents(store)
   const eventCounts = useEventCounts(store)
   const feed = useProjection(store, sessionFeed)
-  const streaming = useLiveFold(store, streamingText)
+  const streaming = useLiveFold(store, streamingTurns)
 
   const [selectedThreadId, setSelectedThreadId] = useState<string | undefined>()
   const [selectedSeq, setSelectedSeq] = useState<number | undefined>()

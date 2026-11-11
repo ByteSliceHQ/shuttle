@@ -5,6 +5,7 @@ import {
   type LoomsDurableObjectConfig,
 } from '@swirls/looms/cloudflare'
 
+import { shuttleAttributes } from './attributes'
 import { ensurePlaybookQuietly, ensureWorkspaceQuietly } from './bootstrap'
 import { readStoredLlmModel, resolveProjectors, writeStoredLlmModel } from './config'
 import type { ShuttleEnv } from './env'
@@ -31,6 +32,7 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
     return {
       modules: shuttleModules(env, runId, { storage: this.ctx.storage }),
       launcher: durableObjectLauncher(env.LOOMS_RUN),
+      attributes: shuttleAttributes,
       projectors: resolveProjectors(env, { runId, storage: this.ctx.storage }),
     }
   }
@@ -78,9 +80,10 @@ export default {
     }
 
     // Ensure the playbook DO exists lazily when a session is started.
-    if (request.method === 'POST' && new URL(request.url).pathname === '/runs') {
-      await ensurePlaybookQuietly(env)
-      await ensureWorkspaceQuietly(env)
+    const pathname = new URL(request.url).pathname
+
+    if (request.method === 'POST' && (pathname === '/runs' || pathname === '/runs/launch')) {
+      await Promise.all([ensurePlaybookQuietly(env), ensureWorkspaceQuietly(env)])
     }
 
     const response = await routeToDurableObject(env.LOOMS_RUN, request, {

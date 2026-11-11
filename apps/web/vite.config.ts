@@ -42,7 +42,7 @@ export default defineConfig({
       '/definitions': api,
       '/health': api,
       '/operations': api,
-      '/runs': api,
+      '/runs': { ...api, ws: true },
       '/sessions': { ...api, ws: true },
       '/playbook': api,
       '/workspace': api,

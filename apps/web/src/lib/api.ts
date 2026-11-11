@@ -63,7 +63,7 @@ export async function startSession(input: {
   const playbook = await fetchPlaybook()
   const lessons = playbook.playbook.lessons ?? []
 
-  const response = await postJson('/runs', {
+  const response = await postJson('/runs/launch', {
     kind: 'shuttle-session',
     definitionName: 'coding',
     input: {

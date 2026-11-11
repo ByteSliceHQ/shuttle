@@ -116,10 +116,24 @@ function estimateFromFeed(feed: SessionFeed): Record<ContextCategoryId, number> 
 
       case 'agent': {
         conversationTokens += estimateTokens(item.text)
+
+        if (item.thought) {
+          conversationTokens += estimateTokens(item.thought.text)
+        }
+
+        break
+      }
+
+      case 'thought': {
+        conversationTokens += estimateTokens(item.text)
         break
       }
 
       case 'tools': {
+        for (const thought of item.thoughts) {
+          conversationTokens += estimateTokens(thought.text)
+        }
+
         for (const call of item.calls) {
           toolTokens += estimateTokens(JSON.stringify(call.args ?? null))
 
@@ -137,6 +151,10 @@ function estimateFromFeed(feed: SessionFeed): Record<ContextCategoryId, number> 
 
       case 'question': {
         conversationTokens += estimateTokens(item.title)
+
+        if (item.thought) {
+          conversationTokens += estimateTokens(item.thought.text)
+        }
 
         if (item.decision?.answer) {
           conversationTokens += estimateTokens(item.decision.answer)

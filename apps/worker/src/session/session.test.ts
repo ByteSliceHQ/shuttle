@@ -88,7 +88,7 @@ async function startCodingSession(
   looms: Looms,
   goal = 'Build a todo app',
 ): Promise<{ runId: string }> {
-  return looms.start(codingSession, {
+  return looms.launch(codingSession, {
     goal,
     lessons: [],
     playbookVersion: 0,

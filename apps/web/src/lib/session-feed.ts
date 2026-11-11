@@ -41,6 +41,19 @@ export interface ToolCallItem {
   readonly error?: string
 }
 
+export interface ThoughtInfo {
+  readonly id: string
+  readonly text: string
+  readonly durationMs?: number
+  readonly seq: number
+  readonly ts: number
+  readonly turn: number
+}
+
+export type ActivityStep =
+  | { readonly kind: 'thought'; readonly thought: ThoughtInfo }
+  | { readonly kind: 'call'; readonly call: ToolCallItem }
+
 export type FeedItem =
   | {
       readonly kind: 'user'
@@ -60,6 +73,17 @@ export type FeedItem =
       readonly threadId: string
       readonly text: string
       readonly replyTo?: string
+      readonly thought?: ThoughtInfo
+    }
+  | {
+      readonly kind: 'thought'
+      readonly id: string
+      readonly seq: number
+      readonly ts: number
+      readonly threadId: string
+      readonly turn: number
+      readonly text: string
+      readonly durationMs?: number
     }
   | {
       readonly kind: 'tools'
@@ -68,6 +92,8 @@ export type FeedItem =
       readonly ts: number
       readonly threadId: string
       readonly calls: readonly ToolCallItem[]
+      readonly thoughts: readonly ThoughtInfo[]
+      readonly steps: readonly ActivityStep[]
     }
   | {
       readonly kind: 'question'
@@ -77,6 +103,7 @@ export type FeedItem =
       readonly threadId: string
       readonly approvalId: string
       readonly title: string
+      readonly thought?: ThoughtInfo
       readonly decision?: { readonly answer: string | null }
     }
   | {
@@ -112,6 +139,8 @@ export interface SessionFeed {
   readonly narrators: Readonly<Record<string, string>>
   readonly toolIndex: Readonly<Record<string, number>>
   readonly questionIndex: Readonly<Record<string, number>>
+  /** Holds a turn's thought until its message, tool call, or approval arrives. */
+  readonly pendingThoughts: Readonly<Record<string, ThoughtInfo>>
 }
 
 export interface PlaybookLessonRef {
@@ -132,6 +161,7 @@ const initialFeed: SessionFeed = {
   narrators: {},
   toolIndex: {},
   questionIndex: {},
+  pendingThoughts: {},
 }
 
 function withoutKey<T>(record: Readonly<Record<string, T>>, key: string): Record<string, T> {
@@ -142,6 +172,66 @@ function withoutKey<T>(record: Readonly<Record<string, T>>, key: string): Record
 
 function appendItem(feed: SessionFeed, item: FeedItem): SessionFeed {
   return { ...feed, items: [...feed.items, item] }
+}
+
+function takePendingThought(
+  feed: SessionFeed,
+  threadId: string,
+  turn?: number,
+): { readonly feed: SessionFeed; readonly thought?: ThoughtInfo } {
+  const pending = feed.pendingThoughts[threadId]
+
+  if (!pending || (turn !== undefined && pending.turn !== turn)) {
+    return { feed }
+  }
+
+  return {
+    feed: { ...feed, pendingThoughts: withoutKey(feed.pendingThoughts, threadId) },
+    thought: pending,
+  }
+}
+
+/** Flush an unclaimed thought when a turn settles without messages, tools, or approvals. */
+function flushPendingThought(feed: SessionFeed, threadId: string | null | undefined): SessionFeed {
+  if (!threadId) {
+    return feed
+  }
+
+  const pending = feed.pendingThoughts[threadId]
+
+  if (!pending) {
+    return feed
+  }
+
+  const cleared: SessionFeed = {
+    ...feed,
+    pendingThoughts: withoutKey(feed.pendingThoughts, threadId),
+  }
+
+  const last = cleared.items.at(-1)
+
+  if (last?.kind === 'tools' && last.threadId === threadId) {
+    const items = [...cleared.items]
+
+    items[items.length - 1] = {
+      ...last,
+      thoughts: [...last.thoughts, pending],
+      steps: [...last.steps, { kind: 'thought', thought: pending }],
+    }
+
+    return { ...cleared, items }
+  }
+
+  return appendItem(cleared, {
+    kind: 'thought',
+    id: pending.id,
+    seq: pending.seq,
+    ts: pending.ts,
+    threadId,
+    turn: pending.turn,
+    text: pending.text,
+    durationMs: pending.durationMs,
+  })
 }
 
 function onToolCall(feed: SessionFeed, event: SessionEvent): SessionFeed {
@@ -157,6 +247,11 @@ function onToolCall(feed: SessionFeed, event: SessionEvent): SessionFeed {
     return feed
   }
 
+  const turn = jsonNumber(payload.turn)
+  const taken = takePendingThought(feed, threadId, turn)
+  const baseFeed = taken.feed
+  const thought = taken.thought
+
   const item: ToolCallItem = {
     toolCallId,
     name,
@@ -165,26 +260,42 @@ function onToolCall(feed: SessionFeed, event: SessionEvent): SessionFeed {
     status: 'running',
   }
 
-  const last = feed.items.at(-1)
+  const newSteps: ActivityStep[] = thought
+    ? [
+        { kind: 'thought', thought },
+        { kind: 'call', call: item },
+      ]
+    : [{ kind: 'call', call: item }]
 
-  // Consecutive calls from one agent collapse into a single activity row.
+  const last = baseFeed.items.at(-1)
+
+  // Consecutive silent work from one agent collapses into a single activity card.
   if (last?.kind === 'tools' && last.threadId === threadId) {
-    const index = feed.items.length - 1
-    const items = [...feed.items]
-    items[index] = { ...last, calls: [...last.calls, item] }
-    return { ...feed, items, toolIndex: { ...feed.toolIndex, [toolCallId]: index } }
+    const index = baseFeed.items.length - 1
+    const items = [...baseFeed.items]
+
+    items[index] = {
+      ...last,
+      calls: [...last.calls, item],
+      thoughts: thought ? [...last.thoughts, thought] : last.thoughts,
+      steps: [...last.steps, ...newSteps],
+    }
+
+    return { ...baseFeed, items, toolIndex: { ...baseFeed.toolIndex, [toolCallId]: index } }
   }
 
   return {
-    ...appendItem(feed, {
+    ...appendItem(baseFeed, {
       kind: 'tools',
       id: event.id,
       seq: event.seq,
       ts: event.ts,
       threadId,
       calls: [item],
+      thoughts: thought ? [thought] : [],
+      steps: newSteps,
     }),
-    toolIndex: { ...feed.toolIndex, [toolCallId]: feed.items.length },
+    toolIndex: { ...baseFeed.toolIndex, [toolCallId]: baseFeed.items.length },
   }
 }
 
@@ -201,17 +312,21 @@ function onToolResult(feed: SessionFeed, event: SessionEvent): SessionFeed {
   const error = jsonText(payload.error) ?? undefined
   const items = [...feed.items]
 
+  const updateCall = (call: ToolCallItem): ToolCallItem =>
+    call.toolCallId === toolCallId
+      ? {
+          ...call,
+          status: error ? 'error' : 'ok',
+          result: payload.result ?? null,
+          error,
+        }
+      : call
+
   items[index] = {
     ...group,
-    calls: group.calls.map((call) =>
-      call.toolCallId === toolCallId
-        ? {
-            ...call,
-            status: error ? 'error' : 'ok',
-            result: payload.result ?? null,
-            error,
-          }
-        : call,
+    calls: group.calls.map(updateCall),
+    steps: group.steps.map((step) =>
+      step.kind === 'call' ? { kind: 'call', call: updateCall(step.call) } : step,
     ),
   }
 
@@ -411,6 +526,32 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       }
     }
 
+    case 'shuttle.turn.thought': {
+      const text = jsonText(payload.text)?.trim()
+      const turn = jsonNumber(payload.turn)
+
+      if (!text || turn === undefined || !event.threadId) {
+        return feed
+      }
+
+      const flushed = flushPendingThought(feed, event.threadId)
+
+      return {
+        ...flushed,
+        pendingThoughts: {
+          ...flushed.pendingThoughts,
+          [event.threadId]: {
+            id: event.id,
+            text,
+            durationMs: jsonNumber(payload.durationMs),
+            seq: event.seq,
+            ts: event.ts,
+            turn,
+          },
+        },
+      }
+    }
+
     case 'agent.message': {
       const message = jsonFields(payload.message)
       const text = jsonText(message.content)?.trim()
@@ -419,14 +560,18 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
         return feed
       }
 
-      return appendItem(feed, {
+      const turn = jsonNumber(payload.turn)
+      const taken = takePendingThought(feed, event.threadId, turn)
+
+      return appendItem(taken.feed, {
         kind: 'agent',
         id: event.id,
         seq: event.seq,
         ts: event.ts,
         threadId: event.threadId,
         text,
-        replyTo: feed.narrators[event.threadId],
+        replyTo: taken.feed.narrators[event.threadId],
+        ...(taken.thought ? { thought: taken.thought } : {}),
       })
     }
 
@@ -440,8 +585,10 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
         return feed
       }
 
+      const taken = takePendingThought(feed, event.threadId)
+
       return {
-        ...appendItem(feed, {
+        ...appendItem(taken.feed, {
           kind: 'question',
           id: event.id,
           seq: event.seq,
@@ -449,8 +596,9 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
           threadId: event.threadId,
           approvalId,
           title: jsonText(payload.title) ?? 'The agent needs your input',
+          ...(taken.thought ? { thought: taken.thought } : {}),
         }),
-        questionIndex: { ...feed.questionIndex, [approvalId]: feed.items.length },
+        questionIndex: { ...taken.feed.questionIndex, [approvalId]: taken.feed.items.length },
       }
     }
 
@@ -476,8 +624,13 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
     case 'agent.tool.result':
       return onToolResult(feed, event)
 
+    case 'agent.turn.settled':
+    case 'runtime.thread.completed':
+    case 'runtime.thread.cancelled':
+      return flushPendingThought(feed, event.threadId)
+
     case 'runtime.thread.failed':
-      return appendItem(feed, {
+      return appendItem(flushPendingThought(feed, event.threadId), {
         kind: 'notice',
         id: event.id,
         seq: event.seq,
@@ -488,7 +641,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       })
 
     case 'agent.turn.stopped':
-      return appendItem(feed, {
+      return appendItem(flushPendingThought(feed, event.threadId), {
         kind: 'notice',
         id: event.id,
         seq: event.seq,
@@ -509,10 +662,28 @@ export const sessionFeed: ProjectionDefinition<SessionFeed> = {
   reduce: reduceFeed,
 }
 
-/** Text each agent has streamed since its last durable message. */
-export const streamingText: LiveFoldDefinition<Readonly<Record<string, string>>, SessionEvent> = {
+export interface StreamingTurn {
+  readonly turn: number
+  readonly thinking: string
+  readonly text: string
+  readonly thinkingStartedAt?: number
+  readonly thinkingEndedAt?: number
+}
+
+function clearStreamingTurn(
+  state: Readonly<Record<string, StreamingTurn>>,
+  threadId: string,
+): Readonly<Record<string, StreamingTurn>> {
+  return threadId in state ? withoutKey(state, threadId) : state
+}
+
+/** Live thinking + reply text each agent has streamed since its last durable message. */
+export const streamingTurns: LiveFoldDefinition<
+  Readonly<Record<string, StreamingTurn>>,
+  SessionEvent
+> = {
   kind: 'liveFold',
-  name: 'shuttleStreamingText',
+  name: 'shuttleStreamingTurns',
   initialState: {},
   reduce(state, event) {
     const threadId = event.threadId
@@ -523,20 +694,94 @@ export const streamingText: LiveFoldDefinition<Readonly<Record<string, string>>,
 
     if (
       event.type === 'agent.message' ||
+      event.type === 'agent.turn.settled' ||
       event.type === 'agent.turn.stopped' ||
       event.type === 'runtime.thread.completed' ||
       event.type === 'runtime.thread.failed' ||
       event.type === 'runtime.thread.cancelled'
     ) {
-      return threadId in state ? withoutKey(state, threadId) : state
+      return clearStreamingTurn(state, threadId)
+    }
+
+    const payload = jsonFields(event.payload)
+    const turn = jsonNumber(payload.turn) ?? state[threadId]?.turn ?? 0
+    const current = state[threadId]
+
+    const base: StreamingTurn = current ?? {
+      turn,
+      thinking: '',
+      text: '',
+    }
+
+    if (event.type === 'shuttle.turn.thinking_delta') {
+      const delta = jsonText(payload.delta)
+
+      if (!delta) {
+        return state
+      }
+
+      const nextTurn =
+        current && current.turn !== turn
+          ? { turn, thinking: '', text: '', thinkingStartedAt: event.ts }
+          : base
+
+      return {
+        ...state,
+        [threadId]: {
+          ...nextTurn,
+          turn,
+          thinking: `${nextTurn.thinking}${delta}`,
+          thinkingStartedAt: nextTurn.thinkingStartedAt ?? event.ts,
+          thinkingEndedAt: event.ts,
+        },
+      }
     }
 
     if (event.type === 'agent.turn.text_delta') {
-      const delta = jsonText(jsonFields(event.payload).delta)
-      return delta ? { ...state, [threadId]: `${state[threadId] ?? ''}${delta}` } : state
+      const delta = jsonText(payload.delta)
+
+      if (!delta) {
+        return state
+      }
+
+      const nextTurn = current && current.turn !== turn ? { turn, thinking: '', text: '' } : base
+
+      return {
+        ...state,
+        [threadId]: {
+          ...nextTurn,
+          turn,
+          text: `${nextTurn.text}${delta}`,
+          thinkingEndedAt: nextTurn.thinking ? (nextTurn.thinkingEndedAt ?? event.ts) : undefined,
+        },
+      }
     }
 
     return state
+  },
+}
+
+/** @deprecated Prefer {@link streamingTurns}; kept for older call sites. */
+export const streamingText: LiveFoldDefinition<Readonly<Record<string, string>>, SessionEvent> = {
+  kind: 'liveFold',
+  name: 'shuttleStreamingText',
+  initialState: {},
+  reduce(state, event) {
+    const next = streamingTurns.reduce(
+      Object.fromEntries(
+        Object.entries(state).map(([threadId, text]) => [
+          threadId,
+          { turn: 0, thinking: '', text } satisfies StreamingTurn,
+        ]),
+      ),
+      event,
+    )
+
+    return Object.fromEntries(
+      Object.entries(next)
+        .filter(([, turn]) => turn.text.length > 0)
+        .map(([threadId, turn]) => [threadId, turn.text]),
+    )
   },
 }
 

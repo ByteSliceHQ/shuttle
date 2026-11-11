@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import type { JsonValue } from '@swirls/looms/core'
 
 import type { SessionEvent } from './event-catalog'
-import { sessionFeed, streamingText } from './session-feed'
+import { sessionFeed, streamingText, streamingTurns } from './session-feed'
 
 let seq = 0
 
@@ -155,19 +155,26 @@ describe('session feed', () => {
   })
 })
 
-describe('streaming text', () => {
-  test('accumulates deltas until the durable message lands', () => {
+describe('streaming turns', () => {
+  test('accumulates thinking and text until the durable message lands', () => {
+    const think = (text: string) =>
+      event('shuttle.turn.thinking_delta', { turn: 1, delta: text }, 'thr_narrator')
+
     const delta = (text: string) =>
       event('agent.turn.text_delta', { turn: 1, delta: text }, 'thr_narrator')
 
-    const streamed = [delta('Hel'), delta('lo')].reduce(
-      streamingText.reduce,
-      streamingText.initialState,
+    const streamed = [think('Hmm'), think('…'), delta('Hel'), delta('lo')].reduce(
+      streamingTurns.reduce,
+      streamingTurns.initialState,
     )
 
-    expect(streamed).toEqual({ thr_narrator: 'Hello' })
+    expect(streamed.thr_narrator).toMatchObject({
+      turn: 1,
+      thinking: 'Hmm…',
+      text: 'Hello',
+    })
 
-    const settled = streamingText.reduce(
+    const settled = streamingTurns.reduce(
       streamed,
       event(
         'agent.message',
@@ -177,5 +184,163 @@ describe('streaming text', () => {
     )
 
     expect(settled).toEqual({})
+  })
+
+  test('clears on turn settled and keeps streamingText compatible', () => {
+    const streamed = streamingTurns.reduce(
+      streamingTurns.initialState,
+      event('agent.turn.text_delta', { turn: 2, delta: 'Hi' }, 'thr_worker'),
+    )
+
+    expect(
+      streamingText.reduce(
+        {},
+        event('agent.turn.text_delta', { turn: 2, delta: 'Hi' }, 'thr_worker'),
+      ),
+    ).toEqual({
+      thr_worker: 'Hi',
+    })
+
+    expect(
+      streamingTurns.reduce(streamed, event('agent.turn.settled', { turn: 2 }, 'thr_worker')),
+    ).toEqual({})
+  })
+})
+
+describe('thinking fold', () => {
+  test('pairs a thought onto the following assistant reply', () => {
+    const feed = fold([
+      event(
+        'shuttle.turn.thought',
+        { turn: 1, text: 'I should greet the user', durationMs: 1200 },
+        'thr_narrator',
+      ),
+      event(
+        'agent.message',
+        { turn: 1, message: { role: 'assistant', content: 'Hello there' } },
+        'thr_narrator',
+      ),
+    ])
+
+    expect(feed.items).toHaveLength(1)
+
+    expect(feed.items[0]).toMatchObject({
+      kind: 'agent',
+      text: 'Hello there',
+      thought: {
+        text: 'I should greet the user',
+        durationMs: 1200,
+        turn: 1,
+      },
+    })
+  })
+
+  test('folds consecutive silent thoughts and tool calls into one activity card', () => {
+    const feed = fold([
+      event(
+        'shuttle.turn.thought',
+        { turn: 1, text: 'Need to inspect the file first', durationMs: 800 },
+        'thr_worker',
+      ),
+      event(
+        'agent.message',
+        { turn: 1, message: { role: 'assistant', content: '', toolCalls: [] } },
+        'thr_worker',
+      ),
+      event(
+        'agent.tool_call.requested',
+        { turn: 1, toolCall: { id: 'c1', name: 'read_file', arguments: { path: '/a.ts' } } },
+        'thr_worker',
+      ),
+      event(
+        'agent.tool.result',
+        { turn: 1, toolCallId: 'c1', name: 'read_file', result: 'ok', error: null },
+        'thr_worker',
+      ),
+      event('agent.turn.settled', { turn: 1 }, 'thr_worker'),
+      event(
+        'shuttle.turn.thought',
+        { turn: 2, text: 'Now patch the import', durationMs: 1100 },
+        'thr_worker',
+      ),
+      event(
+        'agent.message',
+        { turn: 2, message: { role: 'assistant', content: '', toolCalls: [] } },
+        'thr_worker',
+      ),
+      event(
+        'agent.tool_call.requested',
+        { turn: 2, toolCall: { id: 'c2', name: 'edit_file', arguments: { path: '/a.ts' } } },
+        'thr_worker',
+      ),
+    ])
+
+    expect(feed.items).toHaveLength(1)
+    const item = feed.items[0]
+    expect(item?.kind).toBe('tools')
+
+    if (item?.kind === 'tools') {
+      expect(item.calls).toHaveLength(2)
+      expect(item.thoughts).toHaveLength(2)
+      expect(item.steps.map((step) => step.kind)).toEqual(['thought', 'call', 'thought', 'call'])
+
+      expect(item.steps[1]).toMatchObject({
+        kind: 'call',
+        call: { toolCallId: 'c1', status: 'ok' },
+      })
+    }
+  })
+
+  test('attaches a thought onto an ask_user question card', () => {
+    const feed = fold([
+      event(
+        'shuttle.turn.thought',
+        { turn: 3, text: 'Better confirm the port with the user', durationMs: 650 },
+        'thr_conductor',
+      ),
+      event(
+        'agent.message',
+        { turn: 3, message: { role: 'assistant', content: '', toolCalls: [] } },
+        'thr_conductor',
+      ),
+      event(
+        'agent.tool_call.requested',
+        { turn: 3, toolCall: { id: 'q1', name: 'ask_user', arguments: { title: 'Port?' } } },
+        'thr_conductor',
+      ),
+      event('approval.requested', { approvalId: 'a_port', title: 'Port?' }, 'thr_conductor'),
+    ])
+
+    expect(feed.items).toHaveLength(1)
+
+    expect(feed.items[0]).toMatchObject({
+      kind: 'question',
+      approvalId: 'a_port',
+      thought: {
+        text: 'Better confirm the port with the user',
+        durationMs: 650,
+        turn: 3,
+      },
+    })
+  })
+
+  test('flushes an unclaimed thought when a turn settles with no text or tools', () => {
+    const feed = fold([
+      event(
+        'shuttle.turn.thought',
+        { turn: 4, text: 'Nothing left to do', durationMs: 300 },
+        'thr_worker',
+      ),
+      event('agent.turn.settled', { turn: 4 }, 'thr_worker'),
+    ])
+
+    expect(feed.items).toHaveLength(1)
+
+    expect(feed.items[0]).toMatchObject({
+      kind: 'thought',
+      text: 'Nothing left to do',
+      durationMs: 300,
+      turn: 4,
+    })
   })
 })

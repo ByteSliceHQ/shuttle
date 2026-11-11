@@ -71,6 +71,15 @@ export const shuttleCatalog = defineEventCatalog('shuttle', {
     sandboxName: Schema.String,
     repoCount: Schema.Finite,
   }),
+  'turn.thinking_delta': Schema.Struct({
+    turn: Schema.Finite,
+    delta: Schema.String,
+  }),
+  'turn.thought': Schema.Struct({
+    turn: Schema.Finite,
+    text: Schema.String,
+    durationMs: Schema.optional(Schema.Finite),
+  }),
   reroute: Schema.Struct({
     messageId: Schema.String,
     kind: InterjectionKindSchema,
