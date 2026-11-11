@@ -47,7 +47,14 @@ Cloudflare Worker that hosts Shuttle sessions on Looms Durable Objects.
 5. (Optional) Create a GitHub App for folder repo linking:
 
    - Permissions: Contents (read/write), Metadata (read)
-   - Setup URL: `https://<worker-host>/github/setup` (local: `http://127.0.0.1:8790/github/setup`)
+   - Setup URL must be the **worker** origin (not the Vite UI):
+     `https://<worker-host>/github/setup` (local:
+     `http://127.0.0.1:8790/github/setup`). GitHub redirects the browser
+     here after install, so localhost works — no tunnel needed for Connect.
+     Use a public worker URL (or a tunnel) only if you add webhooks later.
+   - After `bun run dev`, click **Connect GitHub** in the web UI
+     (`http://127.0.0.1:5180`). Vite proxies `/github/*` to the worker;
+     you can also open `http://127.0.0.1:8790/github/install` directly.
    - Convert the private key to PKCS#8:
 
      ```bash
@@ -55,7 +62,8 @@ Cloudflare Worker that hosts Shuttle sessions on Looms Durable Objects.
      ```
 
    - Put `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY`, and
-     `GITHUB_STATE_SECRET` in `.dev.vars` (or as Wrangler secrets).
+     `GITHUB_STATE_SECRET` in `.dev.vars` (or as Wrangler secrets). Keep
+     `SHUTTLE_WEB_URL` pointed at the web UI so setup redirects home.
 
 6. Deploy:
 

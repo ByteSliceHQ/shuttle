@@ -7,7 +7,7 @@ import { ArtifactPane } from '@/components/artifacts/artifact-pane'
 import { Composer } from '@/components/composer'
 import { Conversation } from '@/components/conversation'
 import { SessionContextButtons } from '@/components/session-context'
-import { RepoChip } from '@/components/sidebar/repo-chip'
+import { SessionRepos } from '@/components/session-repos'
 import { useReportLiveSession, useWorkspace } from '@/components/sidebar/workspace-context'
 import { StatusBadge } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
@@ -176,99 +176,71 @@ function SessionHeader({
   feed: SessionFeed
 }) {
   const [copied, setCopied] = useState(false)
+  const tree = useWorkspace()?.tree
+  const sessionMeta = tree?.sessions[runId]
+  const folder = sessionMeta ? tree?.folders[sessionMeta.folderId] : undefined
+  const title = sessionMeta?.title ?? goal ?? 'Coding session'
 
   const badgeStatus =
     status === 'completed' || status === 'failed' || status === 'cancelled' ? status : activity
 
+  // Two columns: the title only ever truncates, so its length never moves the controls.
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
-      <div className="flex min-w-0 flex-1 items-center gap-2.5">
-        <SessionFolderContext sessionRunId={runId} goal={goal} />
-        <StatusBadge status={badgeStatus} />
-        <ConnectionIndicator connection={connection} />
+    <header className="grid h-12 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b px-3">
+      <div className="flex min-w-0 items-center gap-1.5">
+        {folder ? (
+          <>
+            <Link
+              to="/folders/$folderId"
+              params={{ folderId: folder.folderId }}
+              title={folder.name}
+              className="text-muted-foreground hover:text-foreground hidden max-w-40 shrink-0 items-center gap-1.5 text-[12px] transition-colors duration-100 sm:inline-flex"
+            >
+              <Folder className="size-3.5 shrink-0" />
+              <span className="truncate" dir="auto">
+                {folder.name}
+              </span>
+            </Link>
+            <span aria-hidden className="text-muted-foreground/50 hidden text-[12px] sm:inline">
+              /
+            </span>
+          </>
+        ) : null}
+        <h1 className="min-w-0 truncate text-[13px] font-medium" dir="auto" title={title}>
+          {title}
+        </h1>
       </div>
-      <SessionContextButtons feed={feed} />
-      <Button
-        variant="ghost"
-        size="sm"
-        className="font-mono"
-        title={runId}
-        onClick={() => {
-          void navigator.clipboard.writeText(runId).then(() => setCopied(true))
-        }}
-        onPointerLeave={() => setCopied(false)}
-      >
-        {copied ? <Check className="text-status-completed" /> : <Copy />}
-        {shortId(runId)}
-      </Button>
+      <div className="flex items-center gap-1">
+        <ConnectionIndicator connection={connection} />
+        <StatusBadge status={badgeStatus} className="mr-1" />
+        {folder ? (
+          <SessionRepos folderId={folder.folderId} folderName={folder.name} repos={folder.repos} />
+        ) : null}
+        <SessionContextButtons feed={feed} />
+        <span aria-hidden className="bg-border mx-1 h-4 w-px" />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="font-mono"
+          title={`Copy run id ${runId}`}
+          onClick={() => {
+            void navigator.clipboard.writeText(runId).then(() => setCopied(true))
+          }}
+          onPointerLeave={() => setCopied(false)}
+        >
+          {copied ? <Check className="text-status-completed" /> : <Copy />}
+          {shortId(runId)}
+        </Button>
+      </div>
     </header>
   )
 }
 
-const HEADER_REPOS = 2
-
-function SessionFolderContext({
-  sessionRunId,
-  goal,
-}: {
-  sessionRunId: string
-  goal: string | undefined
-}) {
-  const tree = useWorkspace()?.tree
-  const sessionMeta = tree?.sessions[sessionRunId]
-  const folder = sessionMeta ? tree?.folders[sessionMeta.folderId] : undefined
-  const title = sessionMeta?.title ?? goal ?? 'Coding session'
-  const extraRepos = folder ? folder.repos.length - HEADER_REPOS : 0
-
-  return (
-    <>
-      {folder ? (
-        <Link
-          to="/folders/$folderId"
-          params={{ folderId: folder.folderId }}
-          title={folder.name}
-          className="text-muted-foreground hover:text-foreground inline-flex max-w-40 shrink-0 items-center gap-1 text-[12px] transition-colors duration-100"
-        >
-          <Folder className="size-3.5 shrink-0" />
-          <span className="truncate" dir="auto">
-            {folder.name}
-          </span>
-          <span className="text-muted-foreground/60">/</span>
-        </Link>
-      ) : null}
-      <h1 className="min-w-0 truncate text-[13px] font-medium" dir="auto" title={title}>
-        {title}
-      </h1>
-      {folder && folder.repos.length > 0 ? (
-        <div className="hidden min-w-0 shrink items-center gap-1.5 xl:flex">
-          {folder.repos.slice(0, HEADER_REPOS).map((repo) => (
-            <RepoChip key={repo.fullName} repo={repo} className="max-w-48" />
-          ))}
-          {extraRepos > 0 ? (
-            <Link
-              to="/folders/$folderId"
-              params={{ folderId: folder.folderId }}
-              className="text-muted-foreground hover:text-foreground shrink-0 text-[11px] tabular-nums"
-              title={folder.repos.map((repo) => repo.fullName).join('\n')}
-            >
-              +{extraRepos}
-            </Link>
-          ) : null}
-        </div>
-      ) : null}
-    </>
-  )
-}
-
+/** Silent while live; only a degraded connection earns header space. */
 function ConnectionIndicator({ connection }: { connection: LoomsConnectionStatus }) {
   switch (connection) {
     case 'live':
-      return (
-        <span className="text-muted-foreground inline-flex items-center gap-1.5 text-[11px]">
-          <span className="bg-status-completed size-1.5 rounded-full" />
-          Live
-        </span>
-      )
+      return null
     case 'connecting':
     case 'reconnecting':
       return (
