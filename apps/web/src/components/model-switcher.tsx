@@ -54,13 +54,14 @@ export function ModelSwitcher({
       <DropdownMenuTrigger
         disabled={disabled}
         aria-label="OpenRouter model"
-        className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 data-[state=open]:bg-accent data-[state=open]:text-foreground flex h-7 max-w-48 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap transition-colors duration-150 outline-none focus-visible:ring-[3px] disabled:opacity-50"
+        className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 data-[state=open]:bg-accent data-[state=open]:text-foreground ease-snappy flex h-7 max-w-40 min-w-0 shrink items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap transition-[background-color,color,transform] duration-150 outline-none focus-visible:ring-[3px] active:scale-[0.97] disabled:opacity-50 sm:max-w-48"
       >
         <span className="truncate">{selected.label}</span>
         <ChevronDown className="size-3 shrink-0 opacity-60" />
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        align="start"
+        align="end"
+        collisionPadding={12}
         side="top"
         sideOffset={8}
         className="flex w-auto max-w-[min(100vw-2rem,36rem)] gap-0 overflow-hidden p-0"

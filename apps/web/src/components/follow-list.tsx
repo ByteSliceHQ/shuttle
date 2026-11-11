@@ -33,6 +33,7 @@ export function FollowList<T>({
   paddingStart = 4,
   paddingEnd = 4,
   className,
+  viewportClassName,
   itemClassName,
   empty,
 }: {
@@ -46,6 +47,7 @@ export function FollowList<T>({
   paddingStart?: number
   paddingEnd?: number
   className?: string
+  viewportClassName?: string
   itemClassName?: string
   empty?: ReactNode
 }) {
@@ -148,7 +150,7 @@ export function FollowList<T>({
     <div className={cn('relative min-h-0 flex-1', className)}>
       <ScrollArea
         viewportRef={parentRef}
-        className="size-full"
+        className={cn('size-full', viewportClassName)}
         onViewportScroll={onScroll}
         onWheel={noteInput}
         onTouchMove={noteInput}

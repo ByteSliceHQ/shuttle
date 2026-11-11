@@ -82,6 +82,38 @@ function DropdownMenuCheckboxItem({
   )
 }
 
+function DropdownMenuRadioGroup(props: ComponentProps<typeof DropdownMenuPrimitive.RadioGroup>) {
+  return <DropdownMenuPrimitive.RadioGroup data-slot="dropdown-menu-radio-group" {...props} />
+}
+
+function DropdownMenuRadioItem({
+  className,
+  children,
+  description,
+  ...props
+}: ComponentProps<typeof DropdownMenuPrimitive.RadioItem> & { description?: string }) {
+  return (
+    <DropdownMenuPrimitive.RadioItem
+      data-slot="dropdown-menu-radio-item"
+      className={cn(
+        'focus:bg-accent focus:text-accent-foreground relative flex cursor-default flex-col items-start rounded-sm py-1.5 pr-2.5 pl-7 text-xs outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50',
+        className,
+      )}
+      {...props}
+    >
+      <span className="absolute top-2 left-2 flex size-3.5 items-center justify-center">
+        <DropdownMenuPrimitive.ItemIndicator>
+          <Check className="size-3.5" />
+        </DropdownMenuPrimitive.ItemIndicator>
+      </span>
+      <span className="flex items-center gap-1.5">{children}</span>
+      {description ? (
+        <span className="text-muted-foreground mt-0.5 text-[11px] leading-snug">{description}</span>
+      ) : null}
+    </DropdownMenuPrimitive.RadioItem>
+  )
+}
+
 function DropdownMenuSeparator({
   className,
   ...props
@@ -101,6 +133,8 @@ export {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 }

@@ -105,7 +105,8 @@ export function Conversation({
       estimateSize={72}
       overscan={6}
       paddingStart={16}
-      paddingEnd={16}
+      paddingEnd={28}
+      viewportClassName="conversation-fade"
       itemClassName="px-4 sm:px-6"
       empty={
         <EmptyState icon={<MessageSquareDashed />} title="Connecting to the session">
