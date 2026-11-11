@@ -165,11 +165,11 @@ async function listDiffs(stub: ReturnType<typeof sandboxStub>, runId: string): P
     const repoRoots = new Set<string>()
 
     for (const path of files) {
-      // `/workspace/.wt/<runId>/<threadId>/<repo>/...`
-      const match = path.match(new RegExp(`^${escapeRegExp(sessionRoot)}/([^/]+)/([^/]+)`))
+      // `/workspace/.wt/<runId>/<repo>/...`
+      const match = path.match(new RegExp(`^${escapeRegExp(sessionRoot)}/([^/]+)`))
 
-      if (match?.[1] && match[2]) {
-        repoRoots.add(`${sessionRoot}/${match[1]}/${match[2]}`)
+      if (match?.[1]) {
+        repoRoots.add(`${sessionRoot}/${match[1]}`)
       }
     }
 

@@ -12,7 +12,7 @@ Validated against Looms + Cloudflare before the vertical slice:
 ## 2. Parallel child threads in one Durable Object
 
 - The conductor uses `asAgentTool(worker)`. Multiple tool calls in one turn spawn child threads in the **same** run.
-- Each worker gets `/workspace/.wt/<threadId>` so parallel edits do not collide.
+- Workers share `/workspace/.wt/<runId>/<repo>` so parallel workers see each other's edits; the conductor only parallelizes disjoint files.
 - All events still serialize through one Looms DO writer — fine for the demo; scale path is `launch()`ed child runs (already indexed by `correlation_id` in the D1 replica).
 
 ## 3. D1 replica lag for history tools

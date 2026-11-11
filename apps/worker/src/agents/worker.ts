@@ -10,16 +10,18 @@ export function createWorkerAgent(env: ShuttleEnv, runId: string, storage?: Dura
 
   return defineAgent({
     name: 'worker',
-    description: 'Implements a focused coding task in its own git worktree',
+    description: 'Implements a focused coding task in the shared session worktree',
     conversational: false,
+    maxTurns: 60,
     input: z.object({
       text: z.string().describe('Task description from the conductor'),
     }),
     instructions: [
       'You are a Shuttle coding worker.',
-      'You work only in your assigned worktree under /workspace/.wt/<run>/<thread>/<repo>.',
+      'All workers in this session share one worktree per repo under /workspace/.wt/<run>/<repo>.',
       'When multiple repositories are linked, each repo is a sibling directory named after the repo.',
       'Use read_file, edit_file, write_file, grep, bash, and git_diff.',
+      'Never search outside /workspace. If an expected file is missing, report that back instead of hunting the filesystem.',
       'Container baseline tools: node, npm, python3, git, rg, curl, bash.',
       'Prefer project-local installs (npm install / pip in the worktree) over system packages.',
       'System packages via apk add are allowed when needed; they vanish if the container is recreated.',

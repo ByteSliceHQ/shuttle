@@ -6,8 +6,9 @@ describe('memory workspace overlays', () => {
   test('copy-on-write worktrees diff against the base checkout', async () => {
     const workspace = new MemoryWorkspace()
     await workspace.ensureRepos([])
-    const worktree = await workspace.ensureWorktree('run_1', 'thread_1')
+    const worktree = await workspace.ensureWorktree('run_1')
     const cwd = worktree.repoDirs[0]!.root
+    expect(cwd).toBe('/workspace/.wt/run_1/demo')
 
     const before = await workspace.readFile('src/math.ts', cwd)
     expect(before).toContain('export function add')
@@ -18,6 +19,12 @@ describe('memory workspace overlays', () => {
     expect(diff).toContain('src/math.ts')
     expect(diff).toContain('return a + b + 0')
     expect(diff).toContain('-  return a + b')
+
+    // A second ensureWorktree for the same run reuses the shared overlay.
+    const again = await workspace.ensureWorktree('run_1')
+    expect(again.repoDirs[0]!.root).toBe(cwd)
+    const shared = await workspace.readFile('src/math.ts', again.repoDirs[0]!.root)
+    expect(shared).toContain('a + b + 0')
 
     // Base checkout remains unchanged.
     const base = await workspace.readFile('/workspace/repos/demo/src/math.ts')

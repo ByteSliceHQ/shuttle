@@ -3,23 +3,31 @@ import { Files } from '@cloudflare/sandbox'
 import type { ShuttleEnv } from '../env'
 import { getInstallationToken } from '../github/app'
 import { ensureContainerRunning, type DurableContainer } from './container-runtime'
+import { shellQuote, timedBashArgv } from './exec-argv'
 import { parentDirectory } from './paths'
 import {
   repoCheckoutPath,
   resolvePath,
   worktreeRepoPath,
   worktreeRoot,
+  type ExecOptions,
   type ExecResult,
   type LinkedSandboxRepo,
   type Workspace,
   type WorktreeResult,
 } from './workspace'
 
+const DEFAULT_EXEC_TIMEOUT_MS = 120_000
+const MAX_EXEC_TIMEOUT_MS = 600_000
+const GREP_TIMEOUT_MS = 30_000
+const OUTPUT_CAP_BYTES = 32 * 1024
+
 /**
  * Real Linux workspace backed by a Durable Object container + `@cloudflare/sandbox` Files.
  */
 export class ContainerWorkspace implements Workspace {
-  private activePid: number | null = null
+  /** One sandbox serves every worker in a session, so kills must target a specific exec. */
+  private readonly activePids = new Map<string, number>()
 
   constructor(
     private readonly getContainer: () => DurableContainer | undefined,
@@ -40,9 +48,7 @@ export class ContainerWorkspace implements Workspace {
     await files.mkdir('/workspace/repos', { recursive: true })
 
     if (repos.length === 0) {
-      // Files.writeFile does not create parents; seed demo repo dirs first.
-      await files.mkdir('/workspace/repos/demo', { recursive: true })
-      await files.writeFile('/workspace/repos/demo/README.md', '# Shuttle workspace\n')
+      await this.seedDemoRepo(container, files)
       return { root: '/workspace' }
     }
 
@@ -56,12 +62,12 @@ export class ContainerWorkspace implements Workspace {
         'bash',
         '-lc',
         [
-          `if [ -d ${JSON.stringify(target)}/.git ]; then`,
-          `  git -C ${JSON.stringify(target)} -c http.extraheader=${JSON.stringify(`AUTHORIZATION: basic ${basic}`)} fetch --depth 1 origin ${JSON.stringify(repo.defaultBranch)} &&`,
-          `  git -C ${JSON.stringify(target)} checkout -B ${JSON.stringify(repo.defaultBranch)} FETCH_HEAD;`,
+          `if [ -d ${shellQuote(target)}/.git ]; then`,
+          `  git -C ${shellQuote(target)} -c http.extraheader=${shellQuote(`AUTHORIZATION: basic ${basic}`)} fetch --depth 1 origin ${shellQuote(repo.defaultBranch)} &&`,
+          `  git -C ${shellQuote(target)} checkout -B ${shellQuote(repo.defaultBranch)} FETCH_HEAD;`,
           `else`,
           `  mkdir -p /workspace/repos &&`,
-          `  git -c http.extraheader=${JSON.stringify(`AUTHORIZATION: basic ${basic}`)} clone --depth 1 --branch ${JSON.stringify(repo.defaultBranch)} ${JSON.stringify(cloneUrl)} ${JSON.stringify(target)};`,
+          `  git -c http.extraheader=${shellQuote(`AUTHORIZATION: basic ${basic}`)} clone --depth 1 --branch ${shellQuote(repo.defaultBranch)} ${shellQuote(cloneUrl)} ${shellQuote(target)};`,
           `fi`,
         ].join(' '),
       ])
@@ -72,17 +78,23 @@ export class ContainerWorkspace implements Workspace {
     return { root: '/workspace' }
   }
 
-  async ensureWorktree(runId: string, threadId: string): Promise<WorktreeResult> {
+  async ensureWorktree(runId: string): Promise<WorktreeResult> {
     const container = await this.container()
-    const root = worktreeRoot(runId, threadId)
-    await this.files(container).mkdir(root, { recursive: true })
+    const root = worktreeRoot(runId)
 
-    const listed = await container
-      .exec(['bash', '-lc', 'ls -1 /workspace/repos 2>/dev/null || true'])
-      .then((process) => process.output())
+    await this.execWithTimeout(
+      `mkdir -p ${shellQuote(root)}`,
+      { timeoutMs: GREP_TIMEOUT_MS },
+      container,
+    )
 
-    const names = new TextDecoder()
-      .decode(listed.stdout)
+    const listed = await this.execWithTimeout(
+      'ls -1 /workspace/repos 2>/dev/null || true',
+      { timeoutMs: GREP_TIMEOUT_MS },
+      container,
+    )
+
+    const names = listed.stdout
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
@@ -90,20 +102,25 @@ export class ContainerWorkspace implements Workspace {
     const repoDirs: { name: string; root: string }[] = []
 
     for (const name of names) {
-      const target = worktreeRepoPath(runId, threadId, name)
+      const target = worktreeRepoPath(runId, name)
       repoDirs.push({ name, root: target })
+      const branch = `shuttle/${runId}/${name}`
+      const source = repoCheckoutPath(name)
 
-      await container
-        .exec([
-          'bash',
-          '-lc',
-          [
-            `mkdir -p ${JSON.stringify(root)} &&`,
-            `(git -C ${JSON.stringify(repoCheckoutPath(name))} worktree add -B shuttle/${runId}/${threadId}/${name} ${JSON.stringify(target)} 2>/dev/null`,
-            `|| cp -R ${JSON.stringify(repoCheckoutPath(name))}/. ${JSON.stringify(target)})`,
-          ].join(' '),
-        ])
-        .then((process) => process.output())
+      // Shared per session: later workers must not clobber an existing worktree.
+      await this.execWithTimeout(
+        [
+          `if [ ! -d ${shellQuote(target)} ]; then`,
+          `  if [ -d ${shellQuote(source)}/.git ]; then`,
+          `    git -C ${shellQuote(source)} worktree add -B ${shellQuote(branch)} ${shellQuote(target)};`,
+          `  else`,
+          `    mkdir -p ${shellQuote(root)} && cp -R ${shellQuote(source)}/. ${shellQuote(target)};`,
+          `  fi`,
+          `fi`,
+        ].join(' '),
+        { timeoutMs: GREP_TIMEOUT_MS },
+        container,
+      )
     }
 
     return { root, repoDirs }
@@ -152,86 +169,152 @@ export class ContainerWorkspace implements Workspace {
   }
 
   async grep(pattern: string, path?: string, cwd?: string): Promise<string> {
-    const container = await this.container()
     const target = path ?? '.'
 
-    const process = await container.exec(
-      [
-        'bash',
-        '-lc',
-        `rg -n --no-heading ${JSON.stringify(pattern)} ${JSON.stringify(target)} || true`,
-      ],
-      cwd ? { cwd } : undefined,
+    const result = await this.exec(
+      `rg -n --no-heading ${shellQuote(pattern)} ${shellQuote(target)} || true`,
+      { cwd, timeoutMs: GREP_TIMEOUT_MS },
     )
 
-    const output = await process.output()
-    return new TextDecoder().decode(output.stdout)
+    return result.stdout
   }
 
   async listFiles(root: string): Promise<string[]> {
-    const container = await this.container()
-
-    // Prefer find so listing does not depend on rg. Missing roots are empty,
-    // not errors — container disk resets leave Events history without files.
     const script = [
-      `root=${JSON.stringify(root)}`,
+      `root=${shellQuote(root)}`,
       `if [ ! -d "$root" ]; then`,
       `  exit 0`,
       `fi`,
       `find "$root" -type f`,
     ].join('\n')
 
-    const process = await container.exec(['bash', '-lc', script])
-    const output = await process.output()
+    const result = await this.exec(script, { timeoutMs: GREP_TIMEOUT_MS })
 
-    if ((output.exitCode ?? 0) !== 0) {
-      const stderr = new TextDecoder().decode(output.stderr ?? new Uint8Array()).trim()
-      throw new Error(stderr || `listFiles failed for ${root} (exit ${output.exitCode})`)
+    if (result.exitCode !== 0) {
+      throw new Error(
+        result.stderr.trim() || `listFiles failed for ${root} (exit ${result.exitCode})`,
+      )
     }
 
-    return new TextDecoder()
-      .decode(output.stdout)
+    return result.stdout
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
   }
 
-  async exec(command: string, options?: { cwd?: string; timeoutMs?: number }): Promise<ExecResult> {
+  async exec(command: string, options?: ExecOptions): Promise<ExecResult> {
     const container = await this.container()
-
-    const process = await container.exec(['bash', '-lc', command], {
-      cwd: options?.cwd,
-    })
-
-    this.activePid = typeof process.pid === 'number' ? process.pid : null
-
-    try {
-      const output = await process.output()
-      return {
-        stdout: new TextDecoder().decode(output.stdout),
-        stderr: new TextDecoder().decode(output.stderr ?? new Uint8Array()),
-        exitCode: output.exitCode ?? 0,
-      } satisfies ExecResult
-    } finally {
-      this.activePid = null
-    }
+    return this.execWithTimeout(command, options, container)
   }
 
   async gitDiff(cwd?: string): Promise<string> {
-    const container = await this.container()
-    const process = await container.exec(['git', 'diff'], cwd ? { cwd } : undefined)
-    const output = await process.output()
-    return new TextDecoder().decode(output.stdout)
+    const result = await this.exec('git diff', { cwd, timeoutMs: GREP_TIMEOUT_MS })
+    return result.stdout
   }
 
-  async kill(pid?: number): Promise<void> {
-    const target = pid ?? this.activePid
+  async kill(execId?: string): Promise<void> {
+    const pid = execId ? this.activePids.get(execId) : undefined
 
-    if (target == null) {
+    if (pid === undefined) {
       return
     }
 
     const container = await this.container()
-    await container.exec(['kill', '-TERM', String(target)]).then((process) => process.output())
+    await container.exec(['kill', '-TERM', String(pid)]).then((process) => process.output())
   }
+
+  private async seedDemoRepo(container: DurableContainer, files: Files): Promise<void> {
+    await files.mkdir('/workspace/repos/demo', { recursive: true })
+    await files.writeFile('/workspace/repos/demo/README.md', '# Shuttle workspace\n')
+
+    await this.execWithTimeout(
+      [
+        'cd /workspace/repos/demo',
+        'if [ ! -d .git ]; then',
+        '  git init',
+        '  git config user.email shuttle@local',
+        '  git config user.name Shuttle',
+        '  git add README.md',
+        '  git commit -m "Initial commit"',
+        'fi',
+      ].join(' && '),
+      { timeoutMs: GREP_TIMEOUT_MS },
+      container,
+    )
+  }
+
+  private async execWithTimeout(
+    command: string,
+    options: ExecOptions | undefined,
+    container: DurableContainer,
+  ): Promise<ExecResult> {
+    const timeoutMs = Math.min(
+      Math.max(1, options?.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS),
+      MAX_EXEC_TIMEOUT_MS,
+    )
+
+    const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000))
+    const execId = options?.execId ?? crypto.randomUUID()
+
+    const process = await container.exec(timedBashArgv(command, timeoutSeconds), {
+      cwd: options?.cwd,
+    })
+
+    const pid = typeof process.pid === 'number' ? process.pid : undefined
+
+    if (pid !== undefined) {
+      this.activePids.set(execId, pid)
+    }
+
+    const raceKill = new Promise<ExecResult>((resolve) => {
+      const timer = setTimeout(() => {
+        if (pid !== undefined) {
+          void container.exec(['kill', '-TERM', String(pid)]).then((proc) => proc.output())
+        }
+
+        resolve({
+          stdout: '',
+          stderr:
+            `Command timed out after ${timeoutSeconds}s (exit 124). ` +
+            'For long-running servers use: nohup <cmd> > log 2>&1 &\n',
+          exitCode: 124,
+        })
+      }, timeoutMs + 5_000)
+
+      process.output().then(
+        (output) => {
+          clearTimeout(timer)
+
+          resolve({
+            stdout: truncateOutput(new TextDecoder().decode(output.stdout)),
+            stderr: truncateOutput(new TextDecoder().decode(output.stderr ?? new Uint8Array())),
+            exitCode: output.exitCode ?? 0,
+          })
+        },
+        (error: unknown) => {
+          clearTimeout(timer)
+
+          resolve({
+            stdout: '',
+            stderr: `${error instanceof Error ? error.message : String(error)}\n`,
+            exitCode: 1,
+          })
+        },
+      )
+    })
+
+    try {
+      return await raceKill
+    } finally {
+      this.activePids.delete(execId)
+    }
+  }
+}
+
+function truncateOutput(text: string): string {
+  if (text.length <= OUTPUT_CAP_BYTES) {
+    return text
+  }
+
+  return `${text.slice(0, OUTPUT_CAP_BYTES)}\n...[truncated]\n`
 }

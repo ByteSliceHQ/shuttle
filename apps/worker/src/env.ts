@@ -1,4 +1,4 @@
-import type { LinkedSandboxRepo, WorktreeResult } from './sandbox/workspace'
+import type { ExecOptions, LinkedSandboxRepo, WorktreeResult } from './sandbox/workspace'
 
 export interface ShuttleEnv {
   readonly LOOMS_RUN: DurableObjectNamespace
@@ -24,7 +24,7 @@ export interface ShuttleEnv {
 /** RPC surface of SessionSandbox / WorkspaceSandbox. */
 export interface SessionSandboxStub {
   ensureRepos(repos: LinkedSandboxRepo[]): Promise<{ root: string }>
-  ensureWorktree(runId: string, threadId: string): Promise<WorktreeResult>
+  ensureWorktree(runId: string): Promise<WorktreeResult>
   ensureRepo(repoUrl: string | null): Promise<{ root: string }>
   readFile(
     path: string,
@@ -41,10 +41,10 @@ export interface SessionSandboxStub {
   listFiles(root: string): Promise<{ files: string[] }>
   exec(
     command: string,
-    options?: { cwd?: string; timeoutMs?: number },
+    options?: ExecOptions,
   ): Promise<{ stdout: string; stderr: string; exitCode: number }>
   gitDiff(cwd?: string): Promise<{ diff: string }>
-  kill(pid?: number): Promise<{ ok: true }>
+  kill(execId?: string): Promise<{ ok: true }>
   getMode(): Promise<{ mode: 'memory' | 'container' }>
   fetch(request: Request): Promise<Response>
 }

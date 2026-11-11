@@ -6,6 +6,7 @@ import {
   resolvePath,
   worktreeRepoPath,
   worktreeRoot,
+  type ExecOptions,
   type ExecResult,
   type LinkedSandboxRepo,
   type Workspace,
@@ -18,7 +19,7 @@ const META_KEY = 'meta:repos'
 /**
  * In-Durable-Object filesystem for demos without Docker.
  * Base checkouts live under `/workspace/repos/<name>`; worktrees are
- * copy-on-write overlays keyed by `/workspace/.wt/<runId>/<threadId>/<name>`.
+ * copy-on-write overlays keyed by `/workspace/.wt/<runId>/<name>` (shared per session).
  */
 export class MemoryWorkspace implements Workspace {
   private readonly files = new Map<string, string | null>()
@@ -68,13 +69,13 @@ export class MemoryWorkspace implements Workspace {
     return { root: '/workspace' }
   }
 
-  async ensureWorktree(runId: string, threadId: string): Promise<WorktreeResult> {
+  async ensureWorktree(runId: string): Promise<WorktreeResult> {
     await this.hydrate()
-    const root = worktreeRoot(runId, threadId)
+    const root = worktreeRoot(runId)
 
     const repoDirs = this.repoNames.map((name) => ({
       name,
-      root: worktreeRepoPath(runId, threadId, name),
+      root: worktreeRepoPath(runId, name),
     }))
 
     // Overlay markers so the worktree exists even before the first write.
@@ -82,7 +83,7 @@ export class MemoryWorkspace implements Workspace {
       const marker = `${dir.root}/.shuttle-worktree`
 
       if (!this.files.has(marker)) {
-        this.files.set(marker, `${runId}/${threadId}`)
+        this.files.set(marker, `${runId}/${dir.name}`)
         this.dirty.add(marker)
       }
     }
@@ -168,7 +169,7 @@ export class MemoryWorkspace implements Workspace {
       .toSorted()
   }
 
-  async exec(command: string, options?: { cwd?: string; timeoutMs?: number }): Promise<ExecResult> {
+  async exec(command: string, options?: ExecOptions): Promise<ExecResult> {
     this.throwIfAborted()
     await this.hydrate()
     const cwd = options?.cwd ?? '/workspace'
@@ -380,7 +381,8 @@ export class MemoryWorkspace implements Workspace {
   }
 
   private basePathFor(path: string): string | null {
-    const match = path.match(/^\/workspace\/\.wt\/[^/]+\/[^/]+\/(.+)$/)
+    // `/workspace/.wt/<runId>/<repo>/...` → `/workspace/repos/<repo>/...`
+    const match = path.match(/^\/workspace\/\.wt\/[^/]+\/(.+)$/)
 
     if (!match?.[1]) {
       return null
@@ -399,7 +401,7 @@ export class MemoryWorkspace implements Workspace {
 
       paths.add(path)
 
-      // Synthesize overlay views of base files under each worktree.
+      // Synthesize overlay views of base files under each shared worktree repo.
       if (path.startsWith('/workspace/repos/')) {
         const relative = path.slice('/workspace/repos/'.length)
 

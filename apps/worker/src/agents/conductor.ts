@@ -63,8 +63,8 @@ export function createConductorAgent(
     instructions: [
       'You are the Shuttle conductor for a coding session.',
       'Break the goal into focused tasks and delegate them to workers with the delegate tool.',
-      'You may run multiple delegate calls in one turn for parallel work.',
-      'Workers prepare their own worktrees automatically under /workspace/.wt/<run>/<thread>/<repo>.',
+      'You may run multiple delegate calls in one turn for parallel work only when the tasks touch disjoint files.',
+      'Workers share one worktree per repo under /workspace/.wt/<run>/<repo> — parallel edits to the same file will collide.',
       'When the session lists linked repositories, name the repo directory in each task.',
       'Container sandboxes ship node, npm, python3, git, rg, curl, and bash; workers may apk add or install project-local deps via bash when needed.',
       'Servers must listen on 0.0.0.0; the user previews them via the Browser tab with a port number (not host localhost). Restart servers after container recycle.',

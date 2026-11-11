@@ -53,20 +53,20 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
     return bindingPromise
   }
 
-  async function prepare(threadId: string): Promise<{ cwd: string; repos: LinkedSandboxRepo[] }> {
+  async function prepare(): Promise<{ cwd: string; repos: LinkedSandboxRepo[] }> {
     const binding = await resolveBinding()
     const sandbox = sandboxStub(env, binding.sandboxName)
-    const key = `${binding.sandboxName}:${threadId}`
+    const key = binding.sandboxName
 
     if (!prepared.has(key)) {
       await sandbox.ensureRepos(binding.repos as LinkedSandboxRepo[])
-      await sandbox.ensureWorktree(runId, threadId)
+      await sandbox.ensureWorktree(runId)
       prepared.add(key)
     }
 
     const primary = binding.repos[0]?.name ?? 'demo'
     return {
-      cwd: `/workspace/.wt/${runId}/${threadId}/${primary}`,
+      cwd: `/workspace/.wt/${runId}/${primary}`,
       repos: binding.repos as LinkedSandboxRepo[],
     }
   }
@@ -83,7 +83,7 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
       path: z.string(),
     }),
     handler: async ({ path }, ctx) => {
-      const { cwd } = await prepare(ctx.threadId)
+      const { cwd } = await prepare()
       const binding = await resolveBinding()
 
       const result = await withAbort(
@@ -92,7 +92,12 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
         onAbort,
       )
 
-      return { path, content: result.content }
+      return {
+        path,
+        content: result.missing ? null : result.content,
+        missing: result.missing === true,
+        error: result.missing ? result.error : null,
+      }
     },
   })
 
@@ -104,7 +109,7 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
       content: z.string(),
     }),
     handler: async ({ path, content }, ctx) => {
-      const { cwd } = await prepare(ctx.threadId)
+      const { cwd } = await prepare()
       const binding = await resolveBinding()
 
       await withAbort(
@@ -126,7 +131,7 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
       new_text: z.string(),
     }),
     handler: async ({ path, old_text, new_text }, ctx) => {
-      const { cwd } = await prepare(ctx.threadId)
+      const { cwd } = await prepare()
       const binding = await resolveBinding()
 
       const result = await withAbort(
@@ -147,7 +152,7 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
       path: z.string().optional(),
     }),
     handler: async ({ pattern, path }, ctx) => {
-      const { cwd } = await prepare(ctx.threadId)
+      const { cwd } = await prepare()
       const binding = await resolveBinding()
 
       const result = await withAbort(
@@ -162,17 +167,24 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
 
   const bash = defineTool({
     name: 'bash',
-    description: 'Run a shell command in the worker worktree',
+    description: 'Run a shell command in the shared session worktree',
     input: z.object({
       command: z.string(),
+      timeout_seconds: z.number().int().min(1).max(600).optional(),
     }),
-    handler: async ({ command }, ctx) => {
-      const { cwd } = await prepare(ctx.threadId)
+    handler: async ({ command, timeout_seconds }, ctx) => {
+      const { cwd } = await prepare()
       const binding = await resolveBinding()
+      const sandbox = sandboxStub(env, binding.sandboxName)
+      const timeoutMs = (timeout_seconds ?? 120) * 1000
+      const execId = crypto.randomUUID()
+
       return await withAbort(
         ctx.signal,
-        () => sandboxStub(env, binding.sandboxName).exec(command, { cwd }),
-        onAbort,
+        () => sandbox.exec(command, { cwd, timeoutMs, execId }),
+        async () => {
+          await sandbox.kill(execId)
+        },
       )
     },
   })
@@ -182,7 +194,7 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
     description: 'Show the current git diff in the worker worktree',
     input: z.object({}),
     handler: async (_input, ctx) => {
-      const { cwd } = await prepare(ctx.threadId)
+      const { cwd } = await prepare()
       const binding = await resolveBinding()
 
       const result = await withAbort(

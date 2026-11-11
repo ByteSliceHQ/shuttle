@@ -8,7 +8,13 @@ import { MemoryWorkspace } from './memory-workspace'
 import { parsePreviewHost } from './preview-host'
 import { proxyContainerPreview } from './preview-proxy'
 import { openContainerTerminal } from './terminal'
-import type { ExecResult, LinkedSandboxRepo, Workspace, WorktreeResult } from './workspace'
+import type {
+  ExecOptions,
+  ExecResult,
+  LinkedSandboxRepo,
+  Workspace,
+  WorktreeResult,
+} from './workspace'
 
 /**
  * One sandbox Durable Object per workspace folder (named `folder:<folderId>`).
@@ -49,12 +55,12 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
     return result
   }
 
-  async ensureWorktree(runId: string, threadId: string): Promise<WorktreeResult> {
+  async ensureWorktree(runId: string): Promise<WorktreeResult> {
     if (!this.preparedRepos) {
       await this.ensureRepos([])
     }
 
-    return (await this.workspace()).ensureWorktree(runId, threadId)
+    return (await this.workspace()).ensureWorktree(runId)
   }
 
   /** @deprecated Prefer ensureRepos. */
@@ -130,7 +136,7 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
     return { files: await (await this.workspace()).listFiles(root) }
   }
 
-  async exec(command: string, options?: { cwd?: string; timeoutMs?: number }): Promise<ExecResult> {
+  async exec(command: string, options?: ExecOptions): Promise<ExecResult> {
     return (await this.workspace()).exec(command, options)
   }
 
@@ -143,8 +149,8 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
     return { diff: await (await this.workspace()).gitDiff(cwd) }
   }
 
-  async kill(pid?: number): Promise<{ ok: true }> {
-    await (await this.workspace()).kill(pid)
+  async kill(execId?: string): Promise<{ ok: true }> {
+    await (await this.workspace()).kill(execId)
     return { ok: true }
   }
 

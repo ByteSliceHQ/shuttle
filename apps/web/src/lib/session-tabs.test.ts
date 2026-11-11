@@ -90,7 +90,7 @@ describe('session-tabs', () => {
   })
 
   test('titles browsers and file paths', () => {
-    expect(tabTitleForKind('file', '/workspace/.wt/s1/t1/repo/src/main.ts')).toBe('main.ts')
+    expect(tabTitleForKind('file', '/workspace/.wt/s1/repo/src/main.ts')).toBe('main.ts')
     expect(tabTitleForKind('browser', '3000')).toBe(':3000')
     expect(tabTitleForKind('browser', 'http://127.0.0.1:5173/app')).toBe('127.0.0.1:5173')
   })

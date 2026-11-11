@@ -4,7 +4,7 @@
  * Spike findings (see SPIKE.md):
  * - Local effects inside a Looms Durable Object can call another DO over RPC.
  * - AbortSignal on ToolContext races the RPC; kill() cleans up when possible.
- * - Parallel child threads in one DO each get their own worktree path.
+ * - Workers in one session share a single worktree per repo so edits are visible.
  * - D1 replica is optional; history tools degrade to in-run events when absent.
  */
 
@@ -28,17 +28,24 @@ export interface WorktreeResult {
   readonly repoDirs: readonly { readonly name: string; readonly root: string }[]
 }
 
+export interface ExecOptions {
+  readonly cwd?: string
+  readonly timeoutMs?: number
+  /** Caller-chosen id so `kill(execId)` targets this command, not another worker's. */
+  readonly execId?: string
+}
+
 export interface Workspace {
   ensureRepos(repos: readonly LinkedSandboxRepo[]): Promise<{ root: string }>
-  ensureWorktree(runId: string, threadId: string): Promise<WorktreeResult>
+  ensureWorktree(runId: string): Promise<WorktreeResult>
   readFile(path: string, cwd?: string): Promise<string>
   writeFile(path: string, content: string, cwd?: string): Promise<void>
   editFile(path: string, oldText: string, newText: string, cwd?: string): Promise<number>
   grep(pattern: string, path?: string, cwd?: string): Promise<string>
   listFiles(root: string): Promise<string[]>
-  exec(command: string, options?: { cwd?: string; timeoutMs?: number }): Promise<ExecResult>
+  exec(command: string, options?: ExecOptions): Promise<ExecResult>
   gitDiff(cwd?: string): Promise<string>
-  kill(pid?: number): Promise<void>
+  kill(execId?: string): Promise<void>
 }
 
 export function resolvePath(path: string, cwd?: string): string {
@@ -54,10 +61,11 @@ export function repoCheckoutPath(repoName: string): string {
   return `/workspace/repos/${repoName}`
 }
 
-export function worktreeRoot(runId: string, threadId: string): string {
-  return `/workspace/.wt/${runId}/${threadId}`
+/** Shared session worktree root: one per run, not per worker thread. */
+export function worktreeRoot(runId: string): string {
+  return `/workspace/.wt/${runId}`
 }
 
-export function worktreeRepoPath(runId: string, threadId: string, repoName: string): string {
-  return `${worktreeRoot(runId, threadId)}/${repoName}`
+export function worktreeRepoPath(runId: string, repoName: string): string {
+  return `${worktreeRoot(runId)}/${repoName}`
 }
