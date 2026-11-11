@@ -3,6 +3,41 @@ import { Schema } from 'effect'
 import { TabKindSchema, workspaceModule, type ArtifactTab } from './scope'
 import { reduceSessionTabsState, type SessionTabSet } from './tab-set'
 
+function activityEventSeq(
+  payloadSeq: number | undefined,
+  idempotencyKey: string | null | undefined,
+): number | undefined {
+  if (typeof payloadSeq === 'number' && Number.isFinite(payloadSeq)) {
+    return payloadSeq
+  }
+
+  if (typeof idempotencyKey === 'string' && idempotencyKey.startsWith('activity:')) {
+    const tail = Number(idempotencyKey.slice(idempotencyKey.lastIndexOf(':') + 1))
+
+    if (Number.isFinite(tail)) {
+      return tail
+    }
+  }
+
+  return undefined
+}
+
+function isStaleActivityEvent(
+  session: { readonly activitySeq?: number; readonly activityAt?: number },
+  seq: number | undefined,
+  at: number,
+): boolean {
+  if (seq !== undefined && session.activitySeq !== undefined) {
+    return seq < session.activitySeq
+  }
+
+  if (session.activityAt !== undefined) {
+    return at < session.activityAt
+  }
+
+  return false
+}
+
 const GithubAccountSchema = Schema.Struct({
   login: Schema.String,
   type: Schema.String,
@@ -33,6 +68,9 @@ const SessionSchema = Schema.Struct({
   goal: Schema.String,
   status: Schema.String,
   activity: Schema.String,
+  activitySeq: Schema.optional(Schema.Finite),
+  activityAt: Schema.optional(Schema.Finite),
+  lastCompletedAt: Schema.optional(Schema.Finite),
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
   archived: Schema.Boolean,
@@ -79,6 +117,9 @@ export const workspaceTree = workspaceModule.projection({
         goal: string
         status: string
         activity: string
+        activitySeq?: number
+        activityAt?: number
+        lastCompletedAt?: number
         createdAt: number
         updatedAt: number
         archived: boolean
@@ -309,6 +350,14 @@ export const workspaceTree = workspaceModule.projection({
           return state
         }
 
+        const seq = activityEventSeq(event.payload.seq, event.idempotencyKey)
+
+        if (isStaleActivityEvent(session, seq, event.payload.at)) {
+          return state
+        }
+
+        const finishedWork = session.activity === 'working' && event.payload.activity === 'idle'
+
         return {
           ...state,
           sessions: {
@@ -316,7 +365,12 @@ export const workspaceTree = workspaceModule.projection({
             [event.payload.runId]: {
               ...session,
               activity: event.payload.activity,
-              updatedAt: event.payload.at,
+              activityAt: Math.max(session.activityAt ?? 0, event.payload.at),
+              ...(seq !== undefined
+                ? { activitySeq: Math.max(session.activitySeq ?? 0, seq) }
+                : {}),
+              updatedAt: Math.max(session.updatedAt, event.payload.at),
+              ...(finishedWork ? { lastCompletedAt: event.payload.at } : {}),
             },
           },
         }
@@ -341,15 +395,19 @@ export const workspaceTree = workspaceModule.projection({
           return state
         }
 
+        const nextStatus = status ?? session.status
+        const at = typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
+
         return {
           ...state,
           sessions: {
             ...state.sessions,
             [runId]: {
               ...session,
-              status: status ?? session.status,
-              activity: 'idle',
-              updatedAt: Date.now(),
+              status: nextStatus,
+              activity: nextStatus === 'failed' ? 'error' : 'idle',
+              updatedAt: at,
+              ...(nextStatus === 'completed' ? { lastCompletedAt: at } : {}),
             },
           },
         }

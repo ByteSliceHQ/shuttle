@@ -144,6 +144,7 @@ export const reportActivity = workspaceModule.signal({
     runId: Schema.String,
     activity: SessionActivitySchema,
     at: Schema.Finite,
+    seq: Schema.optional(Schema.Finite),
   }),
   build: (input) => workspaceModule.input('session.activity', input),
 })

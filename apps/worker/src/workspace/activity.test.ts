@@ -14,6 +14,7 @@ import type { ShuttleEnv } from '../env'
 import { codingSession, say, shuttleSession } from '../session/module'
 import { createWorkspaceActivityProjector } from './activity'
 import {
+  deriveActivityFromRunState,
   deriveSessionActivity,
   initialSessionActivityState,
   reduceSessionActivity,
@@ -25,6 +26,7 @@ interface RecordedSignal {
     readonly runId: string
     readonly activity: string
     readonly at: number
+    readonly seq?: number
   }
   readonly idempotencyKey?: string
 }
@@ -302,6 +304,7 @@ describe('workspace activity projector', () => {
       runId: 'session_parallel',
       activity: 'idle',
       at: 220,
+      seq: 19,
     })
   })
 
@@ -431,6 +434,7 @@ describe('workspace activity projector', () => {
 
       // 1. Conductor pauses on ask_user -> 'needs_input'
       await waitUntilActivity(runId, 'needs_input')
+      expect(deriveActivityFromRunState(await looms.getRun(runId))).toBe('needs_input')
 
       // 2. Developer approves -> Conductor finishes turn 2 -> settles to 'idle'
       await looms.signal(runId, [
@@ -446,6 +450,7 @@ describe('workspace activity projector', () => {
       ])
 
       await waitUntilActivity(runId, 'idle')
+      expect(deriveActivityFromRunState(await looms.getRun(runId))).toBe('idle')
 
       // 3. Follow-up task crashes Conductor on turn 3 -> surfaces 'error'
       await looms.signal(runId, [
@@ -453,6 +458,7 @@ describe('workspace activity projector', () => {
       ])
 
       await waitUntilActivity(runId, 'error')
+      expect(deriveActivityFromRunState(await looms.getRun(runId))).toBe('error')
 
       // 4. Another message respawns Conductor (gen 1) and settles back to 'idle'
       await looms.signal(runId, [
@@ -460,6 +466,7 @@ describe('workspace activity projector', () => {
       ])
 
       await waitUntilActivity(runId, 'idle')
+      expect(deriveActivityFromRunState(await looms.getRun(runId))).toBe('idle')
     } finally {
       await looms.stop()
     }

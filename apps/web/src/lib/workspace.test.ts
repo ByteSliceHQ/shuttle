@@ -4,8 +4,15 @@ import type { AnyEventEnvelope } from '@swirls/looms/core'
 
 import { emptySessionTabs, emptyWorkspaceTree, sessionTabs, workspaceTree } from './workspace'
 
-function event(type: string, payload: object): AnyEventEnvelope {
-  return { type, payload, seq: 1, id: 'e1', ts: 1 } as AnyEventEnvelope
+function event(type: string, payload: object, idempotencyKey?: string): AnyEventEnvelope {
+  return {
+    type,
+    payload,
+    seq: 1,
+    id: 'e1',
+    ts: 1,
+    ...(idempotencyKey ? { idempotencyKey } : {}),
+  } as AnyEventEnvelope
 }
 
 describe('workspaceTree reducer', () => {
@@ -90,6 +97,69 @@ describe('workspaceTree reducer', () => {
     expect(state.sessions.s1?.activity).toBe('idle')
     expect(state.sessions.s1?.lastCompletedAt).toBe(180)
     expect(state.sessions.s1?.title).toBe('Refactored sidebar')
+  })
+
+  test('ignores out-of-order stale activity signals from projector backfills', () => {
+    let state = emptyWorkspaceTree
+
+    state = workspaceTree.reduce(
+      state,
+      event('workspace.folder.created', {
+        folderId: 'f1',
+        name: 'Demo 2',
+        createdAt: 1,
+      }),
+    )
+
+    state = workspaceTree.reduce(
+      state,
+      event('workspace.session.requested', {
+        runId: 's_demo',
+        folderId: 'f1',
+        goal: 'are you able to see any files?',
+      }),
+    )
+
+    state = workspaceTree.reduce(state, event('workspace.session.launched', { runId: 's_demo' }))
+
+    // Projector v2 already reported idle at seq 588.
+    state = workspaceTree.reduce(
+      state,
+      event(
+        'workspace.session.activity',
+        { runId: 's_demo', activity: 'idle', at: 1794366642408 },
+        'activity:s_demo:588',
+      ),
+    )
+
+    expect(state.sessions.s_demo?.activity).toBe('idle')
+    expect(state.sessions.s_demo?.activitySeq).toBe(588)
+
+    // Later projector version replays batch 1..500 (out of 588) and emits a stale working signal at seq 500.
+    state = workspaceTree.reduce(
+      state,
+      event(
+        'workspace.session.activity',
+        { runId: 's_demo', activity: 'working', at: 1794366636601, seq: 500 },
+        'activity:s_demo:500',
+      ),
+    )
+
+    expect(state.sessions.s_demo?.activity).toBe('idle')
+    expect(state.sessions.s_demo?.activitySeq).toBe(588)
+
+    // Subsequent genuine user message advances past seq 588 -> updates to working.
+    state = workspaceTree.reduce(
+      state,
+      event(
+        'workspace.session.activity',
+        { runId: 's_demo', activity: 'working', at: 1794367000000, seq: 595 },
+        'activity:s_demo:595',
+      ),
+    )
+
+    expect(state.sessions.s_demo?.activity).toBe('working')
+    expect(state.sessions.s_demo?.activitySeq).toBe(595)
   })
 })
 

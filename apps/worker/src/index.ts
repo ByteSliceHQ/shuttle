@@ -17,6 +17,8 @@ import { handleShuttleRoutes } from './routes/sessions'
 import { handleWorkspaceRoutes } from './routes/workspace'
 import { parsePreviewHost } from './sandbox/preview-host'
 import { SessionSandbox } from './sandbox/session-sandbox'
+import { deriveActivityFromRunState } from './workspace/activity-state'
+import type { SessionActivity } from './workspace/module'
 import { sandboxNameFor } from './workspace/thread'
 
 export { SessionSandbox }
@@ -44,6 +46,44 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
 
   async setLlmModel(model: string): Promise<{ model: string }> {
     return { model: await writeStoredLlmModel(this.ctx.storage, model) }
+  }
+
+  /** Authoritative log tail for this run. */
+  async getStreamTail(): Promise<number> {
+    const runId = this.ctx.id.name
+
+    if (!runId) {
+      return 0
+    }
+
+    const [row] = [
+      ...this.ctx.storage.sql.exec('SELECT tail FROM looms_streams WHERE run_id = ?', runId),
+    ]
+
+    return row && typeof row.tail === 'number' && Number.isFinite(row.tail) ? row.tail : 0
+  }
+
+  /** Authoritative session activity + committed log tail for workspace reconciliation. */
+  async getSessionActivitySnapshot(): Promise<{
+    activity: SessionActivity
+    tail: number
+  } | null> {
+    const runId = this.ctx.id.name
+
+    if (!runId) {
+      return null
+    }
+
+    const run = await this.getRun()
+
+    if (!run.rootThreadId) {
+      return null
+    }
+
+    return {
+      activity: deriveActivityFromRunState(run),
+      tail: await this.getStreamTail(),
+    }
   }
 }
 

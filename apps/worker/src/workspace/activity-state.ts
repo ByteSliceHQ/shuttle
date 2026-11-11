@@ -1,3 +1,5 @@
+import type { RunState } from '@swirls/looms/core'
+
 import type { SessionActivity } from './scope'
 
 export type OpenToolCallState = 'executing' | 'spawned_child' | 'awaiting_effects'
@@ -744,4 +746,106 @@ export function reduceSessionActivity(
     default:
       return state
   }
+}
+
+function waitAwaitsApproval(wait: RunState['waits'][string]): boolean {
+  const tag = asRecord(wait.tag)
+
+  if (typeof tag.approvalId === 'string' && tag.approvalId.length > 0) {
+    return true
+  }
+
+  if ('type' in wait.on) {
+    const types = Array.isArray(wait.on.type) ? wait.on.type : [wait.on.type]
+    return types.includes('approval.decided')
+  }
+
+  return false
+}
+
+/**
+ * Derive authoritative `SessionActivity` directly from a hydrated `RunState`.
+ * Used for workspace self-healing when an older projector or interrupted batch left
+ * a stale `working` state behind.
+ */
+export function deriveActivityFromRunState(run: RunState): SessionActivity {
+  switch (run.status) {
+    case 'completed':
+    case 'cancelled':
+      return 'idle'
+
+    case 'failed':
+      return 'error'
+
+    case 'running':
+      break
+
+    default: {
+      const exhaustive: never = run.status
+      return exhaustive
+    }
+  }
+
+  for (const wait of Object.values(run.waits)) {
+    const owner = run.threads[wait.threadId]
+
+    if (
+      owner &&
+      owner.status !== 'completed' &&
+      owner.status !== 'failed' &&
+      owner.status !== 'cancelled' &&
+      waitAwaitsApproval(wait)
+    ) {
+      return 'needs_input'
+    }
+  }
+
+  if (run.outstandingEffects.length > 0) {
+    return 'working'
+  }
+
+  for (const thread of Object.values(run.threads)) {
+    if (
+      thread.status === 'completed' ||
+      thread.status === 'failed' ||
+      thread.status === 'cancelled'
+    ) {
+      continue
+    }
+
+    if (thread.kind === 'evaluator') {
+      return 'working'
+    }
+
+    if (thread.kind === 'agent') {
+      const agentState = asRecord(thread.state)
+
+      if (agentState.needsLlmCall === true) {
+        return 'working'
+      }
+
+      const executing = agentState.executingToolCalls
+
+      if (Array.isArray(executing) && executing.length > 0) {
+        return 'working'
+      }
+    }
+  }
+
+  const root = run.rootThreadId ? run.threads[run.rootThreadId] : undefined
+
+  if (root?.status === 'failed') {
+    return 'error'
+  }
+
+  if (root?.kind === 'shuttle-session') {
+    const rootState = asRecord(root.state)
+    const conductor = asRecord(rootState.conductor)
+
+    if (conductor.status === 'down' && conductor.reason === 'failed') {
+      return 'error'
+    }
+  }
+
+  return 'idle'
 }

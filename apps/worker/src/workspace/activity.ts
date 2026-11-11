@@ -161,6 +161,7 @@ export function createWorkspaceActivityProjector(
         runId,
         activity,
         at: reportAt,
+        seq: reportSeq,
       })
 
       await stub.signal([

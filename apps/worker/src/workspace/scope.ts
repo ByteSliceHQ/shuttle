@@ -94,6 +94,7 @@ export const workspaceCatalog = defineEventCatalog('workspace', {
     runId: Schema.String,
     activity: SessionActivitySchema,
     at: Schema.Finite,
+    seq: Schema.optional(Schema.Finite),
   }),
   'tab.opened': Schema.Struct({
     runId: Schema.String,

@@ -3,7 +3,13 @@ import { playbookRunId, workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { getInstallation, listInstallationRepos } from '../github/app'
 import { loomsStub } from '../looms-stub'
-import { linkRepo, requestSession, unlinkRepo, type LinkedRepo } from '../workspace/module'
+import {
+  linkRepo,
+  reportActivity,
+  requestSession,
+  unlinkRepo,
+  type LinkedRepo,
+} from '../workspace/module'
 
 export async function handleWorkspaceRoutes(
   request: Request,
@@ -40,44 +46,125 @@ export async function handleWorkspaceRoutes(
 async function getWorkspace(env: ShuttleEnv, ctx?: ExecutionContext): Promise<Response> {
   await ensureWorkspaceQuietly(env)
   const runId = workspaceRunId(env)
-  ctx?.waitUntil(reconcileActiveWorkspaceSessions(env, runId))
-  return Response.json({ runId })
+  const stub = loomsStub(env.LOOMS_RUN, runId)
+
+  const [treeResponse, tabsResponse, tail] = await Promise.all([
+    stub.fetch(
+      new Request(`https://shuttle.internal/runs/${runId}/projections/workspaceTree`, {
+        method: 'GET',
+      }),
+    ),
+    stub.fetch(
+      new Request(`https://shuttle.internal/runs/${runId}/projections/sessionTabs`, {
+        method: 'GET',
+      }),
+    ),
+    stub.getStreamTail(),
+  ])
+
+  const treeBody = treeResponse.ok ? ((await treeResponse.json()) as { value?: unknown }) : null
+  const tabsBody = tabsResponse.ok ? ((await tabsResponse.json()) as { value?: unknown }) : null
+
+  ctx?.waitUntil(reconcileActiveWorkspaceSessions(env, runId, treeBody?.value))
+
+  return Response.json({
+    runId,
+    tail,
+    tree: treeBody?.value ?? null,
+    tabs: tabsBody?.value ?? null,
+  })
 }
 
 async function reconcileActiveWorkspaceSessions(
   env: ShuttleEnv,
   workspaceId: string,
+  initialTree?: unknown,
 ): Promise<void> {
   try {
     const stub = loomsStub(env.LOOMS_RUN, workspaceId)
+    let treeValue = initialTree
 
-    const response = await stub.fetch(
-      new Request(`https://shuttle.internal/runs/${workspaceId}/projections/workspaceTree`, {
-        method: 'GET',
-      }),
-    )
+    if (!treeValue) {
+      const response = await stub.fetch(
+        new Request(`https://shuttle.internal/runs/${workspaceId}/projections/workspaceTree`, {
+          method: 'GET',
+        }),
+      )
 
-    if (!response.ok) {
-      return
+      if (!response.ok) {
+        return
+      }
+
+      const body = (await response.json()) as { value?: unknown }
+      treeValue = body.value
     }
 
-    const body = (await response.json()) as {
+    const body = { value: treeValue } as {
       value?: {
-        sessions?: Record<string, { runId?: unknown; status?: unknown; activity?: unknown }>
+        sessions?: Record<
+          string,
+          {
+            runId?: unknown
+            status?: unknown
+            activity?: unknown
+            activitySeq?: unknown
+            updatedAt?: unknown
+          }
+        >
       }
     }
 
-    const activeRunIds = Object.values(body.value?.sessions ?? {}).flatMap((session) =>
+    const activeSessions = Object.values(body.value?.sessions ?? {}).flatMap((session) =>
       typeof session.runId === 'string' &&
       session.status === 'running' &&
       session.activity === 'working'
-        ? [session.runId]
+        ? [
+            {
+              runId: session.runId,
+              activitySeq:
+                typeof session.activitySeq === 'number' ? session.activitySeq : undefined,
+              updatedAt: typeof session.updatedAt === 'number' ? session.updatedAt : 0,
+            },
+          ]
         : [],
     )
 
-    await Promise.allSettled(
-      activeRunIds.map((sessionRunId) => loomsStub(env.LOOMS_RUN, sessionRunId).status()),
+    if (activeSessions.length === 0) {
+      return
+    }
+
+    const corrections = await Promise.allSettled(
+      activeSessions.map(async (entry) => {
+        const snapshot = await loomsStub(env.LOOMS_RUN, entry.runId).getSessionActivitySnapshot()
+
+        if (!snapshot || snapshot.tail === 0 || snapshot.activity === 'working') {
+          return null
+        }
+
+        const seq = Math.max(snapshot.tail, entry.activitySeq ?? 0)
+        const at = entry.updatedAt > 0 ? entry.updatedAt : Date.now()
+
+        const built = reportActivity({
+          runId: entry.runId,
+          activity: snapshot.activity,
+          at,
+          seq,
+        })
+
+        return {
+          ...built,
+          idempotencyKey: `reconcile:${entry.runId}:${seq}:${snapshot.activity}`,
+        }
+      }),
     )
+
+    const signals = corrections.flatMap((result) =>
+      result.status === 'fulfilled' && result.value !== null ? [result.value] : [],
+    )
+
+    if (signals.length > 0) {
+      await stub.signal(signals)
+    }
   } catch {
     // Best-effort background reconciliation; live sessions still self-report via projectors.
   }

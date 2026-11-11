@@ -1,7 +1,9 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { SessionActivity } from '@/lib/session-activity'
 import {
+  emptySessionTabs,
+  emptyWorkspaceTree,
   fetchWorkspace,
   sessionTabs,
   workspaceTree,
@@ -10,7 +12,7 @@ import {
   type WorkspaceTree,
 } from '@/lib/workspace'
 import { FIXTURE_MODES, workspaceFixture, type FixtureMode } from '@/lib/workspace-fixtures'
-import { useProjection, useRunStore, useRunSummary } from '@swirls/looms/react'
+import { useRunEvents, useRunStore, useRunSummary } from '@swirls/looms/react'
 
 export interface LiveSessionStatus {
   readonly status: string
@@ -89,11 +91,19 @@ function mergeLiveSessions(
 }
 
 /**
- * One live subscription to the singleton workspace run, shared by the sidebar and every page.
- * The subscription renders as a sibling so pages never remount when the run id arrives.
+ * Hydrates from the server's authoritative `/workspace` projection snapshot (which preserves
+ * server-only fields like `idempotencyKey` and avoids replaying the entire historical log),
+ * then folds live delta events strictly past `tail`.
  */
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [runId, setRunId] = useState<string | null>(null)
+
+  const [seed, setSeed] = useState<{
+    readonly tail: number
+    readonly tree: WorkspaceTree
+    readonly tabs: SessionTabsState
+  } | null>(null)
+
   const [liveTree, setLiveTree] = useState<WorkspaceTree | null>(null)
   const [liveTabs, setLiveTabs] = useState<SessionTabsState>({})
   const [liveSessions, setLiveSessions] = useState<Readonly<Record<string, LiveSessionStatus>>>({})
@@ -103,7 +113,22 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     void fetchWorkspace()
-      .then((result) => setRunId(result.runId))
+      .then((result) => {
+        setRunId(result.runId)
+
+        if (result.tree) {
+          const initialTabs = result.tabs ?? emptySessionTabs
+
+          setSeed({
+            tail: typeof result.tail === 'number' ? result.tail : 0,
+            tree: result.tree,
+            tabs: initialTabs,
+          })
+
+          setLiveTree(result.tree)
+          setLiveTabs(initialTabs)
+        }
+      })
       .catch((cause: unknown) =>
         setError(cause instanceof Error ? cause.message : 'Failed to load workspace'),
       )
@@ -156,6 +181,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       {runId ? (
         <WorkspaceSubscription
           runId={runId}
+          seed={seed}
           onTree={setLiveTree}
           onTabs={setLiveTabs}
           onStalled={setError}
@@ -170,28 +196,87 @@ const STALL_MS = 3000
 
 function WorkspaceSubscription({
   runId,
+  seed,
   onTree,
   onTabs,
   onStalled,
 }: {
   runId: string
+  seed: {
+    readonly tail: number
+    readonly tree: WorkspaceTree
+    readonly tabs: SessionTabsState
+  } | null
   onTree: (tree: WorkspaceTree) => void
   onTabs: (tabs: SessionTabsState) => void
   onStalled: (message: string) => void
 }) {
-  const store = useRunStore(runId)
-  const tree = useProjection(store, workspaceTree)
-  const tabs = useProjection(store, sessionTabs)
+  const store = useRunStore(runId, { includeEphemeral: false })
+  const events = useRunEvents(store)
   const summary = useRunSummary(store)
-  const hydrated = summary.startedAt !== undefined
+  const hydrated = Boolean(seed) || summary.startedAt !== undefined
   const live = summary.connection === 'live'
 
+  const foldRef = useRef<{
+    cursor: number
+    tree: WorkspaceTree
+    tabs: SessionTabsState
+    seededTail: number | null
+  }>({
+    cursor: 0,
+    tree: emptyWorkspaceTree,
+    tabs: emptySessionTabs,
+    seededTail: null,
+  })
+
   useEffect(() => {
-    if (hydrated) {
+    if (!hydrated) {
+      return
+    }
+
+    const baseTail = seed?.tail ?? null
+
+    if (foldRef.current.seededTail !== baseTail) {
+      foldRef.current = {
+        cursor: seed?.tail ?? 0,
+        tree: seed?.tree ?? emptyWorkspaceTree,
+        tabs: seed?.tabs ?? emptySessionTabs,
+        seededTail: baseTail,
+      }
+    }
+
+    let { cursor, tree, tabs } = foldRef.current
+    let changed = false
+
+    for (const event of events) {
+      if (event.ephemeral || event.seq <= cursor) {
+        continue
+      }
+
+      cursor = event.seq
+      const nextTree = workspaceTree.reduce(tree, event)
+      const nextTabs = sessionTabs.reduce(tabs, event)
+
+      if (nextTree !== tree || nextTabs !== tabs) {
+        changed = true
+      }
+
+      tree = nextTree
+      tabs = nextTabs
+    }
+
+    foldRef.current = {
+      cursor,
+      tree,
+      tabs,
+      seededTail: baseTail,
+    }
+
+    if (changed || cursor === (seed?.tail ?? 0)) {
       onTree(tree)
       onTabs(tabs)
     }
-  }, [tree, tabs, hydrated, onTree, onTabs])
+  }, [events, hydrated, seed, onTree, onTabs])
 
   useEffect(() => {
     if (hydrated || !live) {

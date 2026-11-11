@@ -1,5 +1,7 @@
 import type { EventInput, JsonValue, RunState, RunStatusSnapshot } from '@swirls/looms/core'
 
+import type { SessionActivity } from './workspace/module'
+
 /** Narrow RPC surface we call on Looms Durable Object stubs. */
 export interface LoomsRunStub {
   fetch(request: Request): Promise<Response>
@@ -20,6 +22,8 @@ export interface LoomsRunStub {
   }): Promise<{ runId: string }>
   getLlmModel(): Promise<{ model: string }>
   setLlmModel(model: string): Promise<{ model: string }>
+  getStreamTail(): Promise<number>
+  getSessionActivitySnapshot(): Promise<{ activity: SessionActivity; tail: number } | null>
 }
 
 export function loomsStub(namespace: DurableObjectNamespace, runId: string): LoomsRunStub {

@@ -26,6 +26,8 @@ export interface WorkspaceSession {
   readonly goal: string
   readonly status: string
   readonly activity: string
+  readonly activitySeq?: number
+  readonly activityAt?: number
   readonly createdAt: number
   readonly updatedAt: number
   readonly archived: boolean
@@ -74,6 +76,41 @@ export const emptyWorkspaceTree: WorkspaceTree = {
 }
 
 export const emptySessionTabs: SessionTabsState = {}
+
+function activityEventSeq(
+  payloadSeq: number | undefined,
+  idempotencyKey: string | null | undefined,
+): number | undefined {
+  if (typeof payloadSeq === 'number' && Number.isFinite(payloadSeq)) {
+    return payloadSeq
+  }
+
+  if (typeof idempotencyKey === 'string' && idempotencyKey.startsWith('activity:')) {
+    const tail = Number(idempotencyKey.slice(idempotencyKey.lastIndexOf(':') + 1))
+
+    if (Number.isFinite(tail)) {
+      return tail
+    }
+  }
+
+  return undefined
+}
+
+function isStaleActivityEvent(
+  session: { readonly activitySeq?: number; readonly activityAt?: number },
+  seq: number | undefined,
+  at: number,
+): boolean {
+  if (seq !== undefined && session.activitySeq !== undefined) {
+    return seq < session.activitySeq
+  }
+
+  if (session.activityAt !== undefined) {
+    return at < session.activityAt
+  }
+
+  return false
+}
 
 export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
   name: 'workspaceTree',
@@ -326,11 +363,18 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
           runId: string
           activity: string
           at: number
+          seq?: number
         }
 
         const session = state.sessions[payload.runId]
 
         if (!session) {
+          return state
+        }
+
+        const seq = activityEventSeq(payload.seq, event.idempotencyKey)
+
+        if (isStaleActivityEvent(session, seq, payload.at)) {
           return state
         }
 
@@ -343,7 +387,11 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
             [payload.runId]: {
               ...session,
               activity: payload.activity,
-              updatedAt: payload.at,
+              activityAt: Math.max(session.activityAt ?? 0, payload.at),
+              ...(seq !== undefined
+                ? { activitySeq: Math.max(session.activitySeq ?? 0, seq) }
+                : {}),
+              updatedAt: Math.max(session.updatedAt, payload.at),
               ...(finishedWork ? { lastCompletedAt: payload.at } : {}),
             },
           },
@@ -407,14 +455,21 @@ async function postJson(path: string, body: object): Promise<Response> {
   })
 }
 
-export async function fetchWorkspace(): Promise<{ runId: string }> {
+export interface WorkspaceSnapshotResponse {
+  readonly runId: string
+  readonly tail?: number
+  readonly tree?: WorkspaceTree | null
+  readonly tabs?: SessionTabsState | null
+}
+
+export async function fetchWorkspace(): Promise<WorkspaceSnapshotResponse> {
   const response = await fetch('/workspace')
 
   if (!response.ok) {
     throw new Error(`Failed to load workspace: ${response.status}`)
   }
 
-  return (await response.json()) as { runId: string }
+  return (await response.json()) as WorkspaceSnapshotResponse
 }
 
 export async function startWorkspaceSession(input: {

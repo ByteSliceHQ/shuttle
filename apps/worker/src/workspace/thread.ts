@@ -28,6 +28,8 @@ export interface WorkspaceSession {
   readonly title: string
   readonly status: 'requested' | 'running' | 'completed' | 'failed' | 'cancelled'
   readonly activity: SessionActivity
+  readonly activitySeq?: number
+  readonly activityAt?: number
   readonly createdAt: number
   readonly updatedAt: number
   readonly archived: boolean
@@ -69,6 +71,41 @@ function asNumber(value: unknown): number | null {
 
 function sandboxNameFor(folderId: string): string {
   return `folder:${folderId}`
+}
+
+function activityEventSeq(
+  payloadSeq: number | undefined,
+  idempotencyKey: string | null | undefined,
+): number | undefined {
+  if (typeof payloadSeq === 'number' && Number.isFinite(payloadSeq)) {
+    return payloadSeq
+  }
+
+  if (typeof idempotencyKey === 'string' && idempotencyKey.startsWith('activity:')) {
+    const tail = Number(idempotencyKey.slice(idempotencyKey.lastIndexOf(':') + 1))
+
+    if (Number.isFinite(tail)) {
+      return tail
+    }
+  }
+
+  return undefined
+}
+
+function isStaleActivityEvent(
+  session: { readonly activitySeq?: number; readonly activityAt?: number },
+  seq: number | undefined,
+  at: number,
+): boolean {
+  if (seq !== undefined && session.activitySeq !== undefined) {
+    return seq < session.activitySeq
+  }
+
+  if (session.activityAt !== undefined) {
+    return at < session.activityAt
+  }
+
+  return false
 }
 
 export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
@@ -326,6 +363,15 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
             return state
           }
 
+          const seq = activityEventSeq(event.payload.seq, event.idempotencyKey)
+
+          if (isStaleActivityEvent(session, seq, event.payload.at)) {
+            return {
+              ...state,
+              mailboxEpoch: state.mailboxEpoch + 1,
+            }
+          }
+
           return {
             ...state,
             sessions: {
@@ -333,7 +379,11 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
               [event.payload.runId]: {
                 ...session,
                 activity: event.payload.activity,
-                updatedAt: event.payload.at,
+                activityAt: Math.max(session.activityAt ?? 0, event.payload.at),
+                ...(seq !== undefined
+                  ? { activitySeq: Math.max(session.activitySeq ?? 0, seq) }
+                  : {}),
+                updatedAt: Math.max(session.updatedAt, event.payload.at),
               },
             },
             mailboxEpoch: state.mailboxEpoch + 1,
