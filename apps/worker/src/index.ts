@@ -10,7 +10,9 @@ import { ensurePlaybookQuietly, ensurePullsQuietly, ensureWorkspaceQuietly } fro
 import { readStoredLlmModel, resolveProjectors, writeStoredLlmModel } from './config'
 import type { ShuttleEnv } from './env'
 import { sandboxStub } from './env'
+import { EventFirehose } from './firehose/durable-object'
 import { shuttleModules } from './modules'
+import { handleFirehoseRoutes } from './routes/firehose'
 import { handleGithubRoutes } from './routes/github'
 import { handleSandboxRoutes } from './routes/sandbox'
 import { handleShuttleRoutes } from './routes/sessions'
@@ -21,7 +23,7 @@ import { deriveActivityFromRunState } from './workspace/activity-state'
 import type { SessionActivity } from './workspace/module'
 import { sandboxNameFor } from './workspace/thread'
 
-export { SessionSandbox }
+export { EventFirehose, SessionSandbox }
 
 export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
   override configure(env: ShuttleEnv): LoomsDurableObjectConfig {
@@ -99,6 +101,12 @@ export default {
 
     if (request.method === 'GET' && url.pathname === '/health') {
       return Response.json({ ok: true })
+    }
+
+    const firehose = await handleFirehoseRoutes(request, env)
+
+    if (firehose) {
+      return firehose
     }
 
     const workspace = await handleWorkspaceRoutes(request, env, ctx)

@@ -55,6 +55,7 @@ export default defineConfig({
       '/sessions': { ...api, ws: true },
       '/playbook': api,
       '/workspace': api,
+      '/firehose': { ...api, ws: true },
       '/github': githubApi,
     },
   },

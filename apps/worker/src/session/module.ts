@@ -98,6 +98,7 @@ export function shuttleSession(options: ShuttleSessionOptions = {}) {
     ({
       LOOMS_RUN: {} as DurableObjectNamespace,
       SANDBOX: {} as DurableObjectNamespace,
+      EVENT_FIREHOSE: {} as DurableObjectNamespace,
     } satisfies ShuttleEnv)
 
   return defineModule(shuttleModule, () => ({

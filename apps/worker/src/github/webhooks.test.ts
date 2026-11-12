@@ -9,6 +9,7 @@ describe('github webhooks', () => {
       GITHUB_WEBHOOK_SECRET: 'whsec_test',
       LOOMS_RUN: {} as DurableObjectNamespace,
       SANDBOX: {} as DurableObjectNamespace,
+      EVENT_FIREHOSE: {} as DurableObjectNamespace,
     } satisfies ShuttleEnv
 
     const rawBody = '{"action":"opened"}'

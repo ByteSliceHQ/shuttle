@@ -28,12 +28,20 @@
         "name": "SANDBOX",
         "class_name": "SessionSandbox",
       },
+      {
+        "name": "EVENT_FIREHOSE",
+        "class_name": "EventFirehose",
+      },
     ],
   },
   "migrations": [
     {
       "tag": "v1",
       "new_sqlite_classes": ["LoomsRun", "SessionSandbox"],
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["EventFirehose"],
     },
   ],
   // Uncomment and create a D1 database for cross-run session lists and history tools:

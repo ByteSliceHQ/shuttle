@@ -37,6 +37,7 @@ describe('github app jwt', () => {
       GITHUB_APP_PRIVATE_KEY: privateKey,
       LOOMS_RUN: {} as DurableObjectNamespace,
       SANDBOX: {} as DurableObjectNamespace,
+      EVENT_FIREHOSE: {} as DurableObjectNamespace,
     } satisfies ShuttleEnv
 
     const jwt = await createAppJwt(env)
@@ -57,6 +58,7 @@ describe('github app jwt', () => {
       GITHUB_STATE_SECRET: 'test-secret',
       LOOMS_RUN: {} as DurableObjectNamespace,
       SANDBOX: {} as DurableObjectNamespace,
+      EVENT_FIREHOSE: {} as DurableObjectNamespace,
     } satisfies ShuttleEnv
 
     const state = await signState(env, 'install:nonce:1')

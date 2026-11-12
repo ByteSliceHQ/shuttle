@@ -25,6 +25,7 @@ export function pulls(options: PullsModuleOptions = {}) {
     ({
       LOOMS_RUN: {} as DurableObjectNamespace,
       SANDBOX: {} as DurableObjectNamespace,
+      EVENT_FIREHOSE: {} as DurableObjectNamespace,
     } satisfies ShuttleEnv)
 
   return defineModule(pullsModule, () => ({

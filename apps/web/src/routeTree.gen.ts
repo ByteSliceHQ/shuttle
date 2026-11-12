@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as EventsRouteImport } from './routes/events'
 import { Route as PlaybookRouteImport } from './routes/playbook'
 import { Route as FoldersFolderIdRouteImport } from './routes/folders.$folderId'
 import { Route as SessionsSessionIdRouteImport } from './routes/sessions.$sessionId'
@@ -17,6 +18,11 @@ import { Route as SessionsSessionIdRouteImport } from './routes/sessions.$sessio
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EventsRoute = EventsRouteImport.update({
+  id: '/events',
+  path: '/events',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PlaybookRoute = PlaybookRouteImport.update({
@@ -37,12 +43,14 @@ const SessionsSessionIdRoute = SessionsSessionIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/events': typeof EventsRoute
   '/playbook': typeof PlaybookRoute
   '/folders/$folderId': typeof FoldersFolderIdRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/events': typeof EventsRoute
   '/playbook': typeof PlaybookRoute
   '/folders/$folderId': typeof FoldersFolderIdRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
@@ -50,18 +58,30 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/events': typeof EventsRoute
   '/playbook': typeof PlaybookRoute
   '/folders/$folderId': typeof FoldersFolderIdRoute
   '/sessions/$sessionId': typeof SessionsSessionIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/playbook' | '/folders/$folderId' | '/sessions/$sessionId'
+  fullPaths:
+    | '/'
+    | '/events'
+    | '/playbook'
+    | '/folders/$folderId'
+    | '/sessions/$sessionId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/playbook' | '/folders/$folderId' | '/sessions/$sessionId'
+  to:
+    | '/'
+    | '/events'
+    | '/playbook'
+    | '/folders/$folderId'
+    | '/sessions/$sessionId'
   id:
     | '__root__'
     | '/'
+    | '/events'
     | '/playbook'
     | '/folders/$folderId'
     | '/sessions/$sessionId'
@@ -69,6 +89,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  EventsRoute: typeof EventsRoute
   PlaybookRoute: typeof PlaybookRoute
   FoldersFolderIdRoute: typeof FoldersFolderIdRoute
   SessionsSessionIdRoute: typeof SessionsSessionIdRoute
@@ -81,6 +102,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/events': {
+      id: '/events'
+      path: '/events'
+      fullPath: '/events'
+      preLoaderRoute: typeof EventsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/playbook': {
@@ -109,6 +137,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  EventsRoute: EventsRoute,
   PlaybookRoute: PlaybookRoute,
   FoldersFolderIdRoute: FoldersFolderIdRoute,
   SessionsSessionIdRoute: SessionsSessionIdRoute,

@@ -14,6 +14,7 @@ import { d1ReplicaDatabase, sqliteReplica } from '@swirls/looms/projectors/repli
 import { classifyHeuristic, parseIntakeMessage } from './agents/intake'
 import { shuttleAttributes } from './attributes'
 import type { ShuttleEnv } from './env'
+import { createFirehoseProjector } from './firehose/projector'
 import {
   createReasoningLlm,
   createStubThinkingLlm,
@@ -172,6 +173,7 @@ export function resolveProjectors(env: ShuttleEnv, context?: ProjectorContext): 
   }
 
   if (context) {
+    projectors.push(createFirehoseProjector(env, context.runId))
     projectors.push(createWorkspaceActivityProjector(env, context.runId, context.storage))
   }
 

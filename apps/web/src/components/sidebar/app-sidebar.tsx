@@ -8,6 +8,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  Radio,
   SquarePen,
 } from 'lucide-react'
 import { useEffect, useEffectEvent, useMemo, useState } from 'react'
@@ -75,7 +76,9 @@ function activeSessionRunId(pathname: string): string | null {
 
 export function AppSidebarShell({ children }: { children: React.ReactNode }) {
   return (
-    <LoomsProvider endpoint="">
+    // SSE holds one of the browser's six HTTP/1.1 connections per origin for each run store;
+    // across a few tabs that starves route chunks and API calls. WebSockets have their own pool.
+    <LoomsProvider endpoint="" transport="websocket">
       <WorkspaceProvider>
         <div className="flex h-dvh min-h-0">
           <AppSidebar />
@@ -311,6 +314,18 @@ function SidebarRail({
           </Link>
         </Button>
       </IconTip>
+      <IconTip label="Events" side="right">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className={cn(pathname === '/events' && 'bg-accent text-foreground')}
+          asChild
+        >
+          <Link to="/events" aria-label="Events">
+            <Radio />
+          </Link>
+        </Button>
+      </IconTip>
     </aside>
   )
 }
@@ -359,6 +374,9 @@ function SidebarPanel({
         </SidebarNavLink>
         <SidebarNavLink to="/playbook" icon={<BookOpen />} active={pathname === '/playbook'}>
           Playbook
+        </SidebarNavLink>
+        <SidebarNavLink to="/events" icon={<Radio />} active={pathname === '/events'}>
+          Events
         </SidebarNavLink>
       </nav>
 
@@ -692,7 +710,7 @@ function SidebarNavLink({
   shortcut,
   children,
 }: {
-  to: '/' | '/playbook'
+  to: '/' | '/playbook' | '/events'
   icon: React.ReactNode
   active: boolean
   shortcut?: readonly string[]

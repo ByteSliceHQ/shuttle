@@ -14,6 +14,7 @@ import type {
 export interface ShuttleEnv {
   readonly LOOMS_RUN: DurableObjectNamespace
   readonly SANDBOX: DurableObjectNamespace
+  readonly EVENT_FIREHOSE: DurableObjectNamespace
   readonly REPLICA?: D1Database
   readonly OPENROUTER_API_KEY?: string
   readonly LOOMS_MODEL?: string
