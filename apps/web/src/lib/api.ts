@@ -168,6 +168,19 @@ export async function decideApproval(
   )
 }
 
+/** Resolve a structured approval gate (PR publish / review submit). */
+export async function decideStructuredApproval(
+  runId: string,
+  approvalId: string,
+  choice: {
+    readonly actionId: string
+    readonly outcome: 'approve' | 'reject'
+    readonly payload?: Record<string, unknown>
+  },
+) {
+  await signal(runId, 'approval/decision', { approvalId, choice }, 'Failed to decide approval')
+}
+
 export async function fetchLlmModel(runId: string): Promise<{ model: string }> {
   const response = await fetch(`/sessions/${encodeURIComponent(runId)}/llm-model`)
 

@@ -13,12 +13,22 @@ import {
 import type { LinkedRepo, SessionActivity } from './scope'
 import { workspaceModule } from './scope'
 
+export type AutoReviewMode = 'off' | 'others' | 'all'
+
 export interface WorkspaceFolder {
   readonly folderId: string
   readonly name: string
   readonly createdAt: number
   readonly archived: boolean
   readonly repos: readonly LinkedRepo[]
+  readonly autoReview: AutoReviewMode
+}
+
+export interface SessionPullRef {
+  readonly fullName: string
+  readonly number: number
+  readonly headSha: string
+  readonly baseSha: string
 }
 
 export interface WorkspaceSession {
@@ -37,6 +47,8 @@ export interface WorkspaceSession {
   readonly lessons: readonly { id: string; text: string; scope?: string }[]
   readonly playbookVersion: number
   readonly playbookRunId: string | null
+  readonly definitionName: string
+  readonly pull: SessionPullRef | null
 }
 
 export interface GithubInstallation {
@@ -140,6 +152,7 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
                 createdAt: event.payload.createdAt,
                 archived: false,
                 repos: [],
+                autoReview: 'off',
               },
             },
             mailboxEpoch: state.mailboxEpoch + 1,
@@ -289,6 +302,28 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
                 })),
                 playbookVersion: event.payload.playbookVersion,
                 playbookRunId: event.payload.playbookRunId,
+                definitionName: event.payload.definitionName ?? 'coding',
+                pull: event.payload.pull ?? null,
+              },
+            },
+            mailboxEpoch: state.mailboxEpoch + 1,
+          }
+        }
+
+        case 'workspace.folder.auto_review.set': {
+          const folder = state.folders[event.payload.folderId]
+
+          if (!folder) {
+            return state
+          }
+
+          return {
+            ...state,
+            folders: {
+              ...state.folders,
+              [folder.folderId]: {
+                ...folder,
+                autoReview: event.payload.autoReview,
               },
             },
             mailboxEpoch: state.mailboxEpoch + 1,
@@ -448,7 +483,7 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
           launch({
             runId: session.runId,
             kind: 'shuttle-session',
-            definitionName: 'coding',
+            definitionName: session.definitionName,
             input: {
               goal: session.goal,
               folderId: session.folderId,
@@ -464,7 +499,21 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
               })),
               playbookRunId: session.playbookRunId,
               playbookVersion: session.playbookVersion,
-              lessons: session.lessons,
+              lessons: session.lessons.map((lesson) => ({
+                id: lesson.id,
+                text: lesson.text,
+                ...(lesson.scope ? { scope: lesson.scope } : {}),
+              })),
+              ...(session.pull
+                ? {
+                    pull: {
+                      fullName: session.pull.fullName,
+                      number: session.pull.number,
+                      headSha: session.pull.headSha,
+                      baseSha: session.pull.baseSha,
+                    },
+                  }
+                : {}),
             },
             close: 'wait',
             tag: `launch_${session.runId}`,
@@ -485,6 +534,7 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
               'workspace.folder.renamed',
               'workspace.folder.archived',
               'workspace.folder.reordered',
+              'workspace.folder.auto_review.set',
               'workspace.github.connected',
               'workspace.github.disconnected',
               'workspace.repo.linked',

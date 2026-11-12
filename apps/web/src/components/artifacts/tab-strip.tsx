@@ -27,6 +27,7 @@ const KIND_ICON: Record<ArtifactTabKind, ReactNode> = {
   changes: <GitCompareArrows />,
   terminal: <SquareTerminal />,
   browser: <Globe />,
+  review: <GitCompareArrows />,
 }
 
 export function TabStrip({
@@ -158,6 +159,7 @@ export function TabStrip({
             onOpen={onOpen}
           />
           <LauncherItem kind="browser" label="Browser" icon={<Globe />} onOpen={onOpen} />
+          <LauncherItem kind="review" label="Review" icon={<GitCompareArrows />} onOpen={onOpen} />
           <LauncherItem kind="events" label="Events" icon={<ListTree />} onOpen={onOpen} />
         </DropdownMenuContent>
       </DropdownMenu>

@@ -1,8 +1,10 @@
-import { ensureWorkspaceQuietly } from '../bootstrap'
-import { workspaceRunId } from '../config'
+import { ensurePullsQuietly, ensureWorkspaceQuietly } from '../bootstrap'
+import { pullsRunId, workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { getInstallation, listInstallationRepos, signState, verifyState } from '../github/app'
+import { normalizeWebhook, verifyWebhookSignature } from '../github/webhooks'
 import { loomsStub } from '../looms-stub'
+import { ingestWebhook } from '../pulls/signals'
 import { connectGithub } from '../workspace/module'
 
 export async function handleGithubRoutes(
@@ -23,7 +25,119 @@ export async function handleGithubRoutes(
     return searchRepos(url, env)
   }
 
+  if (request.method === 'POST' && url.pathname === '/github/webhooks') {
+    return handleWebhook(request, env)
+  }
+
   return null
+}
+
+async function handleWebhook(request: Request, env: ShuttleEnv): Promise<Response> {
+  const rawBody = await request.text()
+  const signature = request.headers.get('X-Hub-Signature-256')
+
+  if (!(await verifyWebhookSignature(env, rawBody, signature))) {
+    return Response.json({ error: 'invalid signature' }, { status: 401 })
+  }
+
+  const eventName = request.headers.get('X-GitHub-Event') ?? ''
+  const deliveryId = request.headers.get('X-GitHub-Delivery') ?? crypto.randomUUID()
+  let payload: unknown
+
+  try {
+    payload = JSON.parse(rawBody) as unknown
+  } catch {
+    return Response.json({ error: 'invalid json' }, { status: 400 })
+  }
+
+  const normalized = normalizeWebhook(eventName, deliveryId, payload)
+
+  if (normalized.kind === 'ignored') {
+    return Response.json({ ok: true, ignored: normalized.reason })
+  }
+
+  await ensurePullsQuietly(env)
+  const stub = loomsStub(env.LOOMS_RUN, pullsRunId(env))
+
+  switch (normalized.kind) {
+    case 'pull.upserted':
+      await stub.signal([
+        ingestWebhook({
+          kind: 'pull.upserted',
+          deliveryId: normalized.deliveryId,
+          installationId: normalized.installationId,
+          fullName: normalized.fullName,
+          number: normalized.number,
+          action: normalized.action,
+          title: normalized.title,
+          body: normalized.body,
+          url: normalized.url,
+          draft: normalized.draft,
+          authorLogin: normalized.authorLogin,
+          authorAvatarUrl: normalized.authorAvatarUrl,
+          headRef: normalized.headRef,
+          headSha: normalized.headSha,
+          baseRef: normalized.baseRef,
+          baseSha: normalized.baseSha,
+          additions: normalized.additions,
+          deletions: normalized.deletions,
+          updatedAt: normalized.updatedAt,
+          isFork: normalized.isFork,
+          stack: normalized.stack,
+        }),
+      ])
+
+      break
+    case 'pull.closed':
+      await stub.signal([
+        ingestWebhook({
+          kind: 'pull.closed',
+          deliveryId: normalized.deliveryId,
+          installationId: normalized.installationId,
+          fullName: normalized.fullName,
+          number: normalized.number,
+          updatedAt: normalized.updatedAt,
+        }),
+      ])
+
+      break
+    case 'review.submitted':
+      await stub.signal([
+        ingestWebhook({
+          kind: 'review.submitted',
+          deliveryId: normalized.deliveryId,
+          installationId: normalized.installationId,
+          fullName: normalized.fullName,
+          number: normalized.number,
+          verdict: normalized.verdict,
+          updatedAt: normalized.updatedAt,
+        }),
+      ])
+
+      break
+    case 'checks.updated':
+      await stub.signal([
+        ingestWebhook({
+          kind: 'checks.updated',
+          deliveryId: normalized.deliveryId,
+          installationId: normalized.installationId,
+          fullName: normalized.fullName,
+          headSha: normalized.headSha,
+          checkRollup: normalized.checkRollup,
+          updatedAt: normalized.updatedAt,
+        }),
+      ])
+
+      break
+
+    default: {
+      const exhaustive: never = normalized
+      void exhaustive
+      break
+    }
+  }
+
+  return Response.json({ ok: true })
 }
 
 async function startInstall(env: ShuttleEnv): Promise<Response> {

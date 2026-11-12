@@ -9,7 +9,7 @@
   ],
   "type": "module",
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "bun scripts/dev-setup.ts && turbo run dev dev:tunnel",
     "build": "turbo run build",
     "check-types": "turbo run check-types",
     "test": "turbo run test",

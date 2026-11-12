@@ -9,17 +9,22 @@ import {
   type LocalEffectDefinition,
 } from '@swirls/looms/core'
 
+import type { ShuttleEnv } from '../env'
 import { bindThinkingObserver, clearThinkingObserver } from '../llm'
 import { createBindSandboxEffect } from './bind-sandbox'
-import { codingSession } from './definitions'
+import { codingSession, reviewSession } from './definitions'
+import { createPreparePrPublishGateEffect } from './prepare-pr-publish-gate'
 import { brief, routing, transcript, work } from './projections'
+import { createPublishPullRequestEffect } from './publish-pr'
 import { shuttleModule } from './scope'
 import { reroute, say } from './signals'
+import { createSubmitReviewEffect } from './submit-review'
 import { createSessionThread } from './thread'
 
 export interface ShuttleSessionOptions {
   readonly definitions?: readonly DefinitionRef[]
   readonly storage?: DurableObjectStorage
+  readonly env?: ShuttleEnv
 }
 
 /** Decoded `agent.callLLM` input — enough for thinking middleware without the agent service R. */
@@ -87,8 +92,16 @@ const thinkingMiddleware = onEffect(
 )
 
 export function shuttleSession(options: ShuttleSessionOptions = {}) {
+  // Tests may omit env; publish/submit effects then no-op until a real env is provided.
+  const env =
+    options.env ??
+    ({
+      LOOMS_RUN: {} as DurableObjectNamespace,
+      SANDBOX: {} as DurableObjectNamespace,
+    } satisfies ShuttleEnv)
+
   return defineModule(shuttleModule, () => ({
-    definitions: options.definitions ?? [codingSession],
+    definitions: options.definitions ?? [codingSession, reviewSession],
     threads: {
       'shuttle-session': createSessionThread(),
     },
@@ -103,11 +116,14 @@ export function shuttleSession(options: ShuttleSessionOptions = {}) {
       reroute,
     },
     effects: {
-      bindSandbox: createBindSandboxEffect(options.storage),
+      bindSandbox: createBindSandboxEffect(options.env, options.storage),
+      preparePrPublishGate: createPreparePrPublishGateEffect(env, options.storage),
+      publishPullRequest: createPublishPullRequestEffect(env, options.storage),
+      submitReview: createSubmitReviewEffect(env, options.storage),
     },
     middleware: [thinkingMiddleware],
   }))
 }
 
-export { say, reroute, brief, routing, transcript, work, codingSession }
+export { say, reroute, brief, routing, transcript, work, codingSession, reviewSession }
 export type { InterjectionKind, SessionState } from './thread'

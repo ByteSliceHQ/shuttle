@@ -3,6 +3,7 @@ import { ArrowRight, Link2, LoaderCircle, Plus } from 'lucide-react'
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 
 import { NotFound } from '@/components/not-found'
+import { PullInboxPanel, PullInboxSheetButton, usePullInbox } from '@/components/pulls/pull-inbox'
 import { ActivityDot } from '@/components/sidebar/activity-dot'
 import { LinkRepoDialog } from '@/components/sidebar/link-repo-dialog'
 import { RepoChip } from '@/components/sidebar/repo-chip'
@@ -10,11 +11,13 @@ import { useWorkspace, WorkspacePending } from '@/components/sidebar/workspace-c
 import { Button } from '@/components/ui/button'
 import { EmptyState, Kbd } from '@/components/ui/panel'
 import { Textarea } from '@/components/ui/textarea'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { errorMessage } from '@/lib/cn'
 import { rememberSession } from '@/lib/recent-sessions'
 import { isSessionUnread, useSeenSessions } from '@/lib/seen-sessions'
 import { resolveSessionIndicator, sessionIndicatorLabel } from '@/lib/session-activity'
 import { compactRelativeTime, fullDateTime } from '@/lib/time'
+import { useMediaQuery } from '@/lib/use-media-query'
 import { useNow } from '@/lib/use-now'
 import {
   rememberLastFolder,
@@ -71,6 +74,10 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
   const sessions = useMemo(() => sessionsForFolder(tree, folder.folderId), [tree, folder])
   const repos = showAllRepos ? folder.repos : folder.repos.slice(0, REPO_PREVIEW)
   const hiddenRepos = folder.repos.length - repos.length
+  const hasRepos = folder.repos.length > 0
+  const wide = useMediaQuery('(min-width: 1024px)')
+  const repoNames = useMemo(() => folder.repos.map((repo) => repo.fullName), [folder.repos])
+  const pullInbox = usePullInbox(folder.folderId, repoNames)
 
   function start() {
     const trimmed = goal.trim()
@@ -107,124 +114,148 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
   }
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="stagger mx-auto flex w-full max-w-2xl flex-col gap-10 px-6 pt-16 pb-24">
-        <section>
-          <p className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
-            Folder
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-balance wrap-anywhere">
-            What should the agents build in{' '}
-            <span dir="auto" className="text-brand">
-              {folder.name}
-            </span>
-            ?
-          </h1>
-
-          <div className="mt-3 flex flex-wrap items-center gap-1.5">
-            {repos.map((repo) => (
-              <RepoChip
-                key={repo.fullName}
-                repo={repo}
-                onRemove={folder.archived ? undefined : () => unlink(repo.fullName)}
-              />
-            ))}
-            {hiddenRepos > 0 ? (
-              <Button variant="ghost" size="xs" onClick={() => setShowAllRepos(true)}>
-                +{hiddenRepos} more
-              </Button>
-            ) : null}
-            {folder.archived ? null : (
-              <Button variant="ghost" size="xs" onClick={() => setLinkOpen(true)}>
-                <Link2 />
-                {folder.repos.length === 0 ? 'Link a repository' : 'Link another'}
-              </Button>
-            )}
-          </div>
-          {folder.repos.length === 0 ? (
-            <p className="text-muted-foreground mt-2 text-xs">
-              No repos linked yet, so agents work in the demo workspace.
-            </p>
-          ) : null}
-
-          <div className="bg-card mt-6 rounded-xl border p-1.5 shadow-xl shadow-black/20">
-            <Textarea
-              value={goal}
-              onChange={(event) => setGoal(event.target.value)}
-              onKeyDown={onKeyDown}
-              aria-label="Session goal"
-              placeholder="Describe the change you want…"
-              className="max-h-80 min-h-24 resize-none border-0 bg-transparent text-sm focus-visible:ring-0"
-            />
-            <div className="flex items-center gap-2 px-1.5 pb-0.5">
-              <span className="text-muted-foreground ml-auto hidden items-center gap-1 text-[11px] sm:inline-flex">
-                <Kbd>⌘</Kbd>
-                <Kbd>↵</Kbd>
-              </span>
-              <Button variant="brand" onClick={start} disabled={busy || !goal.trim()}>
-                {busy ? <LoaderCircle className="animate-spin" /> : <ArrowRight />}
-                {busy ? 'Starting' : 'Start session'}
-              </Button>
+    <div className="flex h-full">
+      <div className="min-w-0 flex-1 overflow-y-auto">
+        <div className="stagger mx-auto flex w-full max-w-2xl flex-col gap-10 px-6 pt-16 pb-24">
+          <section>
+            <div className="flex h-6 items-center justify-between gap-2">
+              <p className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
+                Folder
+              </p>
+              {hasRepos && !wide ? <PullInboxSheetButton data={pullInbox} /> : null}
             </div>
-          </div>
-          {error ? <p className="text-status-failed mt-3 text-xs wrap-anywhere">{error}</p> : null}
-        </section>
-
-        <section>
-          <div className="mb-2 flex items-baseline gap-2">
-            <h2 className="text-[13px] font-medium">Sessions</h2>
-            {sessions.length > 0 ? (
-              <span className="text-muted-foreground font-mono text-[11px] tabular-nums">
-                {sessions.length.toLocaleString()}
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-balance wrap-anywhere">
+              What should the agents build in{' '}
+              <span dir="auto" className="text-brand">
+                {folder.name}
               </span>
-            ) : null}
-          </div>
-          {sessions.length === 0 ? (
-            <div className="rounded-xl border border-dashed">
-              <EmptyState icon={<Plus />} title="No sessions yet">
-                Describe a change above and agents will pick it up in this folder.
-              </EmptyState>
-            </div>
-          ) : (
-            <ul className="bg-card/40 divide-y overflow-hidden rounded-xl border">
-              {sessions.map((session) => {
-                const unread = isSessionUnread(session, { snapshot: seenSnapshot })
+              ?
+            </h1>
 
-                const tone = resolveSessionIndicator({
-                  activity: session.activity,
-                  status: session.status,
-                  unread,
-                })
-
-                return (
-                  <li key={session.runId}>
-                    <Link
-                      to="/sessions/$sessionId"
-                      params={{ sessionId: session.runId }}
-                      className="hover:bg-accent/40 group flex items-center gap-3 px-4 py-3 transition-colors duration-100"
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              {repos.map((repo) => (
+                <RepoChip
+                  key={repo.fullName}
+                  repo={repo}
+                  onRemove={folder.archived ? undefined : () => unlink(repo.fullName)}
+                />
+              ))}
+              {hiddenRepos > 0 ? (
+                <Button variant="ghost" size="xs" onClick={() => setShowAllRepos(true)}>
+                  +{hiddenRepos} more
+                </Button>
+              ) : null}
+              {folder.archived ? null : hasRepos ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label="Link another repository"
+                      onClick={() => setLinkOpen(true)}
+                      className="rounded-full"
                     >
-                      <ActivityDot tone={tone} />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[13px]" dir="auto" title={session.title}>
-                          {session.title}
-                        </p>
-                        <p className="text-muted-foreground mt-0.5 text-[11px]">
-                          <time title={fullDateTime(session.updatedAt)}>
-                            {compactRelativeTime(session.updatedAt, now)}
-                          </time>
-                          {' · '}
-                          {sessionIndicatorLabel(tone)}
-                        </p>
-                      </div>
-                      <ArrowRight className="text-muted-foreground size-3.5 shrink-0 -translate-x-1 opacity-0 transition-[opacity,translate] duration-150 group-hover:translate-x-0 group-hover:opacity-100" />
-                    </Link>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </section>
+                      <Plus />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Link another repository</TooltipContent>
+                </Tooltip>
+              ) : (
+                <Button variant="ghost" size="xs" onClick={() => setLinkOpen(true)}>
+                  <Link2 />
+                  Link a repository
+                </Button>
+              )}
+            </div>
+            {hasRepos ? null : (
+              <p className="text-muted-foreground mt-2 text-xs">
+                No repos linked yet, so agents work in the demo workspace.
+              </p>
+            )}
+
+            <div className="bg-card mt-6 rounded-xl border p-1.5 shadow-xl shadow-black/20">
+              <Textarea
+                value={goal}
+                onChange={(event) => setGoal(event.target.value)}
+                onKeyDown={onKeyDown}
+                aria-label="Session goal"
+                placeholder="Describe the change you want…"
+                className="max-h-80 min-h-24 resize-none border-0 bg-transparent text-sm focus-visible:ring-0"
+              />
+              <div className="flex items-center gap-2 px-1.5 pb-0.5">
+                <span className="text-muted-foreground ml-auto hidden items-center gap-1 text-[11px] sm:inline-flex">
+                  <Kbd>⌘</Kbd>
+                  <Kbd>↵</Kbd>
+                </span>
+                <Button variant="brand" onClick={start} disabled={busy || !goal.trim()}>
+                  {busy ? <LoaderCircle className="animate-spin" /> : <ArrowRight />}
+                  {busy ? 'Starting' : 'Start session'}
+                </Button>
+              </div>
+            </div>
+            {error ? (
+              <p className="text-status-failed mt-3 text-xs wrap-anywhere">{error}</p>
+            ) : null}
+          </section>
+
+          <section>
+            <div className="mb-2 flex items-baseline gap-2">
+              <h2 className="text-[13px] font-medium">Sessions</h2>
+              {sessions.length > 0 ? (
+                <span className="text-muted-foreground font-mono text-[11px] tabular-nums">
+                  {sessions.length.toLocaleString()}
+                </span>
+              ) : null}
+            </div>
+            {sessions.length === 0 ? (
+              <div className="rounded-xl border border-dashed">
+                <EmptyState icon={<Plus />} title="No sessions yet">
+                  Describe a change above and agents will pick it up in this folder.
+                </EmptyState>
+              </div>
+            ) : (
+              <ul className="bg-card/40 divide-y overflow-hidden rounded-xl border">
+                {sessions.map((session) => {
+                  const unread = isSessionUnread(session, { snapshot: seenSnapshot })
+
+                  const tone = resolveSessionIndicator({
+                    activity: session.activity,
+                    status: session.status,
+                    unread,
+                  })
+
+                  return (
+                    <li key={session.runId}>
+                      <Link
+                        to="/sessions/$sessionId"
+                        params={{ sessionId: session.runId }}
+                        className="hover:bg-accent/40 group flex items-center gap-3 px-4 py-3 transition-colors duration-100"
+                      >
+                        <ActivityDot tone={tone} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[13px]" dir="auto" title={session.title}>
+                            {session.title}
+                          </p>
+                          <p className="text-muted-foreground mt-0.5 text-[11px]">
+                            <time title={fullDateTime(session.updatedAt)}>
+                              {compactRelativeTime(session.updatedAt, now)}
+                            </time>
+                            {' · '}
+                            {sessionIndicatorLabel(tone)}
+                          </p>
+                        </div>
+                        <ArrowRight className="text-muted-foreground size-3.5 shrink-0 -translate-x-1 opacity-0 transition-[opacity,translate] duration-150 group-hover:translate-x-0 group-hover:opacity-100" />
+                      </Link>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </section>
+        </div>
       </div>
+
+      {hasRepos && wide ? <PullInboxPanel data={pullInbox} /> : null}
 
       <LinkRepoDialog
         open={linkOpen}

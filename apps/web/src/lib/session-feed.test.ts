@@ -153,6 +153,133 @@ describe('session feed', () => {
 
     expect(answered.items[0]).toMatchObject({ decision: { answer: 'The first one' } })
   })
+
+  test('links published PRs to the thread that proposed them', () => {
+    const feed = fold([
+      event(
+        'approval.requested',
+        { approvalId: 'pr_publish_1', title: 'Publish pull requests? Fix login' },
+        'thr_coder',
+      ),
+      event('approval.decided', {
+        approvalId: 'pr_publish_1',
+        actionId: 'publish',
+        outcome: 'approve',
+        payload: { title: 'Fix login', body: '', draft: false },
+      }),
+      event('shuttle.pr.published', {
+        approvalId: 'pr_publish_1',
+        threadId: 'thr_coder',
+        pulls: [
+          {
+            fullName: 'acme/api',
+            number: 7,
+            url: 'https://github.com/acme/api/pull/7',
+            draft: false,
+          },
+        ],
+      }),
+    ])
+
+    const pull = {
+      fullName: 'acme/api',
+      number: 7,
+      url: 'https://github.com/acme/api/pull/7',
+      draft: false,
+      threadId: 'thr_coder',
+    }
+
+    expect(feed.publishedPulls).toEqual([pull])
+
+    expect(feed.items[0]).toMatchObject({
+      kind: 'question',
+      publish: { status: 'published', pulls: [pull] },
+    })
+  })
+
+  test('keeps the proposed PR fields so the approval card can prefill them', () => {
+    const feed = fold([
+      event(
+        'approval.requested',
+        {
+          approvalId: 'pr_publish_4',
+          title: 'Publish pull requests?',
+          schema: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', default: 'Add sample docs' },
+              body: { type: 'string', default: '## Summary' },
+              draft: { type: 'boolean', default: true },
+            },
+          },
+        },
+        'thr_coder',
+      ),
+    ])
+
+    expect(feed.items[0]).toMatchObject({
+      defaults: { title: 'Add sample docs', body: '## Summary', draft: true },
+    })
+  })
+
+  test('stamps stack labels on the publish approval card from gate defaults', () => {
+    const feed = fold([
+      event(
+        'approval.requested',
+        {
+          approvalId: 'pr_publish_5',
+          title: 'Publish?',
+          schema: {
+            type: 'object',
+            properties: {
+              parentPullLabel: { type: 'string', default: 'ByteSliceHQ/glue#2' },
+              restackLabel: { type: 'string', default: '#3, #4' },
+              repo: { type: 'string', default: 'glue' },
+              layer: { type: 'number', default: 2 },
+            },
+          },
+        },
+        'thr_coder',
+      ),
+    ])
+
+    expect(feed.items[0]).toMatchObject({
+      defaults: {
+        parentPullLabel: 'ByteSliceHQ/glue#2',
+        restackLabel: '#3, #4',
+        repo: 'glue',
+        layer: 2,
+      },
+    })
+  })
+
+  test('falls back to the approval thread for PRs published before thread links', () => {
+    const feed = fold([
+      event('approval.requested', { approvalId: 'pr_publish_2', title: 'Publish?' }, 'thr_coder'),
+      event('shuttle.pr.published', {
+        approvalId: 'pr_publish_2',
+        pulls: [{ fullName: 'acme/web', number: 3, url: 'u', draft: true }],
+      }),
+    ])
+
+    expect(feed.publishedPulls[0]?.threadId).toBe('thr_coder')
+  })
+
+  test('shows publish failures on the approval card', () => {
+    const feed = fold([
+      event('approval.requested', { approvalId: 'pr_publish_3', title: 'Publish?' }, 'thr_coder'),
+      event('shuttle.pr.publish_failed', {
+        approvalId: 'pr_publish_3',
+        error: 'Resource not accessible by integration',
+      }),
+    ])
+
+    expect(feed.items[0]).toMatchObject({
+      publish: { status: 'failed', error: 'Resource not accessible by integration' },
+    })
+
+    expect(feed.publishedPulls).toEqual([])
+  })
 })
 
 describe('streaming turns', () => {

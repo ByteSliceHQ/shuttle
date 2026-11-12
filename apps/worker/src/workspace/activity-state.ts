@@ -757,7 +757,14 @@ function waitAwaitsApproval(wait: RunState['waits'][string]): boolean {
 
   if ('type' in wait.on) {
     const types = Array.isArray(wait.on.type) ? wait.on.type : [wait.on.type]
-    return types.includes('approval.decided')
+
+    // Session mailboxes may also listen for approval.decided so they can publish PRs.
+    // Only treat a wait as needing input when it is approval-only (e.g. ask_user / gate).
+    const approvalOnly = types.every(
+      (type) => typeof type === 'string' && type.startsWith('approval.'),
+    )
+
+    return approvalOnly && types.includes('approval.decided')
   }
 
   return false

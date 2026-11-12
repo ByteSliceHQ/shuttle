@@ -105,7 +105,13 @@ export type FeedItem =
       readonly approvalId: string
       readonly title: string
       readonly thought?: ThoughtInfo
-      readonly decision?: { readonly answer: string | null }
+      readonly decision?: { readonly answer: string | null; readonly ts?: number }
+      /** Values the agent proposed, from the approval schema's field defaults. */
+      readonly defaults?: Readonly<Record<string, JsonValue>>
+      /** What happened after a PR publish approval. */
+      readonly publish?:
+        | { readonly status: 'published'; readonly pulls: readonly PublishedPull[] }
+        | { readonly status: 'failed'; readonly error: string }
     }
   | {
       readonly kind: 'notice'
@@ -125,6 +131,33 @@ export interface BriefRevision {
   readonly sourceMessageId?: string
 }
 
+export interface PublishedPull {
+  readonly fullName: string
+  readonly number: number
+  readonly url: string
+  readonly draft: boolean
+  /** Agent thread that proposed the PR. */
+  readonly threadId?: string
+  /** Shuttle stack membership; absent when the PR can't be placed in a stack. */
+  readonly stack?: PullStackPosition
+}
+
+export interface PullStackPosition {
+  /** Independent stack within the repo; a one-layer stack is a standalone PR. */
+  readonly id: number
+  readonly layer: number
+}
+
+export interface DraftReviewComment {
+  readonly commentId: string
+  readonly path: string
+  readonly line: number
+  readonly side: 'LEFT' | 'RIGHT'
+  readonly severity: 'info' | 'warning' | 'error'
+  readonly body: string
+  readonly suggestion?: string
+}
+
 export interface SessionFeed {
   readonly items: readonly FeedItem[]
   readonly routes: Readonly<Record<string, RouteInfo>>
@@ -142,6 +175,12 @@ export interface SessionFeed {
   readonly questionIndex: Readonly<Record<string, number>>
   /** Holds a turn's thought until its message, tool call, or approval arrives. */
   readonly pendingThoughts: Readonly<Record<string, ThoughtInfo>>
+  /** PRs this session opened (from shuttle.pr.published). */
+  readonly publishedPulls: readonly PublishedPull[]
+  /** Inline review comments drafted during a review session. */
+  readonly draftReviewComments: readonly DraftReviewComment[]
+  /** Open submit-review approval, if any. */
+  readonly pendingReviewApprovalId?: string
 }
 
 export interface PlaybookLessonRef {
@@ -151,6 +190,8 @@ export interface PlaybookLessonRef {
 }
 
 const initialFeed: SessionFeed = {
+  publishedPulls: [],
+  draftReviewComments: [],
   items: [],
   routes: {},
   deliveries: {},
@@ -169,6 +210,39 @@ function withoutKey<T>(record: Readonly<Record<string, T>>, key: string): Record
   const next = { ...record }
   delete next[key]
   return next
+}
+
+type PublishOutcome = NonNullable<Extract<FeedItem, { kind: 'question' }>['publish']>
+
+function schemaDefaults(schema: JsonValue | undefined): Record<string, JsonValue> {
+  const properties = jsonFields(jsonFields(schema).properties)
+  const defaults: Record<string, JsonValue> = {}
+
+  for (const [key, property] of Object.entries(properties)) {
+    const value = jsonFields(property).default
+
+    if (value !== undefined) {
+      defaults[key] = value
+    }
+  }
+
+  return defaults
+}
+
+function withPublishOutcome(
+  feed: SessionFeed,
+  index: number | undefined,
+  publish: PublishOutcome,
+): SessionFeed {
+  const question = index === undefined ? undefined : feed.items[index]
+
+  if (index === undefined || question?.kind !== 'question') {
+    return feed
+  }
+
+  const items = [...feed.items]
+  items[index] = { ...question, publish }
+  return { ...feed, items }
 }
 
 function appendItem(feed: SessionFeed, item: FeedItem): SessionFeed {
@@ -588,6 +662,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       }
 
       const taken = takePendingThought(feed, event.threadId)
+      const defaults = schemaDefaults(payload.schema)
 
       return {
         ...appendItem(taken.feed, {
@@ -598,9 +673,11 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
           threadId: event.threadId,
           approvalId,
           title: jsonText(payload.title) ?? 'The agent needs your input',
+          ...(Object.keys(defaults).length > 0 ? { defaults } : {}),
           ...(taken.thought ? { thought: taken.thought } : {}),
         }),
         questionIndex: { ...taken.feed.questionIndex, [approvalId]: taken.feed.items.length },
+        ...(approvalId.startsWith('pr_review_') ? { pendingReviewApprovalId: approvalId } : {}),
       }
     }
 
@@ -619,8 +696,102 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
           : null
 
       const items = [...feed.items]
-      items[index] = { ...question, decision: { answer } }
-      return { ...feed, items }
+      items[index] = { ...question, decision: { answer, ts: event.ts } }
+
+      return {
+        ...feed,
+        items,
+        ...(approvalId && approvalId === feed.pendingReviewApprovalId
+          ? { pendingReviewApprovalId: undefined }
+          : {}),
+      }
+    }
+
+    case 'shuttle.pr.published': {
+      const pullsRaw = Array.isArray(payload.pulls) ? payload.pulls : []
+      const approvalId = jsonText(payload.approvalId)
+      const index = approvalId ? feed.questionIndex[approvalId] : undefined
+      const question = index === undefined ? undefined : feed.items[index]
+      const proposedBy = question?.kind === 'question' ? question.threadId : undefined
+      const threadId = jsonText(payload.threadId) ?? proposedBy
+      const stackId = jsonNumber(payload.stackId) ?? 1
+
+      const published = pullsRaw.flatMap((entry) => {
+        const pull = jsonFields(entry)
+        const fullName = jsonText(pull.fullName)
+        const number = jsonNumber(pull.number)
+        const url = jsonText(pull.url)
+        const layer = jsonNumber(pull.layer)
+
+        if (!fullName || number === undefined || !url) {
+          return []
+        }
+
+        return [
+          {
+            fullName,
+            number,
+            url,
+            draft: pull.draft === true,
+            ...(threadId ? { threadId } : {}),
+            ...(layer !== undefined ? { stack: { id: stackId, layer } } : {}),
+          } satisfies PublishedPull,
+        ]
+      })
+
+      if (published.length === 0) {
+        return feed
+      }
+
+      return {
+        ...withPublishOutcome(feed, index, { status: 'published', pulls: published }),
+        publishedPulls: [...feed.publishedPulls, ...published],
+      }
+    }
+
+    case 'shuttle.pr.publish_failed': {
+      const approvalId = jsonText(payload.approvalId)
+      const index = approvalId ? feed.questionIndex[approvalId] : undefined
+
+      return withPublishOutcome(feed, index, {
+        status: 'failed',
+        error: jsonText(payload.error) ?? 'Publishing failed',
+      })
+    }
+
+    case 'shuttle.review.comment.drafted': {
+      const commentId = jsonText(payload.commentId)
+      const path = jsonText(payload.path)
+      const line = jsonNumber(payload.line)
+      const body = jsonText(payload.body)
+
+      if (!commentId || !path || line === undefined || !body) {
+        return feed
+      }
+
+      const severityRaw = jsonText(payload.severity)
+
+      const severity =
+        severityRaw === 'warning' || severityRaw === 'error' ? severityRaw : ('info' as const)
+
+      const side = payload.side === 'LEFT' ? ('LEFT' as const) : ('RIGHT' as const)
+      const suggestion = jsonText(payload.suggestion)
+
+      return {
+        ...feed,
+        draftReviewComments: [
+          ...feed.draftReviewComments.filter((comment) => comment.commentId !== commentId),
+          {
+            commentId,
+            path,
+            line,
+            side,
+            severity,
+            body,
+            ...(suggestion ? { suggestion } : {}),
+          },
+        ],
+      }
     }
 
     case 'agent.tool.result':

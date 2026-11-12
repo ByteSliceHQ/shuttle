@@ -224,6 +224,8 @@ export function tabTitleForKind(kind: ArtifactTabKind, target?: string): string 
       return 'Terminal'
     case 'browser':
       return target ? browserTitle(target) : 'Browser'
+    case 'review':
+      return 'Review'
 
     default: {
       const exhaustive: never = kind
@@ -255,6 +257,8 @@ export function singletonTabId(kind: ArtifactTabKind): string | null {
       return 'files'
     case 'changes':
       return 'changes'
+    case 'review':
+      return 'review'
     case 'file':
     case 'terminal':
     case 'browser':

@@ -5,6 +5,7 @@ import {
   Folder,
   FolderOpen,
   GitBranch,
+  GitPullRequest,
   MoreHorizontal,
   Plus,
 } from 'lucide-react'
@@ -26,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/cn'
+import { setPullInboxCollapsed } from '@/lib/pull-inbox-pref'
 import { isSessionUnread, type SeenSessionsSnapshot } from '@/lib/seen-sessions'
 import { resolveFolderIndicator, resolveSessionIndicator } from '@/lib/session-activity'
 import {
@@ -51,6 +53,8 @@ export function FolderGroup({
   activeRunId,
   seenSnapshot,
   now,
+  pullAttention = 0,
+  pullCounts,
   onLinkRepo,
 }: {
   runId: string
@@ -62,6 +66,9 @@ export function FolderGroup({
   activeRunId: string | null
   seenSnapshot: SeenSessionsSnapshot
   now: number
+  pullAttention?: number
+  /** Open PRs per session run id. */
+  pullCounts: ReadonlyMap<string, number>
   onLinkRepo: () => void
 }) {
   const [renaming, setRenaming] = useState(false)
@@ -155,21 +162,16 @@ export function FolderGroup({
               </span>
             </Link>
 
-            <div className="relative mr-1 flex h-6 w-[3.25rem] shrink-0 items-center justify-end">
+            <div className="relative mr-1 flex h-6 w-20 shrink-0 items-center justify-end">
               <div className={cn('inline-flex items-center gap-1.5', yieldOnRowHover)}>
                 {collapsedRollup ? (
                   <ActivityDot tone={collapsedRollup.tone} label={collapsedRollup.label} />
                 ) : null}
-                {repoCount > 0 ? (
-                  <span
-                    title={repoCountLabel(repoCount)}
-                    aria-label={repoCountLabel(repoCount)}
-                    className="text-muted-foreground inline-flex items-center gap-0.5 font-mono text-[10px] tabular-nums"
-                  >
-                    <GitBranch className="size-2.5" />
-                    {repoCount}
-                  </span>
-                ) : null}
+                <FolderMeta
+                  folderId={folder.folderId}
+                  repoCount={repoCount}
+                  pullAttention={pullAttention}
+                />
               </div>
               <div className={cn('absolute inset-y-0 right-0 flex items-center', revealOnRowHover)}>
                 {folder.archived ? null : (
@@ -244,6 +246,7 @@ export function FolderGroup({
                 now={now}
                 active={activeRunId === session.runId}
                 dimmed={session.archived}
+                pullCount={pullCounts.get(session.runId)}
                 onRename={() => setRenamingSessionId(session.runId)}
                 onArchive={
                   session.archived
@@ -281,5 +284,54 @@ export function FolderGroup({
         </div>
       ) : null}
     </div>
+  )
+}
+
+function compactCount(count: number): string {
+  return count > 99 ? '99+' : String(count)
+}
+
+function FolderMeta({
+  folderId,
+  repoCount,
+  pullAttention,
+}: {
+  folderId: string
+  repoCount: number
+  pullAttention: number
+}) {
+  if (repoCount === 0) {
+    return null
+  }
+
+  const pullLabel = `${pullAttention} pull request${pullAttention === 1 ? '' : 's'} need attention`
+
+  return (
+    <span className="inline-flex items-center gap-1 font-mono text-[10px] tabular-nums">
+      <span
+        title={repoCountLabel(repoCount)}
+        aria-label={repoCountLabel(repoCount)}
+        className="bg-muted text-muted-foreground inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5"
+      >
+        <GitBranch className="size-2.5" />
+        {compactCount(repoCount)}
+      </span>
+      {pullAttention > 0 ? (
+        <Link
+          to="/folders/$folderId"
+          params={{ folderId }}
+          title={pullLabel}
+          aria-label={pullLabel}
+          onClick={() => {
+            rememberLastFolder(folderId)
+            setPullInboxCollapsed(false)
+          }}
+          className="bg-brand/15 text-brand hover:bg-brand/25 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 transition-colors duration-100"
+        >
+          <GitPullRequest className="size-2.5" />
+          {compactCount(pullAttention)}
+        </Link>
+      ) : null}
+    </span>
   )
 }

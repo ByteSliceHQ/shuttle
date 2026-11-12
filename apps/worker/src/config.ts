@@ -185,3 +185,7 @@ export function playbookRunId(env: ShuttleEnv): string {
 export function workspaceRunId(env: ShuttleEnv): string {
   return env.SHUTTLE_WORKSPACE_RUN_ID ?? 'shuttle-workspace'
 }
+
+export function pullsRunId(env: ShuttleEnv): string {
+  return env.SHUTTLE_PULLS_RUN_ID ?? 'shuttle-pulls'
+}

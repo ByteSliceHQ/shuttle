@@ -9,9 +9,16 @@ import { parsePreviewHost } from './preview-host'
 import { proxyContainerPreview } from './preview-proxy'
 import { openContainerTerminal } from './terminal'
 import type {
+  ChangesetResult,
+  CheckoutRefInput,
   ExecOptions,
   ExecResult,
+  LayerAddress,
+  LayerChangesetInput,
   LinkedSandboxRepo,
+  NewLayerResult,
+  SealLayerResult,
+  StackStatus,
   Workspace,
   WorktreeResult,
 } from './workspace'
@@ -61,6 +68,51 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
     }
 
     return (await this.workspace()).ensureWorktree(runId)
+  }
+
+  async changeset(runId: string, repoName: string, baseBranch?: string): Promise<ChangesetResult> {
+    return (await this.workspace()).changeset(runId, repoName, baseBranch)
+  }
+
+  async layerChangeset(
+    runId: string,
+    repoName: string,
+    input: LayerChangesetInput,
+  ): Promise<ChangesetResult> {
+    return (await this.workspace()).layerChangeset(runId, repoName, input)
+  }
+
+  async stackStatus(runId: string, repoName: string, defaultBranch: string): Promise<StackStatus> {
+    return (await this.workspace()).stackStatus(runId, repoName, defaultBranch)
+  }
+
+  async sealLayer(runId: string, repoName: string, message: string): Promise<SealLayerResult> {
+    return (await this.workspace()).sealLayer(runId, repoName, message)
+  }
+
+  async newLayer(runId: string, repoName: string, defaultBranch: string): Promise<NewLayerResult> {
+    return (await this.workspace()).newLayer(runId, repoName, defaultBranch)
+  }
+
+  async newStack(runId: string, repoName: string, defaultBranch: string): Promise<NewLayerResult> {
+    return (await this.workspace()).newStack(runId, repoName, defaultBranch)
+  }
+
+  async checkoutLayer(
+    runId: string,
+    repoName: string,
+    address: LayerAddress,
+    defaultBranch: string,
+  ): Promise<StackStatus> {
+    return (await this.workspace()).checkoutLayer(runId, repoName, address, defaultBranch)
+  }
+
+  async checkoutRef(
+    runId: string,
+    repo: LinkedSandboxRepo,
+    ref: CheckoutRefInput,
+  ): Promise<{ root: string }> {
+    return (await this.workspace()).checkoutRef(runId, repo, ref)
   }
 
   /** @deprecated Prefer ensureRepos. */

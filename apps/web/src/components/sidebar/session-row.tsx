@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { MoreHorizontal } from 'lucide-react'
+import { GitPullRequest, MoreHorizontal } from 'lucide-react'
 
 import { ActivityDot } from '@/components/sidebar/activity-dot'
 import {
@@ -39,6 +39,7 @@ export function SessionRow({
   now,
   active,
   dimmed,
+  pullCount = 0,
   onRename,
   onArchive,
 }: {
@@ -51,6 +52,8 @@ export function SessionRow({
   now: number
   active: boolean
   dimmed?: boolean
+  /** Open PRs this session authored. */
+  pullCount?: number
   onRename?: () => void
   onArchive?: () => void
 }) {
@@ -73,6 +76,16 @@ export function SessionRow({
         >
           {title}
         </span>
+        {pullCount > 0 ? (
+          <span
+            title={`${pullCount} open pull ${pullCount === 1 ? 'request' : 'requests'}`}
+            className="text-muted-foreground inline-flex shrink-0 items-center gap-0.5 font-mono text-[10px] tabular-nums"
+          >
+            <GitPullRequest aria-hidden className="size-3" />
+            {pullCount}
+            <span className="sr-only">open pull {pullCount === 1 ? 'request' : 'requests'}</span>
+          </span>
+        ) : null}
       </Link>
       <div className="relative mr-1 flex h-6 w-8 shrink-0 items-center justify-end">
         <time

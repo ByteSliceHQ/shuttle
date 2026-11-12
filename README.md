@@ -23,8 +23,11 @@ That one command starts:
 
 - Worker API at http://127.0.0.1:8790
 - Web UI at http://127.0.0.1:5180
+- When a GitHub App is configured in `.dev.vars`, a Cloudflare quick tunnel
+  that rewrites the App webhook URL so PR events reach your laptop live
 
-Default `SHUTTLE_WORKSPACE_MODE=memory` needs no Docker.
+Default `SHUTTLE_WORKSPACE_MODE=memory` needs no Docker. Set
+`SHUTTLE_TUNNEL=off` (or leave GitHub App vars blank) to skip the tunnel.
 
 ## What you get
 
@@ -60,9 +63,9 @@ bun link @swirls/looms
 
 ## Scripts
 
-| Command               | What it does                  |
-| --------------------- | ----------------------------- |
-| `bun run dev`         | Worker + web together         |
-| `bun run check-types` | Typecheck both apps           |
-| `bun run test`        | Worker unit/integration tests |
-| `bun run verify`      | Types + tests                 |
+| Command               | What it does                    |
+| --------------------- | ------------------------------- |
+| `bun run dev`         | Worker + web (+ webhook tunnel) |
+| `bun run check-types` | Typecheck both apps             |
+| `bun run test`        | Worker unit/integration tests   |
+| `bun run verify`      | Types + tests                   |

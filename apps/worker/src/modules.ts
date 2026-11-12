@@ -6,11 +6,13 @@ import { createConductorAgent } from './agents/conductor'
 import { intake } from './agents/intake'
 import { createNarratorAgent } from './agents/narrator'
 import { createReflectorAgent } from './agents/reflector'
+import { createReviewerAgent } from './agents/reviewer'
 import { createWorkerAgent } from './agents/worker'
 import { resolveEvaluator, resolveLlm } from './config'
 import type { ShuttleEnv } from './env'
+import { pulls } from './pulls/module'
 import { reflect } from './reflect/module'
-import { codingSession, shuttleSession } from './session/module'
+import { codingSession, reviewSession, shuttleSession } from './session/module'
 import { workspace } from './workspace/module'
 
 export interface ShuttleModulesOptions {
@@ -18,7 +20,7 @@ export interface ShuttleModulesOptions {
 }
 
 /**
- * Compose native Looms modules with Shuttle's custom session, reflect, and workspace modules.
+ * Compose native Looms modules with Shuttle's custom session, reflect, pulls, and workspace modules.
  * This is the demo's showcase of custom module interoperability.
  */
 export function shuttleModules(
@@ -33,10 +35,11 @@ export function shuttleModules(
   const worker = createWorkerAgent(env, runId, storage)
   const narrator = createNarratorAgent(env, runId, storage)
   const reflector = createReflectorAgent(env, runId)
+  const reviewer = createReviewerAgent(env, runId, storage)
 
   return [
     agent({
-      definitions: [conductor, worker, narrator, reflector],
+      definitions: [conductor, worker, narrator, reflector, reviewer],
       llm,
     }),
     evaluator({
@@ -45,8 +48,9 @@ export function shuttleModules(
       evaluatorPolicy,
     }),
     approval(),
-    shuttleSession({ definitions: [codingSession], storage }),
+    shuttleSession({ definitions: [codingSession, reviewSession], storage, env }),
     reflect(),
+    pulls({ env }),
     workspace(),
   ]
 }

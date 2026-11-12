@@ -7,10 +7,11 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --port 8790",
+    "dev:tunnel": "bun --env-file=.dev.vars scripts/dev-tunnel.ts",
     "deploy": "wrangler deploy",
     "build": "bun x tsc -p tsconfig.json --noEmit",
     "check-types": "bun x tsc -p tsconfig.json --noEmit",
-    "test": "bun test src"
+    "test": "bun test src scripts"
   },
   "dependencies": {
     "@ai-sdk/typesafe-ai": "^3.0.35",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260914.1",
+    "cloudflared": "^0.7.3",
     "typescript": "7.0.2",
     "wrangler": "^4.131.2"
   }

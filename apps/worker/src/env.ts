@@ -1,4 +1,15 @@
-import type { ExecOptions, LinkedSandboxRepo, WorktreeResult } from './sandbox/workspace'
+import type {
+  ChangesetResult,
+  CheckoutRefInput,
+  ExecOptions,
+  LayerAddress,
+  LayerChangesetInput,
+  LinkedSandboxRepo,
+  NewLayerResult,
+  SealLayerResult,
+  StackStatus,
+  WorktreeResult,
+} from './sandbox/workspace'
 
 export interface ShuttleEnv {
   readonly LOOMS_RUN: DurableObjectNamespace
@@ -19,6 +30,13 @@ export interface ShuttleEnv {
   readonly GITHUB_APP_SLUG?: string
   readonly GITHUB_APP_PRIVATE_KEY?: string
   readonly GITHUB_STATE_SECRET?: string
+  readonly GITHUB_WEBHOOK_SECRET?: string
+  /**
+   * Optional user/PAT token. Used when the GitHub App lacks `pull_requests`
+   * (and related) scopes so local inbox sync and PR create still work.
+   */
+  readonly GITHUB_TOKEN?: string
+  readonly SHUTTLE_PULLS_RUN_ID?: string
 }
 
 /** RPC surface of SessionSandbox / WorkspaceSandbox. */
@@ -26,6 +44,27 @@ export interface SessionSandboxStub {
   ensureRepos(repos: LinkedSandboxRepo[]): Promise<{ root: string }>
   ensureWorktree(runId: string): Promise<WorktreeResult>
   ensureRepo(repoUrl: string | null): Promise<{ root: string }>
+  changeset(runId: string, repoName: string, baseBranch?: string): Promise<ChangesetResult>
+  layerChangeset(
+    runId: string,
+    repoName: string,
+    input: LayerChangesetInput,
+  ): Promise<ChangesetResult>
+  stackStatus(runId: string, repoName: string, defaultBranch: string): Promise<StackStatus>
+  sealLayer(runId: string, repoName: string, message: string): Promise<SealLayerResult>
+  newLayer(runId: string, repoName: string, defaultBranch: string): Promise<NewLayerResult>
+  newStack(runId: string, repoName: string, defaultBranch: string): Promise<NewLayerResult>
+  checkoutLayer(
+    runId: string,
+    repoName: string,
+    address: LayerAddress,
+    defaultBranch: string,
+  ): Promise<StackStatus>
+  checkoutRef(
+    runId: string,
+    repo: LinkedSandboxRepo,
+    ref: CheckoutRefInput,
+  ): Promise<{ root: string }>
   readFile(
     path: string,
     cwd?: string,

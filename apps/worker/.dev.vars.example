@@ -11,11 +11,24 @@ TYPESAFE_AI_API_KEY=
 SHUTTLE_WORKSPACE_MODE=memory
 SHUTTLE_PLAYBOOK_RUN_ID=shuttle-playbook
 SHUTTLE_WORKSPACE_RUN_ID=shuttle-workspace
+SHUTTLE_PULLS_RUN_ID=shuttle-pulls
 SHUTTLE_WEB_URL=http://127.0.0.1:5180
 
-# GitHub App (optional — enables Connect GitHub + private repos)
-# Convert the downloaded PEM: openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in app.pem
+# GitHub App (optional — enables Connect GitHub + private repos + PRs)
+# Use a personal *dev* App: `bun run dev` overwrites its webhook URL with a
+# Cloudflare quick tunnel on every start. Any placeholder webhook URL is fine
+# at creation; keep "Active" checked. Convert the downloaded PEM:
+#   openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in app.pem
 GITHUB_APP_ID=
 GITHUB_APP_SLUG=
 GITHUB_APP_PRIVATE_KEY=
+# Optional user/PAT. Auto-filled from `gh auth token` by `bun run dev` when empty.
+# Used when the App lacks Pull requests / Checks / Commit statuses so private
+# inbox sync and PR create still work locally.
+GITHUB_TOKEN=
+# Auto-filled by `bun run dev` when empty; also pushed to the App hook config.
 GITHUB_STATE_SECRET=
+GITHUB_WEBHOOK_SECRET=
+
+# Set to `off` to skip the Cloudflare quick tunnel (inbox Sync still works).
+# SHUTTLE_TUNNEL=off

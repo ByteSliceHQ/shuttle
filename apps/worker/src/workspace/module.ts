@@ -19,6 +19,7 @@ import {
   reportActivity,
   requestSession,
   retargetTab,
+  setFolderAutoReview,
   unlinkRepo,
 } from './signals'
 import { createWorkspaceThread } from './thread'
@@ -50,6 +51,7 @@ export function workspace() {
       closeTab,
       reorderTabs,
       retargetTab,
+      setFolderAutoReview,
     },
   }))
 }
@@ -71,6 +73,7 @@ export {
   requestSession,
   retargetTab,
   sessionTabs,
+  setFolderAutoReview,
   unlinkRepo,
   workspaceDefinition,
   workspaceTree,

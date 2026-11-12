@@ -8,6 +8,7 @@
     "JEV_MODEL",
     "SHUTTLE_WORKSPACE_MODE",
     "SHUTTLE_PLAYBOOK_RUN_ID",
+    "SHUTTLE_TUNNEL",
     "PATH",
     "FLOX_ENV_CACHE"
   ],
@@ -24,6 +25,10 @@
       "dependsOn": ["^build"]
     },
     "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "dev:tunnel": {
       "cache": false,
       "persistent": true
     }

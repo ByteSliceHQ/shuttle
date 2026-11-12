@@ -1,20 +1,36 @@
 import type { ShuttleEnv } from '../env'
-import { fetchRepoTarball } from '../github/app'
+import { fetchRepoTarball, resolveRefSha } from '../github/app'
+import { branchForLayer, parentBranchForLayer } from './stack'
 import { parseTar, stripTarRoot } from './tar'
 import {
   repoCheckoutPath,
   resolvePath,
   worktreeRepoPath,
   worktreeRoot,
+  type ChangesetFile,
+  type ChangesetResult,
+  type CheckoutRefInput,
   type ExecOptions,
   type ExecResult,
+  type LayerAddress,
+  type LayerChangesetInput,
   type LinkedSandboxRepo,
+  type NewLayerResult,
+  type SealLayerResult,
+  type StackStatus,
   type Workspace,
   type WorktreeResult,
 } from './workspace'
 
+interface MemoryStackMeta {
+  readonly current: LayerAddress
+  /** Index s-1 holds the layer count of stack s. */
+  readonly layerCounts: readonly number[]
+}
+
 const FILE_PREFIX = 'file:'
 const META_KEY = 'meta:repos'
+const BASE_SHA_PREFIX = 'meta:baseSha:'
 
 /**
  * In-Durable-Object filesystem for demos without Docker.
@@ -24,6 +40,9 @@ const META_KEY = 'meta:repos'
 export class MemoryWorkspace implements Workspace {
   private readonly files = new Map<string, string | null>()
   private readonly dirty = new Set<string>()
+  private readonly baseShas = new Map<string, string>()
+  /** Per worktree key `${runId}/${repo}` → current layer and layer count per stack. */
+  private readonly stackMeta = new Map<string, MemoryStackMeta>()
   private repoNames: string[] = []
   private aborted = false
   private loaded = false
@@ -39,6 +58,7 @@ export class MemoryWorkspace implements Workspace {
     if (repos.length === 0) {
       await this.seedDemoRepo()
       this.repoNames = ['demo']
+      this.baseShas.set('demo', 'memory-demo-base')
       await this.persistMeta()
       await this.flush()
       return { root: '/workspace' }
@@ -53,10 +73,13 @@ export class MemoryWorkspace implements Workspace {
       }
 
       if (this.env) {
-        await this.importTarball(repo)
+        const baseSha = await resolveRefSha(this.env, repo, repo.defaultBranch)
+        await this.importTarball(repo, baseSha)
+        this.baseShas.set(repo.name, baseSha)
       } else {
         this.files.set(`${root}/README.md`, `# ${repo.fullName}\n`)
         this.dirty.add(`${root}/README.md`)
+        this.baseShas.set(repo.name, 'memory-local-base')
       }
 
       this.files.set(marker, repo.fullName)
@@ -90,6 +113,227 @@ export class MemoryWorkspace implements Workspace {
 
     await this.flush()
     return { root, repoDirs }
+  }
+
+  async layerChangeset(
+    runId: string,
+    repoName: string,
+    _input: LayerChangesetInput,
+  ): Promise<ChangesetResult> {
+    // Memory mode has no real commits; reuse the worktree overlay changeset.
+    return this.changeset(runId, repoName)
+  }
+
+  private stackMetaFor(runId: string, repoName: string): MemoryStackMeta {
+    const key = `${runId}/${repoName}`
+    const meta = this.stackMeta.get(key) ?? { current: { stack: 1, layer: 1 }, layerCounts: [1] }
+    this.stackMeta.set(key, meta)
+    return meta
+  }
+
+  async stackStatus(runId: string, repoName: string, defaultBranch: string): Promise<StackStatus> {
+    this.throwIfAborted()
+    await this.hydrate()
+    const meta = this.stackMetaFor(runId, repoName)
+    const changeset = await this.changeset(runId, repoName)
+    const files = changeset.files.map((file) => file.path)
+    const { current } = meta
+
+    const stacks = meta.layerCounts.map((count, index) => {
+      const stack = index + 1
+
+      const layers = Array.from({ length: count }, (_, layerIndex) => {
+        const address = { stack, layer: layerIndex + 1 }
+        const isCurrent = stack === current.stack && address.layer === current.layer
+        const id = `${repoName}-s${stack}-l${address.layer}`
+
+        return {
+          ...address,
+          branch: branchForLayer(runId, repoName, address),
+          parentBranch: parentBranchForLayer(runId, repoName, address, defaultBranch),
+          tipSha: `memory-${id}`,
+          treeSha: isCurrent ? `memory-tree-${id}-${files.join('|').length}` : `memory-tree-${id}`,
+          pending: isCurrent && files.length > 0,
+          files: isCurrent ? files : [],
+        }
+      })
+
+      return { stack, baseSha: changeset.baseSha, layers }
+    })
+
+    return {
+      repo: repoName,
+      currentStack: current.stack,
+      currentLayer: current.layer,
+      layers: stacks[current.stack - 1]?.layers ?? [],
+      stacks,
+      pending: files.length > 0,
+    }
+  }
+
+  async sealLayer(runId: string, repoName: string, message: string): Promise<SealLayerResult> {
+    const status = await this.stackStatus(runId, repoName, 'main')
+    const current = status.layers.find((layer) => layer.layer === status.currentLayer)
+
+    return {
+      sealed: status.pending,
+      tipSha: current?.tipSha ?? `memory-${repoName}`,
+      treeSha: current?.treeSha ?? `memory-tree-${repoName}`,
+      message: status.pending ? message : null,
+    }
+  }
+
+  async newLayer(runId: string, repoName: string, defaultBranch: string): Promise<NewLayerResult> {
+    await this.sealLayer(runId, repoName, 'Seal before stacking')
+    const meta = this.stackMetaFor(runId, repoName)
+    const stack = meta.current.stack
+    const address = { stack, layer: (meta.layerCounts[stack - 1] ?? 0) + 1 }
+
+    const layerCounts = meta.layerCounts.map((count, index) =>
+      index === stack - 1 ? address.layer : count,
+    )
+
+    this.stackMeta.set(`${runId}/${repoName}`, { current: address, layerCounts })
+
+    return {
+      ...address,
+      branch: branchForLayer(runId, repoName, address),
+      parentBranch: parentBranchForLayer(runId, repoName, address, defaultBranch),
+      tipSha: `memory-${repoName}-s${stack}-l${address.layer}`,
+    }
+  }
+
+  async newStack(runId: string, repoName: string, defaultBranch: string): Promise<NewLayerResult> {
+    await this.sealLayer(runId, repoName, 'Seal before starting a new stack')
+    const meta = this.stackMetaFor(runId, repoName)
+    const address = { stack: meta.layerCounts.length + 1, layer: 1 }
+
+    this.stackMeta.set(`${runId}/${repoName}`, {
+      current: address,
+      layerCounts: [...meta.layerCounts, 1],
+    })
+
+    return {
+      ...address,
+      branch: branchForLayer(runId, repoName, address),
+      parentBranch: defaultBranch,
+      tipSha: `memory-${repoName}-s${address.stack}-l1`,
+    }
+  }
+
+  async checkoutLayer(
+    runId: string,
+    repoName: string,
+    address: LayerAddress,
+    defaultBranch: string,
+  ): Promise<StackStatus> {
+    const meta = this.stackMetaFor(runId, repoName)
+    const count = meta.layerCounts[address.stack - 1] ?? 0
+
+    if (address.layer < 1 || address.layer > count) {
+      throw new Error(`Stack ${address.stack} layer ${address.layer} does not exist in ${repoName}`)
+    }
+
+    this.stackMeta.set(`${runId}/${repoName}`, { ...meta, current: address })
+    return this.stackStatus(runId, repoName, defaultBranch)
+  }
+
+  async changeset(runId: string, repoName: string): Promise<ChangesetResult> {
+    this.throwIfAborted()
+    await this.hydrate()
+
+    const baseSha = this.baseShas.get(repoName)
+
+    if (!baseSha) {
+      throw new Error(`No baseSha recorded for repo ${repoName}`)
+    }
+
+    const wtRoot = worktreeRepoPath(runId, repoName)
+    const baseRoot = repoCheckoutPath(repoName)
+    const files: ChangesetFile[] = []
+    const relativePaths = new Set<string>()
+
+    for (const filePath of this.listVisiblePaths()) {
+      if (filePath.startsWith(`${wtRoot}/`)) {
+        relativePaths.add(filePath.slice(`${wtRoot}/`.length))
+      } else if (filePath.startsWith(`${baseRoot}/`)) {
+        relativePaths.add(filePath.slice(`${baseRoot}/`.length))
+      }
+    }
+
+    for (const relative of Array.from(relativePaths).toSorted()) {
+      if (relative.startsWith('.shuttle-') || relative === '.shuttle-worktree') {
+        continue
+      }
+
+      const overlayPath = `${wtRoot}/${relative}`
+      const basePath = `${baseRoot}/${relative}`
+      const current = this.resolveOverlay(overlayPath)
+
+      const base = this.files.has(basePath)
+        ? this.files.get(basePath) === null
+          ? undefined
+          : this.files.get(basePath)
+        : undefined
+
+      if (current === base || (current === undefined && base === undefined)) {
+        continue
+      }
+
+      if (base == null && current != null) {
+        files.push({ path: relative, status: 'added', content: current })
+        continue
+      }
+
+      if (current == null && base != null) {
+        files.push({ path: relative, status: 'deleted', content: null })
+        continue
+      }
+
+      if (current != null && base != null && current !== base) {
+        files.push({ path: relative, status: 'modified', content: current })
+      }
+    }
+
+    return { baseSha, files }
+  }
+
+  async checkoutRef(
+    runId: string,
+    repo: LinkedSandboxRepo,
+    ref: CheckoutRefInput,
+  ): Promise<{ root: string }> {
+    this.throwIfAborted()
+    await this.hydrate()
+
+    if (!this.env) {
+      throw new Error('checkoutRef requires GitHub env')
+    }
+
+    const baseRoot = repoCheckoutPath(repo.name)
+    const wtRoot = worktreeRepoPath(runId, repo.name)
+
+    // Clear existing checkout + overlay for this repo.
+    for (const path of this.files.keys()) {
+      if (path.startsWith(`${baseRoot}/`) || path.startsWith(`${wtRoot}/`)) {
+        this.files.set(path, null)
+        this.dirty.add(path)
+      }
+    }
+
+    await this.importTarball(repo, ref.sha)
+    this.baseShas.set(repo.name, ref.sha)
+    this.files.set(`${baseRoot}/.shuttle-imported`, repo.fullName)
+    this.dirty.add(`${baseRoot}/.shuttle-imported`)
+
+    if (!this.repoNames.includes(repo.name)) {
+      this.repoNames = [...this.repoNames, repo.name]
+    }
+
+    await this.ensureWorktree(runId)
+    await this.persistMeta()
+    await this.flush()
+    return { root: wtRoot }
   }
 
   async readFile(path: string, cwd?: string): Promise<string> {
@@ -328,12 +572,12 @@ export class MemoryWorkspace implements Workspace {
     }
   }
 
-  private async importTarball(repo: LinkedSandboxRepo): Promise<void> {
+  private async importTarball(repo: LinkedSandboxRepo, ref?: string): Promise<void> {
     if (!this.env) {
       return
     }
 
-    const archive = await fetchRepoTarball(this.env, repo)
+    const archive = await fetchRepoTarball(this.env, repo, ref)
     const stream = new Blob([archive]).stream().pipeThrough(new DecompressionStream('gzip'))
     const gunzipped = await new Response(stream).arrayBuffer()
     const entries = parseTar(gunzipped)
@@ -436,6 +680,12 @@ export class MemoryWorkspace implements Workspace {
       this.files.set(key.slice(FILE_PREFIX.length), value)
     }
 
+    const shaListed = await this.storage.list<string>({ prefix: BASE_SHA_PREFIX })
+
+    for (const [key, value] of shaListed) {
+      this.baseShas.set(key.slice(BASE_SHA_PREFIX.length), value)
+    }
+
     this.loaded = true
   }
 
@@ -445,6 +695,16 @@ export class MemoryWorkspace implements Workspace {
     }
 
     await this.storage.put(META_KEY, this.repoNames)
+
+    const shaBatch: Record<string, string> = {}
+
+    for (const [name, sha] of this.baseShas) {
+      shaBatch[`${BASE_SHA_PREFIX}${name}`] = sha
+    }
+
+    if (Object.keys(shaBatch).length > 0) {
+      await this.storage.put(shaBatch)
+    }
   }
 
   private async flush(): Promise<void> {

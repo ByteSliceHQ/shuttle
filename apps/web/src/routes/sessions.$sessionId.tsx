@@ -7,6 +7,7 @@ import { ArtifactPane } from '@/components/artifacts/artifact-pane'
 import { Composer } from '@/components/composer'
 import { Conversation } from '@/components/conversation'
 import { SessionContextButtons } from '@/components/session-context'
+import { SessionPrPills } from '@/components/session-pr-pills'
 import { SessionRepos } from '@/components/session-repos'
 import { useReportLiveSession, useWorkspace } from '@/components/sidebar/workspace-context'
 import { StatusBadge } from '@/components/status-dot'
@@ -15,9 +16,20 @@ import { PanelHeader, PanelTitle } from '@/components/ui/panel'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { agentIdentities } from '@/lib/agents'
 import { shortId } from '@/lib/cn'
+import {
+  authoredPullsForSession,
+  pullInbox,
+  pullsRunIdFromEnv,
+  type PullInboxState,
+} from '@/lib/pulls'
 import { rememberSession } from '@/lib/recent-sessions'
 import { sessionActivity, type SessionActivity } from '@/lib/session-activity'
-import { sessionFeed, streamingTurns, type SessionFeed } from '@/lib/session-feed'
+import {
+  sessionFeed,
+  streamingTurns,
+  type PublishedPull,
+  type SessionFeed,
+} from '@/lib/session-feed'
 import type { RunStatus } from '@swirls/looms/core'
 import {
   type LoomsConnectionStatus,
@@ -30,16 +42,24 @@ import {
   useThreadTree,
 } from '@swirls/looms/react'
 
+interface SessionSearch {
+  /** Agent thread to inspect on open, e.g. the one that opened a linked PR. */
+  readonly thread?: string
+}
+
 export const Route = createFileRoute('/sessions/$sessionId')({
+  validateSearch: (search: Record<string, unknown>): SessionSearch =>
+    typeof search.thread === 'string' && search.thread ? { thread: search.thread } : {},
   component: SessionPage,
 })
 
 function SessionPage() {
   const { sessionId } = Route.useParams()
-  return <SessionWorkspace key={sessionId} runId={sessionId} />
+  const { thread } = Route.useSearch()
+  return <SessionWorkspace key={sessionId} runId={sessionId} focusThreadId={thread} />
 }
 
-function SessionWorkspace({ runId }: { runId: string }) {
+function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThreadId?: string }) {
   const store = useRunStore(runId)
   const summary = useRunSummary(store)
   const tree = useThreadTree(store)
@@ -86,6 +106,16 @@ function SessionWorkspace({ runId }: { runId: string }) {
     setFocusEventsToken((token) => token + 1)
   }, [])
 
+  const focusThreadKnown = focusThreadId !== undefined && identities.has(focusThreadId)
+  const [focusedThreadId, setFocusedThreadId] = useState<string | undefined>()
+
+  if (focusThreadKnown && focusedThreadId !== focusThreadId) {
+    setFocusedThreadId(focusThreadId)
+    setSelectedThreadId(focusThreadId)
+    setSelectedSeq(undefined)
+    setFocusEventsToken((token) => token + 1)
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <SessionHeader
@@ -95,6 +125,8 @@ function SessionWorkspace({ runId }: { runId: string }) {
         activity={summary.startedAt !== undefined ? activityState.activity : 'working'}
         connection={summary.connection}
         feed={feed}
+        labelFor={labelFor}
+        onInspect={inspect}
       />
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
         <ResizablePanel defaultSize="18" minSize={200} maxSize="30">
@@ -167,6 +199,8 @@ function SessionHeader({
   activity,
   connection,
   feed,
+  labelFor,
+  onInspect,
 }: {
   runId: string
   goal: string | undefined
@@ -174,12 +208,21 @@ function SessionHeader({
   activity: SessionActivity
   connection: LoomsConnectionStatus
   feed: SessionFeed
+  labelFor: (threadId: string | null) => string | undefined
+  onInspect: (threadId: string) => void
 }) {
   const [copied, setCopied] = useState(false)
   const tree = useWorkspace()?.tree
   const sessionMeta = tree?.sessions[runId]
   const folder = sessionMeta ? tree?.folders[sessionMeta.folderId] : undefined
   const title = sessionMeta?.title ?? goal ?? 'Coding session'
+  const pullsStore = useRunStore(pullsRunIdFromEnv())
+  const inbox = useProjection(pullsStore, pullInbox)
+
+  const sessionPulls = useMemo(
+    () => mergeSessionPulls(feed.publishedPulls, inbox, runId),
+    [feed.publishedPulls, inbox, runId],
+  )
 
   const badgeStatus =
     status === 'completed' || status === 'failed' || status === 'cancelled' ? status : activity
@@ -211,6 +254,7 @@ function SessionHeader({
         </h1>
       </div>
       <div className="flex items-center gap-1">
+        <SessionPrPills pulls={sessionPulls} labelFor={labelFor} onInspect={onInspect} />
         <ConnectionIndicator connection={connection} />
         <StatusBadge status={badgeStatus} className="mr-1" />
         {folder ? (
@@ -234,6 +278,31 @@ function SessionHeader({
       </div>
     </header>
   )
+}
+
+function mergeSessionPulls(
+  published: readonly PublishedPull[],
+  inbox: PullInboxState,
+  runId: string,
+): PublishedPull[] {
+  const byKey = new Map<string, PublishedPull>()
+
+  for (const pull of authoredPullsForSession(inbox, runId)) {
+    byKey.set(`${pull.fullName}#${pull.number}`, pull)
+  }
+
+  for (const pull of published) {
+    const key = `${pull.fullName}#${pull.number}`
+    const existing = byKey.get(key)
+
+    byKey.set(key, {
+      ...pull,
+      threadId: pull.threadId ?? existing?.threadId,
+      stack: pull.stack ?? existing?.stack,
+    })
+  }
+
+  return [...byKey.values()]
 }
 
 /** Silent while live; only a degraded connection earns header space. */

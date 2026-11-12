@@ -39,6 +39,7 @@ export const TabKindSchema = Schema.Union([
   Schema.Literal('changes'),
   Schema.Literal('terminal'),
   Schema.Literal('browser'),
+  Schema.Literal('review'),
 ])
 
 export const workspaceCatalog = defineEventCatalog('workspace', {
@@ -56,6 +57,14 @@ export const workspaceCatalog = defineEventCatalog('workspace', {
   }),
   'folder.reordered': Schema.Struct({
     folderIds: Schema.Array(Schema.String),
+  }),
+  'folder.auto_review.set': Schema.Struct({
+    folderId: Schema.String,
+    autoReview: Schema.Union([
+      Schema.Literal('off'),
+      Schema.Literal('others'),
+      Schema.Literal('all'),
+    ]),
   }),
   'github.connected': Schema.Struct({
     installationId: Schema.Finite,
@@ -79,6 +88,15 @@ export const workspaceCatalog = defineEventCatalog('workspace', {
     lessons: Schema.Array(LessonSchema),
     playbookVersion: Schema.Finite,
     playbookRunId: Schema.NullOr(Schema.String),
+    definitionName: Schema.optional(Schema.String),
+    pull: Schema.optional(
+      Schema.Struct({
+        fullName: Schema.String,
+        number: Schema.Finite,
+        headSha: Schema.String,
+        baseSha: Schema.String,
+      }),
+    ),
   }),
   'session.launched': Schema.Struct({
     runId: Schema.String,
@@ -139,7 +157,14 @@ export type LinkedRepo = {
 
 export type SessionActivity = 'working' | 'needs_input' | 'idle' | 'error'
 
-export type ArtifactTabKind = 'events' | 'files' | 'file' | 'changes' | 'terminal' | 'browser'
+export type ArtifactTabKind =
+  | 'events'
+  | 'files'
+  | 'file'
+  | 'changes'
+  | 'terminal'
+  | 'browser'
+  | 'review'
 
 export type ArtifactTab = {
   readonly tabId: string

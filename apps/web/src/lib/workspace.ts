@@ -11,12 +11,15 @@ export interface LinkedRepo {
   readonly private: boolean
 }
 
+export type FolderAutoReview = 'off' | 'others' | 'all'
+
 export interface WorkspaceFolder {
   readonly folderId: string
   readonly name: string
   readonly createdAt: number
   readonly archived: boolean
   readonly repos: readonly LinkedRepo[]
+  readonly autoReview?: FolderAutoReview
 }
 
 export interface WorkspaceSession {
@@ -51,7 +54,14 @@ export interface WorkspaceTree {
   readonly installations: Readonly<Record<string, GithubInstallation>>
 }
 
-export type ArtifactTabKind = 'events' | 'files' | 'file' | 'changes' | 'terminal' | 'browser'
+export type ArtifactTabKind =
+  | 'events'
+  | 'files'
+  | 'file'
+  | 'changes'
+  | 'terminal'
+  | 'browser'
+  | 'review'
 
 export interface ArtifactTab {
   readonly tabId: string
@@ -139,6 +149,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
               createdAt: payload.createdAt,
               archived: false,
               repos: [],
+              autoReview: 'off',
             },
           },
         }
@@ -157,6 +168,27 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
           folders: {
             ...state.folders,
             [payload.folderId]: { ...folder, name: payload.name },
+          },
+        }
+      }
+
+      case 'workspace.folder.auto_review.set': {
+        const payload = event.payload as {
+          folderId: string
+          autoReview: 'off' | 'others' | 'all'
+        }
+
+        const folder = state.folders[payload.folderId]
+
+        if (!folder) {
+          return state
+        }
+
+        return {
+          ...state,
+          folders: {
+            ...state.folders,
+            [payload.folderId]: { ...folder, autoReview: payload.autoReview },
           },
         }
       }

@@ -52,6 +52,7 @@ describe('conductor state', () => {
     expect(shouldSpawnConductor(queued)).toBe(true)
 
     const prompt = buildConductorInput({
+      runId: 'session_1',
       goal: 'Build a todo app',
       briefText: 'Build a todo app',
       briefVersion: 1,
@@ -64,5 +65,31 @@ describe('conductor state', () => {
 
     expect(prompt).toContain('add dark mode')
     expect(prompt).toContain('Previous conductor ended (failed)')
+  })
+
+  test('points the conductor at session worktrees, not the shared clones', () => {
+    const prompt = buildConductorInput({
+      runId: 'session_1',
+      goal: 'Add docs',
+      briefText: 'Add docs',
+      briefVersion: 1,
+      repoUrl: null,
+      repos: [
+        {
+          installationId: 1,
+          owner: 'acme',
+          name: 'glue',
+          fullName: 'acme/glue',
+          defaultBranch: 'main',
+          private: true,
+        },
+      ],
+      lessons: [],
+      playbookVersion: 0,
+      conductor: initialConductor(),
+    })
+
+    expect(prompt).toContain('acme/glue: /workspace/.wt/session_1/glue')
+    expect(prompt).not.toContain('/workspace/repos/')
   })
 })

@@ -5,14 +5,24 @@ import { getInstallationToken } from '../github/app'
 import { ensureContainerRunning, type DurableContainer } from './container-runtime'
 import { shellQuote, timedBashArgv } from './exec-argv'
 import { parentDirectory } from './paths'
+import { BASE_CONFIG_KEY, LAYER_CONFIG_KEY, PARENT_CONFIG_KEY } from './stack'
+import { StackWorkspaceOps } from './stack-ops'
 import {
   repoCheckoutPath,
   resolvePath,
   worktreeRepoPath,
   worktreeRoot,
+  type ChangesetFile,
+  type ChangesetResult,
+  type CheckoutRefInput,
   type ExecOptions,
   type ExecResult,
+  type LayerAddress,
+  type LayerChangesetInput,
   type LinkedSandboxRepo,
+  type NewLayerResult,
+  type SealLayerResult,
+  type StackStatus,
   type Workspace,
   type WorktreeResult,
 } from './workspace'
@@ -21,6 +31,11 @@ const DEFAULT_EXEC_TIMEOUT_MS = 120_000
 const MAX_EXEC_TIMEOUT_MS = 600_000
 const GREP_TIMEOUT_MS = 30_000
 const OUTPUT_CAP_BYTES = 32 * 1024
+
+function recordBaseCommand(worktree: string, branch: string): string {
+  const key = `branch.${branch}.${BASE_CONFIG_KEY}`
+  return `git -C ${shellQuote(worktree)} config ${shellQuote(key)} "$(git -C ${shellQuote(worktree)} rev-parse HEAD)"`
+}
 
 /**
  * Real Linux workspace backed by a Durable Object container + `@cloudflare/sandbox` Files.
@@ -112,7 +127,11 @@ export class ContainerWorkspace implements Workspace {
         [
           `if [ ! -d ${shellQuote(target)} ]; then`,
           `  if [ -d ${shellQuote(source)}/.git ]; then`,
-          `    git -C ${shellQuote(source)} worktree add -B ${shellQuote(branch)} ${shellQuote(target)};`,
+          `    git -C ${shellQuote(source)} worktree add -B ${shellQuote(branch)} ${shellQuote(target)} &&`,
+          `    ${recordBaseCommand(target, branch)} &&`,
+          `    parent=$(git -C ${shellQuote(source)} symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || echo main) &&`,
+          `    git -C ${shellQuote(target)} config ${shellQuote(`branch.${branch}.${LAYER_CONFIG_KEY}`)} 1 &&`,
+          `    git -C ${shellQuote(target)} config ${shellQuote(`branch.${branch}.${PARENT_CONFIG_KEY}`)} "$parent";`,
           `  else`,
           `    mkdir -p ${shellQuote(root)} && cp -R ${shellQuote(source)}/. ${shellQuote(target)};`,
           `  fi`,
@@ -124,6 +143,157 @@ export class ContainerWorkspace implements Workspace {
     }
 
     return { root, repoDirs }
+  }
+
+  async changeset(runId: string, repoName: string, baseBranch?: string): Promise<ChangesetResult> {
+    const cwd = worktreeRepoPath(runId, repoName)
+
+    // The base must be a commit GitHub already has, so local agent commits stay in the
+    // diff. Sessions record it at worktree creation; older ones fall back to merge-base.
+    const fallbacks = baseBranch
+      ? [`refs/remotes/origin/${baseBranch}`, `refs/heads/${baseBranch}`].map(
+          (ref) => `git merge-base HEAD ${shellQuote(ref)} 2>/dev/null`,
+        )
+      : []
+
+    const baseResult = await this.exec(
+      [
+        `git config --get "branch.$(git rev-parse --abbrev-ref HEAD).${BASE_CONFIG_KEY}"`,
+        ...fallbacks,
+        'git rev-parse HEAD',
+      ].join(' || '),
+      { cwd, timeoutMs: GREP_TIMEOUT_MS },
+    )
+
+    const baseSha = baseResult.stdout.trim().split('\n')[0] ?? ''
+
+    if (baseResult.exitCode !== 0 || !baseSha) {
+      throw new Error(baseResult.stderr.trim() || `Failed to resolve a base commit in ${cwd}`)
+    }
+
+    const [diff, untracked] = await Promise.all([
+      this.exec(`git diff --name-status --no-renames -z ${shellQuote(baseSha)}`, {
+        cwd,
+        timeoutMs: GREP_TIMEOUT_MS,
+      }),
+      // Plain `git status` collapses a new directory to `dir/`; list every file instead.
+      this.exec('git ls-files --others --exclude-standard -z', {
+        cwd,
+        timeoutMs: GREP_TIMEOUT_MS,
+      }),
+    ])
+
+    if (diff.exitCode !== 0) {
+      throw new Error(diff.stderr.trim() || `git diff failed in ${cwd}`)
+    }
+
+    if (untracked.exitCode !== 0) {
+      throw new Error(untracked.stderr.trim() || `git ls-files failed in ${cwd}`)
+    }
+
+    const files: ChangesetFile[] = []
+    const diffTokens = diff.stdout.split('\0').filter(Boolean)
+
+    for (let index = 0; index + 1 < diffTokens.length; index += 2) {
+      const code = diffTokens[index]!
+      const path = diffTokens[index + 1]!
+
+      if (code.startsWith('D')) {
+        files.push({ path, status: 'deleted', content: null })
+        continue
+      }
+
+      files.push({
+        path,
+        status: code.startsWith('A') ? 'added' : 'modified',
+        content: await this.readFile(path, cwd),
+      })
+    }
+
+    for (const path of untracked.stdout.split('\0').filter(Boolean)) {
+      files.push({ path, status: 'added', content: await this.readFile(path, cwd) })
+    }
+
+    return { baseSha, files }
+  }
+
+  private stackOps(): StackWorkspaceOps {
+    return new StackWorkspaceOps({
+      exec: (command, options) => this.exec(command, options),
+      ensureGitIdentity: (cwd) => this.ensureGitIdentity(cwd),
+    })
+  }
+
+  async layerChangeset(
+    runId: string,
+    repoName: string,
+    input: LayerChangesetInput,
+  ): Promise<ChangesetResult> {
+    return this.stackOps().layerChangeset(runId, repoName, input)
+  }
+
+  async stackStatus(runId: string, repoName: string, defaultBranch: string): Promise<StackStatus> {
+    return this.stackOps().stackStatus(runId, repoName, defaultBranch)
+  }
+
+  async sealLayer(runId: string, repoName: string, message: string): Promise<SealLayerResult> {
+    return this.stackOps().sealLayer(runId, repoName, message)
+  }
+
+  async newLayer(runId: string, repoName: string, defaultBranch: string): Promise<NewLayerResult> {
+    return this.stackOps().newLayer(runId, repoName, defaultBranch)
+  }
+
+  async newStack(runId: string, repoName: string, defaultBranch: string): Promise<NewLayerResult> {
+    return this.stackOps().newStack(runId, repoName, defaultBranch)
+  }
+
+  async checkoutLayer(
+    runId: string,
+    repoName: string,
+    address: LayerAddress,
+    defaultBranch: string,
+  ): Promise<StackStatus> {
+    return this.stackOps().checkoutLayer(runId, repoName, address, defaultBranch)
+  }
+
+  private async ensureGitIdentity(cwd: string): Promise<void> {
+    await this.exec(
+      ['git config user.email shuttle@local', 'git config user.name Shuttle'].join(' && '),
+      { cwd, timeoutMs: GREP_TIMEOUT_MS },
+    )
+  }
+
+  async checkoutRef(
+    runId: string,
+    repo: LinkedSandboxRepo,
+    ref: CheckoutRefInput,
+  ): Promise<{ root: string }> {
+    const container = await this.container()
+    const token = await getInstallationToken(this.env, repo.installationId)
+    const basic = btoa(`x-access-token:${token}`)
+    const source = repoCheckoutPath(repo.name)
+    const target = worktreeRepoPath(runId, repo.name)
+    const branch = ref.branch ?? `shuttle/${runId}/${repo.name}`
+
+    await this.execWithTimeout(
+      [
+        `mkdir -p /workspace/repos /workspace/.wt/${shellQuote(runId)}`,
+        `if [ ! -d ${shellQuote(source)}/.git ]; then`,
+        `  git -c http.extraheader=${shellQuote(`AUTHORIZATION: basic ${basic}`)} clone --depth 1 ${shellQuote(`https://github.com/${repo.fullName}.git`)} ${shellQuote(source)};`,
+        `fi`,
+        `git -C ${shellQuote(source)} -c http.extraheader=${shellQuote(`AUTHORIZATION: basic ${basic}`)} fetch --depth 1 origin ${shellQuote(ref.sha)}`,
+        `if [ -d ${shellQuote(target)} ]; then`,
+        `  git -C ${shellQuote(source)} worktree remove --force ${shellQuote(target)} || rm -rf ${shellQuote(target)};`,
+        `fi`,
+        `git -C ${shellQuote(source)} worktree add -B ${shellQuote(branch)} ${shellQuote(target)} ${shellQuote(ref.sha)}`,
+        recordBaseCommand(target, branch),
+      ].join(' && '),
+      { timeoutMs: DEFAULT_EXEC_TIMEOUT_MS },
+      container,
+    )
+
+    return { root: target }
   }
 
   async readFile(path: string, cwd?: string): Promise<string> {

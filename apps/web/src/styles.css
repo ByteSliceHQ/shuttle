@@ -275,6 +275,19 @@
   }
 }
 
+/* The docked PR inbox eases its width so centered folder content glides instead of jumping. */
+.pull-inbox {
+  transition: width 220ms var(--ease-snappy);
+}
+
+.pull-inbox-layer {
+  transition: opacity 180ms var(--ease-snappy);
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
 /* Long lists fade out at the bottom instead of slicing a row mid-glyph. */
 .scroll-fade {
   mask-image: linear-gradient(to bottom, black calc(100% - 20px), transparent);
@@ -420,7 +433,8 @@
     transition: none;
   }
 
-  .drawer-in {
+  .drawer-in,
+  .pull-inbox {
     transition: none;
   }
 

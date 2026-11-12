@@ -17,6 +17,13 @@ const LinkedRepoSchema = z.object({
   private: z.boolean(),
 })
 
+const PullRefSchema = z.object({
+  fullName: z.string(),
+  number: z.number(),
+  headSha: z.string(),
+  baseSha: z.string(),
+})
+
 export const ShuttleSessionInputSchema = z.object({
   goal: z.string(),
   repoUrl: z.string().nullable().optional(),
@@ -27,6 +34,7 @@ export const ShuttleSessionInputSchema = z.object({
   playbookRunId: z.string().nullable().optional(),
   playbookVersion: z.number().optional(),
   lessons: z.array(LessonSchema).optional(),
+  pull: PullRefSchema.optional(),
 })
 
 export type ShuttleSessionInput = z.infer<typeof ShuttleSessionInputSchema>
@@ -47,4 +55,9 @@ export function defineShuttleSession(def: {
 export const codingSession = defineShuttleSession({
   name: 'coding',
   description: 'Root coding session with intake routing, brief, and conductor',
+})
+
+export const reviewSession = defineShuttleSession({
+  name: 'review',
+  description: 'Pull request review session with reviewer agent',
 })

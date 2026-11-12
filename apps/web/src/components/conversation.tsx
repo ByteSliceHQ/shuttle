@@ -5,6 +5,7 @@ import {
   CircleStop,
   ChevronRight,
   CornerDownRight,
+  GitPullRequest,
   LoaderCircle,
   MessageCircleQuestion,
   MessageSquareDashed,
@@ -17,7 +18,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { AgentIdentity } from '@/lib/agents'
 import { agentRole } from '@/lib/agents'
-import { answerQuestion, reroute, stopSession } from '@/lib/api'
+import { answerQuestion, decideStructuredApproval, reroute, stopSession } from '@/lib/api'
 import { cn, compactJson, errorMessage } from '@/lib/cn'
 import { classifyHeuristic } from '@/lib/intake-heuristic'
 import { jsonFields, jsonText } from '@/lib/json'
@@ -43,6 +44,7 @@ import { useNow } from '@/lib/use-now'
 
 import { FollowList } from './follow-list'
 import { Markdown } from './markdown'
+import { PullPublishCard } from './pull-publish-card'
 import { Button } from './ui/button'
 import {
   DropdownMenu,
@@ -1229,6 +1231,26 @@ function QuestionCard({
   context: ConversationContext
   className?: string
 }) {
+  if (item.approvalId.startsWith('pr_publish_')) {
+    return <PullPublishCard item={item} context={context} className={className} />
+  }
+
+  if (item.approvalId.startsWith('pr_review_')) {
+    return <PullReviewCard item={item} context={context} className={className} />
+  }
+
+  return <AskUserCard item={item} context={context} className={className} />
+}
+
+function AskUserCard({
+  item,
+  context,
+  className,
+}: {
+  item: Extract<FeedItem, { kind: 'question' }>
+  context: ConversationContext
+  className?: string
+}) {
   const identity = context.identities.get(item.threadId)
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState<'answer' | 'defer' | null>(null)
@@ -1341,6 +1363,173 @@ function QuestionCard({
               </Button>
             </div>
           </form>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function PullReviewCard({
+  item,
+  context,
+  className,
+}: {
+  item: Extract<FeedItem, { kind: 'question' }>
+  context: ConversationContext
+  className?: string
+}) {
+  const identity = context.identities.get(item.threadId)
+  const drafts = context.feed.draftReviewComments
+
+  const [summary, setSummary] = useState(
+    item.title.replace(/^Submit pull request review\?\s*/i, '') || item.title,
+  )
+
+  const [verdict, setVerdict] = useState<'approve' | 'request_changes' | 'comment'>('comment')
+
+  const [enabled, setEnabled] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(drafts.map((comment) => [comment.commentId, true])),
+  )
+
+  const [pending, setPending] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function decide(actionId: 'submit' | 'discard') {
+    setPending(actionId)
+    setError(null)
+
+    try {
+      if (actionId === 'discard') {
+        await decideStructuredApproval(context.runId, item.approvalId, {
+          actionId: 'discard',
+          outcome: 'reject',
+        })
+      } else {
+        await decideStructuredApproval(context.runId, item.approvalId, {
+          actionId: 'submit',
+          outcome: 'approve',
+          payload: {
+            summary,
+            verdict,
+            comments: drafts
+              .filter((comment) => enabled[comment.commentId] !== false)
+              .map((comment) => ({
+                path: comment.path,
+                line: comment.line,
+                side: comment.side,
+                body: comment.body,
+              })),
+          },
+        })
+      }
+    } catch (cause) {
+      setError(errorMessage(cause))
+      setPending(null)
+    }
+  }
+
+  return (
+    <div className={cn('flex gap-3', className)}>
+      <AgentAvatar identity={identity} threadId={item.threadId} />
+      <div
+        className={cn(
+          'min-w-0 flex-1 rounded-xl border p-3',
+          item.decision ? 'bg-card/40' : 'border-brand/30 bg-brand/6',
+        )}
+      >
+        <div className="text-muted-foreground flex items-center gap-2 text-[11px]">
+          <GitPullRequest
+            className={cn('size-3.5 shrink-0', item.decision ? undefined : 'text-brand')}
+          />
+          <span className="text-foreground/90 font-medium">Submit review</span>
+          <span className="shrink-0 whitespace-nowrap tabular-nums">{clockTime(item.ts)}</span>
+          {item.decision ? null : (
+            <span className="text-brand ml-auto shrink-0">Needs approval</span>
+          )}
+        </div>
+        {item.decision ? (
+          <p className="text-muted-foreground mt-2 text-xs">
+            {item.decision.answer === null ? 'Discarded' : item.decision.answer}
+          </p>
+        ) : (
+          <div className="mt-3 flex flex-col gap-2">
+            <Textarea
+              value={summary}
+              onChange={(event) => setSummary(event.target.value)}
+              disabled={pending !== null}
+              className="min-h-20 resize-none text-[13px]"
+            />
+            {drafts.length > 0 ? (
+              <ul className="flex flex-col gap-1.5">
+                {drafts.map((comment) => (
+                  <li
+                    key={comment.commentId}
+                    className="bg-background/60 flex items-start gap-2 rounded-md border px-2 py-1.5 text-[11px]"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={enabled[comment.commentId] !== false}
+                      disabled={pending !== null}
+                      onChange={(event) =>
+                        setEnabled((prev) => ({
+                          ...prev,
+                          [comment.commentId]: event.target.checked,
+                        }))
+                      }
+                      className="mt-0.5 size-3"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-muted-foreground font-mono">
+                        {comment.path}:{comment.line} · {comment.severity}
+                      </p>
+                      <p className="text-foreground/90 mt-0.5 whitespace-pre-wrap">
+                        {comment.body}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
+              {(['comment', 'approve', 'request_changes'] as const).map((option) => (
+                <Button
+                  key={option}
+                  type="button"
+                  size="sm"
+                  variant={verdict === option ? 'brand' : 'outline'}
+                  disabled={pending !== null}
+                  onClick={() => setVerdict(option)}
+                >
+                  {option === 'request_changes'
+                    ? 'Request changes'
+                    : option === 'approve'
+                      ? 'Approve'
+                      : 'Comment'}
+                </Button>
+              ))}
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              {error ? <span className="text-status-failed mr-auto text-xs">{error}</span> : null}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={pending !== null}
+                onClick={() => void decide('discard')}
+              >
+                Discard
+              </Button>
+              <Button
+                type="button"
+                variant="brand"
+                size="sm"
+                disabled={pending !== null}
+                onClick={() => void decide('submit')}
+              >
+                Submit review
+              </Button>
+            </div>
+          </div>
         )}
       </div>
     </div>

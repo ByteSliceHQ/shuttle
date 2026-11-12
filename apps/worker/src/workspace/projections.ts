@@ -59,6 +59,11 @@ const FolderSchema = Schema.Struct({
   createdAt: Schema.Finite,
   archived: Schema.Boolean,
   repos: Schema.Array(LinkedRepoSchema),
+  autoReview: Schema.Union([
+    Schema.Literal('off'),
+    Schema.Literal('others'),
+    Schema.Literal('all'),
+  ]),
 })
 
 const SessionSchema = Schema.Struct({
@@ -106,6 +111,7 @@ export const workspaceTree = workspaceModule.projection({
           defaultBranch: string
           private: boolean
         }[]
+        autoReview: 'off' | 'others' | 'all'
       }
     >,
     sessions: {} as Record<
@@ -151,6 +157,7 @@ export const workspaceTree = workspaceModule.projection({
               createdAt: event.payload.createdAt,
               archived: false,
               repos: [],
+              autoReview: 'off' as const,
             },
           },
         }
@@ -193,6 +200,25 @@ export const workspaceTree = workspaceModule.projection({
         const next = event.payload.folderIds.filter((id) => known.has(id))
         const missing = state.folderOrder.filter((id) => !next.includes(id))
         return { ...state, folderOrder: [...next, ...missing] }
+      }
+
+      case 'workspace.folder.auto_review.set': {
+        const folder = state.folders[event.payload.folderId]
+
+        if (!folder) {
+          return state
+        }
+
+        return {
+          ...state,
+          folders: {
+            ...state.folders,
+            [folder.folderId]: {
+              ...folder,
+              autoReview: event.payload.autoReview,
+            },
+          },
+        }
       }
 
       case 'workspace.github.connected': {

@@ -1,7 +1,6 @@
 import { Predicate } from 'effect'
 
 import {
-  cancel,
   createWaitId,
   deterministicThreadId,
   emit,
@@ -29,7 +28,18 @@ import {
   spawnReason,
   type ConductorState,
 } from './conductor'
+import { appendPrPublishEffects, withPrApprovalDecision } from './publish-effects'
+import { routeForEffects } from './route-effects'
 import { shuttleModule } from './scope'
+import {
+  withPrProposal,
+  withPrPublishSettled,
+  withStackPublished,
+  type PendingPrPublish,
+  type SessionRepoStack,
+} from './stack-state'
+
+export type { SessionRepoStack, SessionStackLayer, SessionStackNative } from './stack-state'
 
 export type InterjectionKind = 'question' | 'idea' | 'constraint' | 'correction' | 'task' | 'stop'
 
@@ -64,6 +74,13 @@ export interface LinkedSessionRepo {
   readonly private: boolean
 }
 
+export interface SessionPullRef {
+  readonly fullName: string
+  readonly number: number
+  readonly headSha: string
+  readonly baseSha: string
+}
+
 export interface SessionState {
   readonly goal: string
   readonly repoUrl: string | null
@@ -88,6 +105,29 @@ export interface SessionState {
   readonly parked: boolean
   /** Bumped whenever the mailbox wait settles so Looms will re-arm it. */
   readonly mailboxEpoch: number
+  readonly pull: SessionPullRef | null
+  readonly reviewerSpawned: boolean
+  /** Pending PR publish waiting for approval or effect completion. */
+  readonly pendingPrPublish: PendingPrPublish | null
+  /** Per-repo stack of published layers (local branch ↔ remote PR). */
+  readonly stacks: Readonly<Record<string, SessionRepoStack>>
+  /** Rejected publish gate whose `pr.discarded` settles the proposing tool call. */
+  readonly discardedPrApprovalId: string | null
+  readonly pendingReviewSubmit: {
+    readonly approvalId: string
+    readonly fullName: string
+    readonly number: number
+    readonly commitId: string
+    readonly summary: string
+    readonly verdict: 'approve' | 'request_changes' | 'comment'
+    readonly comments: readonly {
+      readonly path: string
+      readonly line: number
+      readonly side: 'LEFT' | 'RIGHT'
+      readonly body: string
+    }[]
+    readonly status: 'awaiting_approval' | 'submitting'
+  } | null
 }
 
 function asObject(value: unknown): { [key: string]: JsonValue } {
@@ -147,19 +187,6 @@ function kindFromEvaluator(event: EventEnvelope, fallback?: InterjectionKind): I
   }
 
   return fallback ?? 'task'
-}
-
-function steerEvent(threadId: string, content: string, interrupt: boolean, messageId?: string) {
-  return {
-    type: 'agent.steered' as const,
-    payload: {
-      turn: 0,
-      ...(messageId ? { messageId } : {}),
-      message: { role: 'user' as const, content },
-      interrupt,
-    },
-    threadId,
-  }
 }
 
 function bypassIntakeKind(message: PendingMessage): InterjectionKind | null {
@@ -239,6 +266,21 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         ]
       })
 
+      const pullRaw = asObject(input.pull)
+
+      const pull =
+        Predicate.isString(pullRaw.fullName) &&
+        Predicate.isNumber(pullRaw.number) &&
+        Predicate.isString(pullRaw.headSha) &&
+        Predicate.isString(pullRaw.baseSha)
+          ? {
+              fullName: pullRaw.fullName,
+              number: pullRaw.number,
+              headSha: pullRaw.headSha,
+              baseSha: pullRaw.baseSha,
+            }
+          : null
+
       return {
         goal: asString(input.goal) ?? 'Improve the repository',
         repoUrl: asString(input.repoUrl),
@@ -260,6 +302,12 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         processedMessageIds: [],
         reflectionLaunched: false,
         sandboxBound: false,
+        pull,
+        reviewerSpawned: false,
+        pendingPrPublish: null,
+        stacks: {},
+        discardedPrApprovalId: null,
+        pendingReviewSubmit: null,
         parked: false,
         mailboxEpoch: 0,
       }
@@ -274,6 +322,99 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
           return { ...state, sandboxBound: true }
         }
 
+        case 'shuttle.pr.proposed': {
+          return withPrProposal(state, event.payload, event.threadId ?? null)
+        }
+
+        case 'approval.decided': {
+          const approvalId = Predicate.isString(event.payload.approvalId)
+            ? event.payload.approvalId
+            : ''
+
+          const prNext = withPrApprovalDecision(state, event.payload)
+
+          if (prNext) {
+            return prNext
+          }
+
+          if (approvalId.startsWith('pr_review_')) {
+            if (event.payload.outcome !== 'approve') {
+              return { ...state, pendingReviewSubmit: null }
+            }
+
+            const payload = asObject(event.payload.payload)
+            const verdictRaw = Predicate.isString(payload.verdict) ? payload.verdict : 'comment'
+
+            const verdict =
+              verdictRaw === 'approve' ||
+              verdictRaw === 'request_changes' ||
+              verdictRaw === 'comment'
+                ? verdictRaw
+                : 'comment'
+
+            const commentsRaw = Array.isArray(payload.comments) ? payload.comments : []
+
+            const comments = commentsRaw.flatMap((item) => {
+              const comment = asObject(item)
+
+              if (
+                !Predicate.isString(comment.path) ||
+                !Predicate.isNumber(comment.line) ||
+                !Predicate.isString(comment.body)
+              ) {
+                return []
+              }
+
+              const side = comment.side === 'LEFT' ? ('LEFT' as const) : ('RIGHT' as const)
+              return [
+                {
+                  path: comment.path,
+                  line: comment.line,
+                  side,
+                  body: comment.body,
+                },
+              ]
+            })
+
+            return {
+              ...state,
+              pendingReviewSubmit: {
+                approvalId,
+                fullName: Predicate.isString(payload.fullName)
+                  ? payload.fullName
+                  : (state.pull?.fullName ?? ''),
+                number: Predicate.isNumber(payload.number)
+                  ? payload.number
+                  : (state.pull?.number ?? 0),
+                commitId: Predicate.isString(payload.commitId)
+                  ? payload.commitId
+                  : (state.pull?.headSha ?? ''),
+                summary: Predicate.isString(payload.summary) ? payload.summary : 'Shuttle review',
+                verdict,
+                comments,
+                status: 'submitting',
+              },
+            }
+          }
+
+          return state
+        }
+
+        case 'shuttle.pr.published': {
+          return withStackPublished(
+            withPrPublishSettled(state, event.payload.approvalId),
+            event.payload,
+          )
+        }
+
+        case 'shuttle.pr.publish_failed': {
+          return withPrPublishSettled(state, event.payload.approvalId)
+        }
+
+        case 'shuttle.review.submitted': {
+          return { ...state, pendingReviewSubmit: null }
+        }
+
         case 'shuttle.playbook.loaded': {
           return {
             ...state,
@@ -283,6 +424,10 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         }
 
         case 'shuttle.conductor.spawned': {
+          if (state.pull && !state.reviewerSpawned) {
+            return { ...state, reviewerSpawned: true }
+          }
+
           return {
             ...state,
             conductor: markConductorLive(state.conductor, event.payload.childThreadId),
@@ -409,6 +554,16 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             return applyChildTerminal(base, childThreadId, conductorEndReason(embedded?.type))
           }
 
+          // The conductor's proposal reaches the root only through this mailbox wake, and the
+          // embedded copy carries no threadId. Only the conductor can propose PRs.
+          if (embedded?.type === 'shuttle.pr.proposed') {
+            return withPrProposal(
+              base,
+              embeddedPayload,
+              embedded.threadId ?? liveConductorThreadId(base.conductor),
+            )
+          }
+
           if (embedded?.type === 'agent.spawn.requested') {
             const definitionName = asString(embeddedPayload.definitionName)
             const childThreadId = asString(embeddedPayload.childThreadId)
@@ -488,21 +643,78 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
       const conductorThreadId = liveConductorThreadId(state.conductor)
 
       if (!state.sandboxBound && state.sandboxName) {
+        const bindInput = {
+          sandboxName: state.sandboxName,
+          repos: state.repos.map((repo) => ({
+            installationId: repo.installationId,
+            owner: repo.owner,
+            name: repo.name,
+            fullName: repo.fullName,
+            defaultBranch: repo.defaultBranch,
+            private: repo.private,
+          })),
+          ...(state.pull
+            ? {
+                pull: {
+                  fullName: state.pull.fullName,
+                  number: state.pull.number,
+                  headSha: state.pull.headSha,
+                  baseSha: state.pull.baseSha,
+                },
+              }
+            : {}),
+        }
+
+        effects.push(invoke('shuttle.bindSandbox', bindInput, 'bind_sandbox'))
+      }
+
+      appendPrPublishEffects(state, effects)
+
+      if (state.pendingReviewSubmit?.status === 'submitting') {
+        const pending = state.pendingReviewSubmit
+
         effects.push(
           invoke(
-            'shuttle.bindSandbox',
+            'shuttle.submitReview',
             {
-              sandboxName: state.sandboxName,
-              repos: state.repos.map((repo) => ({
-                installationId: repo.installationId,
-                owner: repo.owner,
-                name: repo.name,
-                fullName: repo.fullName,
-                defaultBranch: repo.defaultBranch,
-                private: repo.private,
-              })),
+              approvalId: pending.approvalId,
+              threadId: deterministicThreadId(ctx.threadId, 'reviewer', 'main'),
+              fullName: pending.fullName,
+              number: pending.number,
+              commitId: pending.commitId,
+              summary: pending.summary,
+              verdict: pending.verdict,
+              comments: [...pending.comments],
             },
-            'bind_sandbox',
+            `submit_review_${pending.approvalId}`,
+          ),
+        )
+      }
+
+      if (state.pull && state.sandboxBound && !state.reviewerSpawned) {
+        const childThreadId = deterministicThreadId(ctx.threadId, 'reviewer', 'main')
+
+        effects.push(
+          spawn({
+            childThreadId,
+            kind: 'agent',
+            definitionName: 'reviewer',
+            input: {
+              text: state.goal,
+              pull: {
+                fullName: state.pull.fullName,
+                number: state.pull.number,
+                headSha: state.pull.headSha,
+              },
+            },
+          }),
+          emit(
+            shuttleModule.input('conductor.spawned', {
+              childThreadId,
+              generation: 0,
+              reason: 'initial',
+            }),
+            'reviewer_spawned',
           ),
         )
       }
@@ -530,7 +742,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         return effects
       }
 
-      if (shouldSpawnConductor(state.conductor)) {
+      if (!state.pull && shouldSpawnConductor(state.conductor)) {
         const { generation } = state.conductor
         const childThreadId = conductorChildThreadId(ctx.threadId, generation)
 
@@ -560,6 +772,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             definitionName: 'conductor',
             input: {
               text: buildConductorInput({
+                runId: ctx.runId,
                 goal: state.goal,
                 briefText: state.briefText,
                 briefVersion: state.briefVersion,
@@ -734,6 +947,11 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             type: [
               'shuttle.user.said',
               'shuttle.reroute',
+              'shuttle.pr.proposed',
+              'shuttle.pr.published',
+              'shuttle.pr.publish_failed',
+              'shuttle.review.submitted',
+              'approval.decided',
               'agent.spawn.requested',
               'runtime.thread.completed',
               'runtime.thread.failed',
@@ -747,147 +965,4 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
       return effects
     },
   })
-}
-
-interface RouteResult {
-  readonly summary: string
-  readonly queued: boolean
-}
-
-function routeForEffects(
-  state: SessionState,
-  route: PendingRoute,
-  effects: RuntimeEffect[],
-  sessionThreadId: string,
-  runId: string,
-): RouteResult {
-  const conductorThreadId = liveConductorThreadId(state.conductor)
-
-  const target =
-    route.targetThreadId ??
-    (route.kind === 'correction' || route.kind === 'stop'
-      ? (state.workerThreadIds[0] ?? conductorThreadId)
-      : conductorThreadId)
-
-  switch (route.kind) {
-    case 'question': {
-      const childThreadId = deterministicThreadId(sessionThreadId, 'narrator', route.messageId)
-
-      effects.push(
-        emit(
-          shuttleModule.input('narrator.spawned', {
-            messageId: route.messageId,
-            childThreadId,
-          }),
-          `narrator_${route.messageId}`,
-        ),
-        spawn({
-          childThreadId,
-          kind: 'agent',
-          definitionName: 'narrator',
-          input: {
-            text: route.text,
-            messageId: route.messageId,
-            sessionRunId: runId,
-            brief: state.briefText,
-            workers: state.workerThreadIds,
-          },
-        }),
-      )
-
-      return { summary: 'answered by narrator', queued: false }
-    }
-
-    case 'idea':
-
-    case 'constraint': {
-      const nextVersion = state.briefVersion + 1
-      const nextBrief = `${state.briefText}\n\n[${route.kind} v${nextVersion}] ${route.text}`
-
-      effects.push(
-        emit(
-          shuttleModule.input('brief.amended', {
-            version: nextVersion,
-            text: nextBrief,
-            sourceMessageId: route.messageId,
-          }),
-          `brief_${route.messageId}`,
-        ),
-      )
-
-      const recipients = [
-        ...(conductorThreadId ? [conductorThreadId] : []),
-        ...state.workerThreadIds,
-      ]
-
-      if (recipients.length === 0) {
-        return { summary: `brief v${nextVersion}; queued for conductor`, queued: true }
-      }
-
-      for (const threadId of recipients) {
-        effects.push(
-          emit(
-            steerEvent(threadId, `Brief v${nextVersion}: ${route.text}`, false, route.messageId),
-            `steer_brief_${route.messageId}_${threadId}`,
-          ),
-        )
-      }
-
-      return { summary: `brief v${nextVersion} to ${recipients.length} agents`, queued: false }
-    }
-
-    case 'correction': {
-      if (!target) {
-        return { summary: 'correction dropped (no target)', queued: false }
-      }
-
-      effects.push(
-        emit(
-          steerEvent(target, route.text, true, route.messageId),
-          `steer_correction_${route.messageId}`,
-        ),
-      )
-
-      return { summary: `interrupted ${target}`, queued: false }
-    }
-
-    case 'task': {
-      if (!conductorThreadId) {
-        return { summary: 'queued for conductor', queued: true }
-      }
-
-      effects.push(
-        emit(
-          steerEvent(conductorThreadId, route.text, false, route.messageId),
-          `steer_task_${route.messageId}`,
-        ),
-      )
-
-      return { summary: 'steered conductor', queued: false }
-    }
-
-    case 'stop': {
-      if (!target) {
-        return { summary: 'stop ignored (no target)', queued: false }
-      }
-
-      effects.push(
-        emit(
-          {
-            type: 'agent.turn.stopped',
-            payload: {},
-            threadId: target,
-          },
-          `stop_${route.messageId}`,
-        ),
-      )
-
-      // Stopping the conductor abandons its turn but keeps the thread alive for follow-ups.
-      if (target !== conductorThreadId) {
-        effects.push(cancel(target, `stop_cancel_${route.messageId}`))
-      }
-
-      return { summary: `stopped ${target}`, queued: false }
-    }
-  }
 }

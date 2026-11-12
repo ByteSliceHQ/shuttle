@@ -6,7 +6,7 @@ import {
 } from '@swirls/looms/cloudflare'
 
 import { shuttleAttributes } from './attributes'
-import { ensurePlaybookQuietly, ensureWorkspaceQuietly } from './bootstrap'
+import { ensurePlaybookQuietly, ensurePullsQuietly, ensureWorkspaceQuietly } from './bootstrap'
 import { readStoredLlmModel, resolveProjectors, writeStoredLlmModel } from './config'
 import type { ShuttleEnv } from './env'
 import { sandboxStub } from './env'
@@ -95,6 +95,12 @@ export default {
       return preview
     }
 
+    const url = new URL(request.url)
+
+    if (request.method === 'GET' && url.pathname === '/health') {
+      return Response.json({ ok: true })
+    }
+
     const workspace = await handleWorkspaceRoutes(request, env, ctx)
 
     if (workspace) {
@@ -120,10 +126,15 @@ export default {
     }
 
     // Ensure the playbook DO exists lazily when a session is started.
-    const pathname = new URL(request.url).pathname
-
-    if (request.method === 'POST' && (pathname === '/runs' || pathname === '/runs/launch')) {
-      await Promise.all([ensurePlaybookQuietly(env), ensureWorkspaceQuietly(env)])
+    if (
+      request.method === 'POST' &&
+      (url.pathname === '/runs' || url.pathname === '/runs/launch')
+    ) {
+      await Promise.all([
+        ensurePlaybookQuietly(env),
+        ensureWorkspaceQuietly(env),
+        ensurePullsQuietly(env),
+      ])
     }
 
     const response = await routeToDurableObject(env.LOOMS_RUN, request, {

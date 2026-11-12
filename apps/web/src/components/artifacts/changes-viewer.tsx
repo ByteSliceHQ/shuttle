@@ -5,6 +5,7 @@ import { EmptyState } from '@/components/ui/panel'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/cn'
 import { fetchSandboxDiff, type SandboxDiffEntry } from '@/lib/sandbox'
+import { parseUnifiedDiff } from '@/lib/unified-diff'
 
 export function ChangesViewer({
   runId,
@@ -99,59 +100,4 @@ export function ChangesViewer({
       </div>
     </ScrollArea>
   )
-}
-
-interface DiffLine {
-  readonly kind: 'ctx' | 'add' | 'del' | 'hunk' | 'meta'
-  readonly text: string
-}
-
-interface DiffFile {
-  readonly repo: string
-  readonly path: string
-  readonly lines: DiffLine[]
-}
-
-function parseUnifiedDiff(diff: string, repo: string): DiffFile[] {
-  if (!diff.trim()) {
-    return []
-  }
-
-  const files: DiffFile[] = []
-  let current: DiffFile | null = null
-
-  for (const raw of diff.split('\n')) {
-    if (raw.startsWith('diff --git ')) {
-      const match = raw.match(/b\/(.+)$/)
-
-      current = {
-        repo,
-        path: match?.[1] ?? 'unknown',
-        lines: [],
-      }
-
-      files.push(current)
-
-      continue
-    }
-
-    if (!current) {
-      current = { repo, path: 'patch', lines: [] }
-      files.push(current)
-    }
-
-    if (raw.startsWith('+++ ') || raw.startsWith('--- ') || raw.startsWith('index ')) {
-      current.lines.push({ kind: 'meta', text: raw })
-    } else if (raw.startsWith('@@')) {
-      current.lines.push({ kind: 'hunk', text: raw })
-    } else if (raw.startsWith('+')) {
-      current.lines.push({ kind: 'add', text: raw })
-    } else if (raw.startsWith('-')) {
-      current.lines.push({ kind: 'del', text: raw })
-    } else {
-      current.lines.push({ kind: 'ctx', text: raw })
-    }
-  }
-
-  return files
 }

@@ -1,8 +1,11 @@
-import { ensurePlaybookQuietly, ensureWorkspaceQuietly } from '../bootstrap'
-import { playbookRunId, workspaceRunId } from '../config'
+import { ensurePlaybookQuietly, ensurePullsQuietly, ensureWorkspaceQuietly } from '../bootstrap'
+import { playbookRunId, pullsRunId, workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { getInstallation, listInstallationRepos } from '../github/app'
 import { loomsStub } from '../looms-stub'
+import { syncFolderRepos } from '../pulls/folder-sync'
+import type { AutoReviewMode } from '../pulls/scope'
+import { setRepoPolicy } from '../pulls/signals'
 import {
   linkRepo,
   reportActivity,
@@ -38,6 +41,26 @@ export async function handleWorkspaceRoutes(
     if (request.method === 'DELETE') {
       return unlinkFolderRepo(request, env, folderId)
     }
+  }
+
+  const syncMatch = url.pathname.match(/^\/workspace\/folders\/([^/]+)\/pulls\/sync$/)
+
+  if (syncMatch && request.method === 'POST') {
+    return syncFolderPulls(env, decodeURIComponent(syncMatch[1] ?? ''))
+  }
+
+  const reviewMatch = url.pathname.match(
+    /^\/workspace\/folders\/([^/]+)\/pulls\/([^/]+)\/(\d+)\/review$/,
+  )
+
+  if (reviewMatch && request.method === 'POST') {
+    return startPullReview(
+      request,
+      env,
+      decodeURIComponent(reviewMatch[1] ?? ''),
+      decodeURIComponent(reviewMatch[2] ?? ''),
+      Number(reviewMatch[3]),
+    )
   }
 
   return null
@@ -232,6 +255,8 @@ async function linkFolderRepo(
 
   const stub = loomsStub(env.LOOMS_RUN, workspaceRunId(env))
   await stub.signal([linkRepo({ folderId, repo })])
+  await syncRepoPolicy(env, repo.fullName, repo.installationId)
+  await syncFolderPulls(env, folderId)
 
   return Response.json({ folderId, repo })
 }
@@ -250,10 +275,140 @@ async function unlinkFolderRepo(
     return Response.json({ error: 'fullName is required' }, { status: 400 })
   }
 
+  const tree = await readWorkspaceFolders(env)
+  const folder = tree.folders[folderId]
+  const repo = folder?.repos.find((item) => item.fullName === fullName)
+
   const stub = loomsStub(env.LOOMS_RUN, workspaceRunId(env))
   await stub.signal([unlinkRepo({ folderId, fullName })])
 
+  if (repo) {
+    await syncRepoPolicy(env, fullName, repo.installationId)
+  }
+
   return Response.json({ folderId, fullName, unlinked: true })
+}
+
+async function syncFolderPulls(env: ShuttleEnv, folderId: string): Promise<Response> {
+  await ensureWorkspaceQuietly(env)
+  await ensurePullsQuietly(env)
+
+  const tree = await readWorkspaceFolders(env)
+  const folder = tree.folders[folderId]
+
+  if (!folder) {
+    return Response.json({ error: 'folder not found' }, { status: 404 })
+  }
+
+  const pullsStub = loomsStub(env.LOOMS_RUN, pullsRunId(env))
+  return Response.json(await syncFolderRepos(env, pullsStub, folderId, folder.repos))
+}
+
+async function startPullReview(
+  request: Request,
+  env: ShuttleEnv,
+  folderId: string,
+  fullName: string,
+  number: number,
+): Promise<Response> {
+  await ensureWorkspaceQuietly(env)
+
+  const body = (await request.json().catch(() => ({}))) as {
+    headSha?: string
+    baseSha?: string
+    title?: string
+  }
+
+  const runId = crypto.randomUUID()
+  const stub = loomsStub(env.LOOMS_RUN, workspaceRunId(env))
+
+  await stub.signal([
+    requestSession({
+      runId,
+      folderId,
+      goal: body.title ?? `Review ${fullName}#${number}`,
+      lessons: [],
+      playbookVersion: 0,
+      playbookRunId: null,
+      definitionName: 'review',
+      pull: {
+        fullName,
+        number,
+        headSha: body.headSha ?? '',
+        baseSha: body.baseSha ?? '',
+      },
+    }),
+  ])
+
+  return Response.json({ runId })
+}
+
+async function syncRepoPolicy(
+  env: ShuttleEnv,
+  fullName: string,
+  installationId: number,
+): Promise<void> {
+  await ensurePullsQuietly(env)
+  const tree = await readWorkspaceFolders(env)
+  const folders: { folderId: string; autoReview: AutoReviewMode }[] = []
+
+  for (const [folderId, folder] of Object.entries(tree.folders)) {
+    if (folder.repos.some((repo) => repo.fullName === fullName)) {
+      folders.push({
+        folderId,
+        autoReview: folder.autoReview ?? 'off',
+      })
+    }
+  }
+
+  const stub = loomsStub(env.LOOMS_RUN, pullsRunId(env))
+  await stub.signal([setRepoPolicy({ fullName, installationId, folders })])
+}
+
+async function readWorkspaceFolders(env: ShuttleEnv): Promise<{
+  folders: Record<
+    string,
+    {
+      repos: LinkedRepo[]
+      autoReview?: AutoReviewMode
+    }
+  >
+}> {
+  const runId = workspaceRunId(env)
+  const stub = loomsStub(env.LOOMS_RUN, runId)
+
+  const response = await stub.fetch(
+    new Request(`https://shuttle.internal/runs/${runId}/projections/workspaceTree`, {
+      method: 'GET',
+    }),
+  )
+
+  if (!response.ok) {
+    return { folders: {} }
+  }
+
+  const body = (await response.json()) as {
+    value?: {
+      folders?: Record<
+        string,
+        {
+          repos?: LinkedRepo[]
+          autoReview?: AutoReviewMode
+        }
+      >
+    }
+  }
+
+  const folders: Record<string, { repos: LinkedRepo[]; autoReview?: AutoReviewMode }> = {}
+
+  for (const [folderId, folder] of Object.entries(body.value?.folders ?? {})) {
+    folders[folderId] = {
+      repos: folder.repos ?? [],
+      autoReview: folder.autoReview,
+    }
+  }
+
+  return { folders }
 }
 
 async function resolveRepo(

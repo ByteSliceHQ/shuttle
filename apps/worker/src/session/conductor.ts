@@ -1,5 +1,6 @@
 import { deterministicThreadId } from '@swirls/looms/core'
 
+import { worktreeRepoPath } from '../sandbox/workspace'
 import type { LinkedSessionRepo, PendingMessage } from './thread'
 
 export type ConductorEndReason = 'failed' | 'cancelled' | 'completed'
@@ -115,6 +116,7 @@ export function conductorEndReason(eventType: string | undefined): ConductorEndR
 }
 
 export interface ConductorPromptInput {
+  readonly runId: string
   readonly goal: string
   readonly briefText: string
   readonly briefVersion: number
@@ -136,8 +138,8 @@ export function buildConductorInput(input: ConductorPromptInput): string {
 
   const repoBlock =
     input.repos.length > 0
-      ? `\n\nLinked repositories:\n${input.repos
-          .map((repo) => `- ${repo.fullName} (checkout at /workspace/repos/${repo.name})`)
+      ? `\n\nLinked repositories (edit only these session worktrees; Shuttle publishes PRs from them):\n${input.repos
+          .map((repo) => `- ${repo.fullName}: ${worktreeRepoPath(input.runId, repo.name)}`)
           .join('\n')}`
       : `\n\nRepo: ${input.repoUrl ?? 'local demo workspace'}`
 

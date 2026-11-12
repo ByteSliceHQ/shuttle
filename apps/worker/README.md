@@ -44,25 +44,40 @@ Cloudflare Worker that hosts Shuttle sessions on Looms Durable Objects.
    (intake routing). Without it, intake falls back to local heuristics.
    Optional `JEV_MODEL` (default `jev-latest`) selects the Jev model id.
 
-5. (Optional) Create a GitHub App for folder repo linking:
+5. (Optional) Create a **personal** GitHub App for folder repo linking and PRs
+   (do not share a production App — local `bun run dev` overwrites its webhook
+   URL every start):
 
-   - Permissions: Contents (read/write), Metadata (read)
+   - Permissions: Contents (read/write), Metadata (read), Pull requests
+     (read/write), Checks (read), Commit statuses (read)
+   - Webhook events: `pull_request`, `pull_request_review`,
+     `pull_request_review_comment`, `check_suite`, `installation_repositories`
+     (prefer `check_suite` over `check_run` to keep volume down)
+   - Tick **Active** on the webhook. Any placeholder webhook URL is fine;
+     `bun run dev` starts a Cloudflare quick tunnel and
+     `PATCH`es `/app/hook/config` to
+     `https://<random>.trycloudflare.com/github/webhooks` with the local
+     `GITHUB_WEBHOOK_SECRET` (auto-generated when empty).
    - Setup URL must be the **worker** origin (not the Vite UI):
      `https://<worker-host>/github/setup` (local:
      `http://127.0.0.1:8790/github/setup`). GitHub redirects the browser
      here after install, so localhost works — no tunnel needed for Connect.
-     Use a public worker URL (or a tunnel) only if you add webhooks later.
-   - After `bun run dev`, click **Connect GitHub** in the web UI
-     (`http://127.0.0.1:5180`). Vite proxies `/github/*` to the worker;
-     you can also open `http://127.0.0.1:8790/github/install` directly.
+   - After `bun run dev`, the tunnel pane prints
+     `webhooks live https://….trycloudflare.com/github/webhooks`. Click
+     **Connect GitHub** in the web UI (`http://127.0.0.1:5180`). Vite proxies
+     `/github/*` to the worker; you can also open
+     `http://127.0.0.1:8790/github/install` directly.
+   - Opt out with `SHUTTLE_TUNNEL=off` (inbox **Sync** still works without a
+     tunnel).
    - Convert the private key to PKCS#8:
 
      ```bash
      openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in app.pem
      ```
 
-   - Put `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY`, and
-     `GITHUB_STATE_SECRET` in `.dev.vars` (or as Wrangler secrets). Keep
+   - Put `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY` in
+     `.dev.vars` (or as Wrangler secrets). Leave `GITHUB_STATE_SECRET` and
+     `GITHUB_WEBHOOK_SECRET` blank to let `bun run dev` fill them. Keep
      `SHUTTLE_WEB_URL` pointed at the web UI so setup redirects home.
 
 6. Deploy:

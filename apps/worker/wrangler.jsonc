@@ -12,6 +12,7 @@
     "SHUTTLE_WORKSPACE_MODE": "memory",
     "SHUTTLE_PLAYBOOK_RUN_ID": "shuttle-playbook",
     "SHUTTLE_WORKSPACE_RUN_ID": "shuttle-workspace",
+    "SHUTTLE_PULLS_RUN_ID": "shuttle-pulls",
     "SHUTTLE_WEB_URL": "http://127.0.0.1:5180",
     // Hostname used for container preview iframes (`p3000-<folderId>.<host>`).
     // Locally, `*.localhost` resolves to loopback; production needs wildcard DNS.

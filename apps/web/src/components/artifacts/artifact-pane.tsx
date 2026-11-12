@@ -12,6 +12,7 @@ import { BrowserViewer } from './browser-viewer'
 import { ChangesViewer } from './changes-viewer'
 import { FileViewer } from './file-viewer'
 import { FilesViewer } from './files-viewer'
+import { ReviewViewer } from './review-viewer'
 import { TabStrip } from './tab-strip'
 import { TerminalViewer } from './terminal-viewer'
 
@@ -211,6 +212,8 @@ function ArtifactViewer({
       return <TerminalViewer runId={runId} folderId={folderId} cwd={tab.target} />
     case 'browser':
       return <BrowserViewer target={tab.target} folderId={folderId} onRetarget={onRetarget} />
+    case 'review':
+      return <ReviewViewer runId={runId} />
 
     default: {
       const exhaustive: never = tab.kind

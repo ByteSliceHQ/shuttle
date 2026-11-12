@@ -4,6 +4,8 @@ schema-version = "1.13.0"
 bun.pkg-path = "bun"
 # Wrangler / Vite tooling expects a Node toolchain on PATH.
 nodejs.pkg-path = "nodejs"
+# Quick tunnels for local GitHub webhook delivery (`bun run dev`).
+cloudflared.pkg-path = "cloudflared"
 
 [vars]
 SHUTTLE_WORKER_PORT = "8790"
@@ -14,7 +16,7 @@ on-activate = '''
   echo "Shuttle"
   echo "  bun install"
   echo "  cp apps/worker/.dev.vars.example apps/worker/.dev.vars"
-  echo "  bun run dev   # worker :$SHUTTLE_WORKER_PORT + web :$SHUTTLE_WEB_PORT"
+  echo "  bun run dev   # worker :$SHUTTLE_WORKER_PORT + web :$SHUTTLE_WEB_PORT (+ webhook tunnel when GitHub App is set)"
 '''
 
 [profile]

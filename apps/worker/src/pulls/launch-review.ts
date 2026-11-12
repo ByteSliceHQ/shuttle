@@ -1,0 +1,45 @@
+import { Schema } from 'effect'
+
+import { workspaceRunId } from '../config'
+import type { ShuttleEnv } from '../env'
+import { loomsStub } from '../looms-stub'
+import { requestSession } from '../workspace/signals'
+import { pullsModule } from './scope'
+
+export function createLaunchReviewEffect(env: ShuttleEnv) {
+  return pullsModule.effect({
+    type: 'pulls.launchReviewSession',
+    placement: 'local',
+    input: Schema.Struct({
+      runId: Schema.String,
+      folderId: Schema.String,
+      fullName: Schema.String,
+      number: Schema.Finite,
+      headSha: Schema.String,
+      baseSha: Schema.String,
+    }),
+    execute: async (input) => {
+      const stub = loomsStub(env.LOOMS_RUN, workspaceRunId(env))
+
+      await stub.signal([
+        requestSession({
+          runId: input.runId,
+          folderId: input.folderId,
+          goal: `Review ${input.fullName}#${input.number}`,
+          lessons: [],
+          playbookVersion: 0,
+          playbookRunId: null,
+          definitionName: 'review',
+          pull: {
+            fullName: input.fullName,
+            number: input.number,
+            headSha: input.headSha,
+            baseSha: input.baseSha,
+          },
+        }),
+      ])
+
+      return []
+    },
+  })
+}

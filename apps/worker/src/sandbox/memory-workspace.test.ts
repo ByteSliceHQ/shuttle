@@ -30,5 +30,14 @@ describe('memory workspace overlays', () => {
     const base = await workspace.readFile('/workspace/repos/demo/src/math.ts')
     expect(base).toContain('return a + b\n')
     expect(base).not.toContain('a + b + 0')
+
+    const changeset = await workspace.changeset('run_1', 'demo')
+    expect(changeset.baseSha).toBe('memory-demo-base')
+    expect(changeset.files.some((file) => file.path === 'src/math.ts')).toBe(true)
+    expect(changeset.files.find((file) => file.path === 'src/math.ts')?.status).toBe('modified')
+
+    expect(changeset.files.find((file) => file.path === 'src/math.ts')?.content).toContain(
+      'a + b + 0',
+    )
   })
 })

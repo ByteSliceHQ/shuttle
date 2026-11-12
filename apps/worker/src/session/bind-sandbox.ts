@@ -1,5 +1,7 @@
 import { Schema } from 'effect'
 
+import type { ShuttleEnv } from '../env'
+import { sandboxStub } from '../env'
 import { shuttleModule } from './scope'
 
 const LinkedRepoSchema = Schema.Struct({
@@ -9,6 +11,13 @@ const LinkedRepoSchema = Schema.Struct({
   fullName: Schema.String,
   defaultBranch: Schema.String,
   private: Schema.Boolean,
+})
+
+const PullRefSchema = Schema.Struct({
+  fullName: Schema.String,
+  number: Schema.Finite,
+  headSha: Schema.String,
+  baseSha: Schema.String,
 })
 
 export const SANDBOX_BINDING_KEY = 'shuttle:sandbox-binding'
@@ -27,13 +36,14 @@ export interface SandboxBinding {
 
 const memoryBindings = new Map<string, SandboxBinding>()
 
-export function createBindSandboxEffect(storage?: DurableObjectStorage) {
+export function createBindSandboxEffect(env?: ShuttleEnv, storage?: DurableObjectStorage) {
   return shuttleModule.effect({
     type: 'shuttle.bindSandbox',
     placement: 'local',
     input: Schema.Struct({
       sandboxName: Schema.String,
       repos: Schema.Array(LinkedRepoSchema),
+      pull: Schema.optional(PullRefSchema),
     }),
     execute: async (input, ctx) => {
       const binding = {
@@ -47,14 +57,26 @@ export function createBindSandboxEffect(storage?: DurableObjectStorage) {
         memoryBindings.set(ctx.runId, binding)
       }
 
-      await ctx.emit(
+      if (env && input.pull?.headSha) {
+        const repo = input.repos.find((item) => item.fullName === input.pull?.fullName)
+
+        if (repo) {
+          const sandbox = sandboxStub(env, input.sandboxName)
+          await sandbox.ensureRepos([repo])
+
+          await sandbox.checkoutRef(ctx.runId, repo, {
+            sha: input.pull.headSha,
+            branch: `shuttle/review/${ctx.runId}/${repo.name}`,
+          })
+        }
+      }
+
+      return [
         shuttleModule.input('sandbox.bound', {
           sandboxName: input.sandboxName,
           repoCount: input.repos.length,
         }),
-      )
-
-      return []
+      ]
     },
   })
 }

@@ -1,4 +1,4 @@
-import { playbookRunId, workspaceRunId } from './config'
+import { playbookRunId, pullsRunId, workspaceRunId } from './config'
 import type { ShuttleEnv } from './env'
 import { loomsStub } from './looms-stub'
 
@@ -40,5 +40,13 @@ export async function ensureWorkspaceQuietly(env: ShuttleEnv): Promise<void> {
     kind: 'shuttle-workspace',
     definitionName: 'workspace',
     input: { title: 'Shuttle workspace' },
+  })
+}
+
+export async function ensurePullsQuietly(env: ShuttleEnv): Promise<void> {
+  await ensureNamedRun(env, pullsRunId(env), {
+    kind: 'shuttle-pulls',
+    definitionName: 'pulls',
+    input: { title: 'Shuttle pulls' },
   })
 }

@@ -106,7 +106,7 @@ export const unlinkRepo = workspaceModule.signal({
 })
 
 export const requestSession = workspaceModule.signal({
-  description: 'Request a coding session launch inside a folder.',
+  description: 'Request a coding or review session launch inside a folder.',
   input: Schema.Struct({
     runId: Schema.String,
     folderId: Schema.String,
@@ -114,11 +114,33 @@ export const requestSession = workspaceModule.signal({
     lessons: Schema.Array(LessonSchema),
     playbookVersion: Schema.Finite,
     playbookRunId: Schema.NullOr(Schema.String),
+    definitionName: Schema.optional(Schema.String),
+    pull: Schema.optional(
+      Schema.Struct({
+        fullName: Schema.String,
+        number: Schema.Finite,
+        headSha: Schema.String,
+        baseSha: Schema.String,
+      }),
+    ),
   }),
   build: (input) =>
     workspaceModule.input('session.requested', input, {
       idempotencyKey: `workspace-session:${input.runId}`,
     }),
+})
+
+export const setFolderAutoReview = workspaceModule.signal({
+  description: 'Set automatic pull-request review mode for a folder.',
+  input: Schema.Struct({
+    folderId: Schema.String,
+    autoReview: Schema.Union([
+      Schema.Literal('off'),
+      Schema.Literal('others'),
+      Schema.Literal('all'),
+    ]),
+  }),
+  build: (input) => workspaceModule.input('folder.auto_review.set', input),
 })
 
 export const renameSession = workspaceModule.signal({

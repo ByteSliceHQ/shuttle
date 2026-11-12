@@ -29,6 +29,13 @@ import { Kbd } from '@/components/ui/panel'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/cn'
+import {
+  attentionPullCount,
+  authoredPullCounts,
+  pullInbox,
+  pullsForFolder,
+  pullsRunIdFromEnv,
+} from '@/lib/pulls'
 import { recentSessions } from '@/lib/recent-sessions'
 import {
   isSessionUnread,
@@ -46,7 +53,7 @@ import {
   sessionsForFolder,
   type GithubInstallation,
 } from '@/lib/workspace'
-import { LoomsProvider } from '@swirls/looms/react'
+import { LoomsProvider, useProjection, useRunStore } from '@swirls/looms/react'
 
 const COLLAPSED_KEY = 'shuttle.sidebar-collapsed'
 const EXPANDED_KEY = 'shuttle.sidebar-expanded'
@@ -210,6 +217,9 @@ function SidebarRail({
   seenSnapshot: SeenSessionsSnapshot
   onExpand: () => void
 }) {
+  const pullsStore = useRunStore(pullsRunIdFromEnv())
+  const inbox = useProjection(pullsStore, pullInbox)
+
   const rollup = useMemo(() => {
     if (!workspace) {
       return null
@@ -228,7 +238,31 @@ function SidebarRail({
     return resolveFolderIndicator(tones)
   }, [workspace, activeRunId, seenSnapshot])
 
-  const expandLabel = rollup ? `Expand sidebar · ${rollup.label}` : 'Expand sidebar'
+  const totalPullAttention = useMemo(() => {
+    if (!workspace) {
+      return 0
+    }
+
+    return Object.values(workspace.tree.folders)
+      .filter((folder) => !folder.archived)
+      .reduce(
+        (sum, folder) =>
+          sum +
+          attentionPullCount(
+            pullsForFolder(
+              inbox,
+              folder.repos.map((repo) => repo.fullName),
+            ),
+          ),
+        0,
+      )
+  }, [workspace, inbox])
+
+  const expandLabel = rollup
+    ? `Expand sidebar · ${rollup.label}`
+    : totalPullAttention > 0
+      ? `Expand sidebar · ${totalPullAttention} PRs need attention`
+      : 'Expand sidebar'
 
   return (
     <aside className="bg-sidebar flex w-12 shrink-0 flex-col items-center gap-1 border-r py-2">
@@ -244,6 +278,10 @@ function SidebarRail({
           {rollup ? (
             <span className="bg-sidebar absolute -top-0.5 -right-0.5 rounded-full p-px">
               <ActivityDot tone={rollup.tone} label={rollup.label} className="size-3" />
+            </span>
+          ) : totalPullAttention > 0 ? (
+            <span className="bg-brand text-brand-foreground absolute -top-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full text-[8px] font-semibold tabular-nums">
+              {totalPullAttention > 9 ? '9+' : totalPullAttention}
             </span>
           ) : null}
         </Button>
@@ -354,6 +392,9 @@ function FolderTree({
   const { runId, tree, liveSessions } = workspace
   const navigate = useNavigate()
   const now = useNow()
+  const pullsStore = useRunStore(pullsRunIdFromEnv())
+  const inbox = useProjection(pullsStore, pullInbox)
+  const pullCounts = useMemo(() => authoredPullCounts(inbox), [inbox])
 
   const [showArchived, setShowArchived] = useState(
     () => localStorage.getItem(SHOW_ARCHIVED_KEY) === '1',
@@ -459,6 +500,13 @@ function FolderTree({
           {folders.map((folder) => {
             const open = expanded[folder.folderId] ?? !folder.archived
 
+            const pullAttention = attentionPullCount(
+              pullsForFolder(
+                inbox,
+                folder.repos.map((repo) => repo.fullName),
+              ),
+            )
+
             return (
               <FolderGroup
                 key={folder.folderId}
@@ -473,6 +521,8 @@ function FolderTree({
                 activeRunId={activeRunId}
                 seenSnapshot={seenSnapshot}
                 now={now}
+                pullAttention={pullAttention}
+                pullCounts={pullCounts}
                 onLinkRepo={() => setLinkFolderId(folder.folderId)}
               />
             )
@@ -495,6 +545,7 @@ function FolderTree({
                     updatedAt={session.openedAt}
                     now={now}
                     active={activeRunId === session.runId}
+                    pullCount={pullCounts.get(session.runId)}
                   />
                 )
               })}
