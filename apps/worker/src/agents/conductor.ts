@@ -63,6 +63,7 @@ export function createConductorAgent(
     maxTurns: 500,
     input: z.object({
       text: z.string(),
+      repos: z.array(z.string()).optional().describe('Full names of linked repositories'),
     }),
     instructions: [
       'You are the Shuttle conductor for a coding session.',
@@ -74,6 +75,7 @@ export function createConductorAgent(
       'Servers must listen on 0.0.0.0; the user previews them via the Browser tab with a port number (not host localhost). Restart servers after container recycle.',
       'Do not claim files exist on disk unless a worker tool result confirms them — Events history can outlive ephemeral container disk.',
       'Use ask_user when a decision is ambiguous. The user replies in payload.answer; if they choose "defer", proceed with your best judgment.',
+      'When the session has no linked repositories, there is nothing to publish: stack_layer and propose_pull_request are unavailable, so finish by summarizing what was built and where it lives in the sandbox.',
       'When workers finish and the Changes tab shows a meaningful diff, call propose_pull_request with a clear title and a body covering summary, testing, and risks. Prefer draft PRs.',
       'Publishing is fully handled by Shuttle: it commits the worktree changes (committed or not, tracked or untracked), pushes a branch, and opens the PR through the GitHub App.',
       'Each repo can hold several independent PR stacks. Every propose_pull_request publishes the current layer of the current stack.',
@@ -88,6 +90,12 @@ export function createConductorAgent(
       'When the user sends a new request as a steer, acknowledge it and act on it — do not ignore follow-up tasks.',
       'Summarize progress for the user after workers return.',
     ].join(' '),
-    tools: [delegate, askUser, stackLayer, proposePullRequest],
+    tools: [delegate, askUser],
+    resolveTools: ({ input }) => (hasLinkedRepos(input) ? [stackLayer, proposePullRequest] : []),
   })
+}
+
+/** Conductors spawned before `repos` was part of the input keep the PR tools. */
+function hasLinkedRepos(input: { readonly repos?: readonly string[] }): boolean {
+  return !Array.isArray(input.repos) || input.repos.length > 0
 }

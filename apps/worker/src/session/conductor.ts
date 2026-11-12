@@ -141,7 +141,7 @@ export function buildConductorInput(input: ConductorPromptInput): string {
       ? `\n\nLinked repositories (edit only these session worktrees; Shuttle publishes PRs from them):\n${input.repos
           .map((repo) => `- ${repo.fullName}: ${worktreeRepoPath(input.runId, repo.name)}`)
           .join('\n')}`
-      : `\n\nRepo: ${input.repoUrl ?? 'local demo workspace'}`
+      : `\n\nRepo: ${input.repoUrl ?? 'local demo workspace'}\nNo repositories are linked, so this session cannot open pull requests.`
 
   const restartBlock =
     conductor.status === 'down'

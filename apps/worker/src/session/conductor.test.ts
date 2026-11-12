@@ -65,6 +65,7 @@ describe('conductor state', () => {
 
     expect(prompt).toContain('add dark mode')
     expect(prompt).toContain('Previous conductor ended (failed)')
+    expect(prompt).toContain('cannot open pull requests')
   })
 
   test('points the conductor at session worktrees, not the shared clones', () => {

@@ -782,6 +782,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
                 playbookVersion: state.playbookVersion,
                 conductor: state.conductor,
               }),
+              repos: state.repos.map((repo) => repo.fullName),
             },
           }),
         )
