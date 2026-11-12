@@ -36,6 +36,12 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
   private containerWs: ContainerWorkspace | null = null
   private preparedRepos = false
 
+  /**
+   * Repository and worktree setup run one at a time. Tool calls arrive concurrently, and a
+   * worktree cut while a clone is still running starts from a repository with no HEAD.
+   */
+  private setup: Promise<unknown> = Promise.resolve()
+
   constructor(ctx: DurableObjectState, env: ShuttleEnv) {
     super(ctx, env)
     reapplyInactivityTimeout(ctx)
@@ -56,18 +62,33 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
     return this.containerWs
   }
 
+  private serializeSetup<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.setup.then(task, task)
+
+    this.setup = run.catch(() => undefined)
+
+    return run
+  }
+
   async ensureRepos(repos: readonly LinkedSandboxRepo[]): Promise<{ root: string }> {
-    const result = await (await this.workspace()).ensureRepos(repos)
-    this.preparedRepos = true
-    return result
+    return this.serializeSetup(async () => {
+      const result = await (await this.workspace()).ensureRepos(repos)
+      this.preparedRepos = true
+      return result
+    })
   }
 
   async ensureWorktree(runId: string): Promise<WorktreeResult> {
-    if (!this.preparedRepos) {
-      await this.ensureRepos([])
-    }
+    return this.serializeSetup(async () => {
+      const workspace = await this.workspace()
 
-    return (await this.workspace()).ensureWorktree(runId)
+      if (!this.preparedRepos) {
+        await workspace.ensureRepos([])
+        this.preparedRepos = true
+      }
+
+      return workspace.ensureWorktree(runId)
+    })
   }
 
   async changeset(runId: string, repoName: string, baseBranch?: string): Promise<ChangesetResult> {
@@ -112,7 +133,7 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
     repo: LinkedSandboxRepo,
     ref: CheckoutRefInput,
   ): Promise<{ root: string }> {
-    return (await this.workspace()).checkoutRef(runId, repo, ref)
+    return this.serializeSetup(async () => (await this.workspace()).checkoutRef(runId, repo, ref))
   }
 
   /** @deprecated Prefer ensureRepos. */

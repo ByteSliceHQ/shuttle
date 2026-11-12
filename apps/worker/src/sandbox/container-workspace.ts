@@ -32,9 +32,13 @@ const MAX_EXEC_TIMEOUT_MS = 600_000
 const GREP_TIMEOUT_MS = 30_000
 const OUTPUT_CAP_BYTES = 32 * 1024
 
+/**
+ * Records the commit a session branch started from. `--verify` makes an unborn HEAD fail here:
+ * plain `rev-parse HEAD` prints the word "HEAD" in that case, which would be stored as the base.
+ */
 function recordBaseCommand(worktree: string, branch: string): string {
   const key = `branch.${branch}.${BASE_CONFIG_KEY}`
-  return `git -C ${shellQuote(worktree)} config ${shellQuote(key)} "$(git -C ${shellQuote(worktree)} rev-parse HEAD)"`
+  return `base=$(git -C ${shellQuote(worktree)} rev-parse --verify HEAD) && git -C ${shellQuote(worktree)} config ${shellQuote(key)} "$base"`
 }
 
 /**
@@ -72,17 +76,26 @@ export class ContainerWorkspace implements Workspace {
       const token = await getInstallationToken(this.env, repo.installationId)
       const basic = btoa(`x-access-token:${token}`)
       const cloneUrl = `https://github.com/${repo.fullName}.git`
+      const cloning = `${target}.cloning`
 
       const process = await container.exec([
         'bash',
         '-lc',
         [
+          // A checkout of some other repository under this name (the seeded demo repo, say)
+          // is moved aside so the linked repository is the one sessions work in.
+          `if [ -d ${shellQuote(target)}/.git ] && [ "$(git -C ${shellQuote(target)} config --get remote.origin.url)" != ${shellQuote(cloneUrl)} ]; then`,
+          `  mkdir -p /workspace/.replaced && mv ${shellQuote(target)} /workspace/.replaced/${shellQuote(repo.name)}-$(date +%s);`,
+          `fi;`,
           `if [ -d ${shellQuote(target)}/.git ]; then`,
           `  git -C ${shellQuote(target)} -c http.extraheader=${shellQuote(`AUTHORIZATION: basic ${basic}`)} fetch --depth 1 origin ${shellQuote(repo.defaultBranch)} &&`,
           `  git -C ${shellQuote(target)} checkout -B ${shellQuote(repo.defaultBranch)} FETCH_HEAD;`,
           `else`,
-          `  mkdir -p /workspace/repos &&`,
-          `  git -c http.extraheader=${shellQuote(`AUTHORIZATION: basic ${basic}`)} clone --depth 1 --branch ${shellQuote(repo.defaultBranch)} ${shellQuote(cloneUrl)} ${shellQuote(target)};`,
+          // Clone beside the target and rename when done, so a `.git` directory at the target
+          // always means a finished clone with a real HEAD.
+          `  mkdir -p /workspace/repos && rm -rf ${shellQuote(cloning)} &&`,
+          `  git -c http.extraheader=${shellQuote(`AUTHORIZATION: basic ${basic}`)} clone --depth 1 --branch ${shellQuote(repo.defaultBranch)} ${shellQuote(cloneUrl)} ${shellQuote(cloning)} &&`,
+          `  rm -rf ${shellQuote(target)} && mv ${shellQuote(cloning)} ${shellQuote(target)};`,
           `fi`,
         ].join(' '),
       ])
@@ -123,13 +136,17 @@ export class ContainerWorkspace implements Workspace {
       const source = repoCheckoutPath(name)
 
       // Shared per session: later workers must not clobber an existing worktree.
-      await this.execWithTimeout(
+      // The branch starts from an explicit commit. Without one, git cuts an empty orphan
+      // branch when the source has no HEAD yet, and nothing built on it can become a PR.
+      const created = await this.execWithTimeout(
         [
           `if [ ! -d ${shellQuote(target)} ]; then`,
           `  if [ -d ${shellQuote(source)}/.git ]; then`,
-          `    git -C ${shellQuote(source)} worktree add -B ${shellQuote(branch)} ${shellQuote(target)} &&`,
+          `    start=$(git -C ${shellQuote(source)} rev-parse --verify 'HEAD^{commit}') &&`,
+          `    git -C ${shellQuote(source)} worktree add -B ${shellQuote(branch)} ${shellQuote(target)} "$start" &&`,
           `    ${recordBaseCommand(target, branch)} &&`,
-          `    parent=$(git -C ${shellQuote(source)} symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || echo main) &&`,
+          `    parent=$(git -C ${shellQuote(source)} symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##') &&`,
+          `    { [ -n "$parent" ] || parent=$(git -C ${shellQuote(source)} rev-parse --abbrev-ref HEAD); } &&`,
           `    git -C ${shellQuote(target)} config ${shellQuote(`branch.${branch}.${LAYER_CONFIG_KEY}`)} 1 &&`,
           `    git -C ${shellQuote(target)} config ${shellQuote(`branch.${branch}.${PARENT_CONFIG_KEY}`)} "$parent";`,
           `  else`,
@@ -140,6 +157,12 @@ export class ContainerWorkspace implements Workspace {
         { timeoutMs: GREP_TIMEOUT_MS },
         container,
       )
+
+      if (created.exitCode !== 0) {
+        throw new Error(
+          `Could not create the session worktree for ${name}: ${created.stderr.trim() || `exit ${created.exitCode}`}`,
+        )
+      }
     }
 
     return { root, repoDirs }
@@ -394,6 +417,18 @@ export class ContainerWorkspace implements Workspace {
   }
 
   private async seedDemoRepo(container: DurableContainer, files: Files): Promise<void> {
+    // Only an empty sandbox gets the demo repo. Once any repository is checked out here,
+    // seeding again would write over files in a linked repository that is also named "demo".
+    const existing = await this.execWithTimeout(
+      'ls -A /workspace/repos 2>/dev/null | head -1',
+      { timeoutMs: GREP_TIMEOUT_MS },
+      container,
+    )
+
+    if (existing.stdout.trim()) {
+      return
+    }
+
     await files.mkdir('/workspace/repos/demo', { recursive: true })
     await files.writeFile('/workspace/repos/demo/README.md', '# Shuttle workspace\n')
 
