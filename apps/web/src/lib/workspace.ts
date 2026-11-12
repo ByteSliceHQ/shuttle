@@ -122,6 +122,17 @@ function isStaleActivityEvent(
   return false
 }
 
+/** Reconcile corrections fix a stuck status; they are not new activity, so they never advance the clock. */
+function activityEventAt(
+  session: { readonly updatedAt: number },
+  at: number,
+  idempotencyKey: string | null | undefined,
+): number {
+  return typeof idempotencyKey === 'string' && idempotencyKey.startsWith('reconcile:')
+    ? Math.min(at, session.updatedAt)
+    : at
+}
+
 export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
   name: 'workspaceTree',
   initialState: emptyWorkspaceTree,
@@ -405,8 +416,9 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
         }
 
         const seq = activityEventSeq(payload.seq, event.idempotencyKey)
+        const at = activityEventAt(session, payload.at, event.idempotencyKey)
 
-        if (isStaleActivityEvent(session, seq, payload.at)) {
+        if (isStaleActivityEvent(session, seq, at)) {
           return state
         }
 
@@ -419,12 +431,12 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
             [payload.runId]: {
               ...session,
               activity: payload.activity,
-              activityAt: Math.max(session.activityAt ?? 0, payload.at),
+              activityAt: Math.max(session.activityAt ?? 0, at),
               ...(seq !== undefined
                 ? { activitySeq: Math.max(session.activitySeq ?? 0, seq) }
                 : {}),
-              updatedAt: Math.max(session.updatedAt, payload.at),
-              ...(finishedWork ? { lastCompletedAt: payload.at } : {}),
+              updatedAt: Math.max(session.updatedAt, at),
+              ...(finishedWork ? { lastCompletedAt: at } : {}),
             },
           },
         }

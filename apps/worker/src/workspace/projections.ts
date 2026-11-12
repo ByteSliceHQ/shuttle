@@ -38,6 +38,22 @@ function isStaleActivityEvent(
   return false
 }
 
+/** Projections re-fold from the event log on read — never stamp wall clock. */
+function eventTimestamp(event: { readonly ts?: number }): number {
+  return typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
+}
+
+/** Reconcile corrections fix a stuck status; they are not new activity, so they never advance the clock. */
+function activityEventAt(
+  session: { readonly updatedAt: number },
+  at: number,
+  idempotencyKey: string | null | undefined,
+): number {
+  return typeof idempotencyKey === 'string' && idempotencyKey.startsWith('reconcile:')
+    ? Math.min(at, session.updatedAt)
+    : at
+}
+
 const GithubAccountSchema = Schema.Struct({
   login: Schema.String,
   type: Schema.String,
@@ -287,7 +303,7 @@ export const workspaceTree = workspaceModule.projection({
           return state
         }
 
-        const now = Date.now()
+        const at = eventTimestamp(event)
 
         return {
           ...state,
@@ -300,8 +316,8 @@ export const workspaceTree = workspaceModule.projection({
               goal: event.payload.goal,
               status: 'requested',
               activity: 'idle',
-              createdAt: now,
-              updatedAt: now,
+              createdAt: at,
+              updatedAt: at,
               archived: false,
             },
           },
@@ -323,7 +339,7 @@ export const workspaceTree = workspaceModule.projection({
               ...session,
               status: 'running',
               activity: 'working',
-              updatedAt: Date.now(),
+              updatedAt: eventTimestamp(event),
             },
           },
         }
@@ -343,7 +359,7 @@ export const workspaceTree = workspaceModule.projection({
             [event.payload.runId]: {
               ...session,
               title: event.payload.title,
-              updatedAt: Date.now(),
+              updatedAt: eventTimestamp(event),
             },
           },
         }
@@ -363,7 +379,7 @@ export const workspaceTree = workspaceModule.projection({
             [event.payload.runId]: {
               ...session,
               archived: true,
-              updatedAt: Date.now(),
+              updatedAt: eventTimestamp(event),
             },
           },
         }
@@ -377,8 +393,9 @@ export const workspaceTree = workspaceModule.projection({
         }
 
         const seq = activityEventSeq(event.payload.seq, event.idempotencyKey)
+        const at = activityEventAt(session, event.payload.at, event.idempotencyKey)
 
-        if (isStaleActivityEvent(session, seq, event.payload.at)) {
+        if (isStaleActivityEvent(session, seq, at)) {
           return state
         }
 
@@ -391,12 +408,12 @@ export const workspaceTree = workspaceModule.projection({
             [event.payload.runId]: {
               ...session,
               activity: event.payload.activity,
-              activityAt: Math.max(session.activityAt ?? 0, event.payload.at),
+              activityAt: Math.max(session.activityAt ?? 0, at),
               ...(seq !== undefined
                 ? { activitySeq: Math.max(session.activitySeq ?? 0, seq) }
                 : {}),
-              updatedAt: Math.max(session.updatedAt, event.payload.at),
-              ...(finishedWork ? { lastCompletedAt: event.payload.at } : {}),
+              updatedAt: Math.max(session.updatedAt, at),
+              ...(finishedWork ? { lastCompletedAt: at } : {}),
             },
           },
         }
@@ -422,7 +439,7 @@ export const workspaceTree = workspaceModule.projection({
         }
 
         const nextStatus = status ?? session.status
-        const at = typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
+        const at = eventTimestamp(event)
 
         return {
           ...state,

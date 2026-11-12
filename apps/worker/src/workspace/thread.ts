@@ -120,6 +120,22 @@ function isStaleActivityEvent(
   return false
 }
 
+/** Thread state can be replayed — stamp from the event, not wall clock. */
+function eventTimestamp(event: { readonly ts?: number }): number {
+  return typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
+}
+
+/** Reconcile corrections fix a stuck status; they are not new activity, so they never advance the clock. */
+function activityEventAt(
+  session: { readonly updatedAt: number },
+  at: number,
+  idempotencyKey: string | null | undefined,
+): number {
+  return typeof idempotencyKey === 'string' && idempotencyKey.startsWith('reconcile:')
+    ? Math.min(at, session.updatedAt)
+    : at
+}
+
 export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
   return workspaceModule.thread<WorkspaceState>({
     kind: 'shuttle-workspace',
@@ -278,7 +294,7 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
             return state
           }
 
-          const now = Date.now()
+          const at = eventTimestamp(event)
 
           return {
             ...state,
@@ -291,8 +307,8 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
                 title: event.payload.goal,
                 status: 'requested',
                 activity: 'idle',
-                createdAt: now,
-                updatedAt: now,
+                createdAt: at,
+                updatedAt: at,
                 archived: false,
                 launched: false,
                 lessons: event.payload.lessons.map((lesson) => ({
@@ -346,7 +362,7 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
                 launched: true,
                 status: 'running',
                 activity: 'working',
-                updatedAt: Date.now(),
+                updatedAt: eventTimestamp(event),
               },
             },
             mailboxEpoch: state.mailboxEpoch + 1,
@@ -367,7 +383,7 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
               [event.payload.runId]: {
                 ...session,
                 title: event.payload.title,
-                updatedAt: Date.now(),
+                updatedAt: eventTimestamp(event),
               },
             },
             mailboxEpoch: state.mailboxEpoch + 1,
@@ -385,7 +401,11 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
             ...state,
             sessions: {
               ...state.sessions,
-              [event.payload.runId]: { ...session, archived: true, updatedAt: Date.now() },
+              [event.payload.runId]: {
+                ...session,
+                archived: true,
+                updatedAt: eventTimestamp(event),
+              },
             },
             mailboxEpoch: state.mailboxEpoch + 1,
           }
@@ -399,8 +419,9 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
           }
 
           const seq = activityEventSeq(event.payload.seq, event.idempotencyKey)
+          const at = activityEventAt(session, event.payload.at, event.idempotencyKey)
 
-          if (isStaleActivityEvent(session, seq, event.payload.at)) {
+          if (isStaleActivityEvent(session, seq, at)) {
             return {
               ...state,
               mailboxEpoch: state.mailboxEpoch + 1,
@@ -414,11 +435,11 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
               [event.payload.runId]: {
                 ...session,
                 activity: event.payload.activity,
-                activityAt: Math.max(session.activityAt ?? 0, event.payload.at),
+                activityAt: Math.max(session.activityAt ?? 0, at),
                 ...(seq !== undefined
                   ? { activitySeq: Math.max(session.activitySeq ?? 0, seq) }
                   : {}),
-                updatedAt: Math.max(session.updatedAt, event.payload.at),
+                updatedAt: Math.max(session.updatedAt, at),
               },
             },
             mailboxEpoch: state.mailboxEpoch + 1,
@@ -453,7 +474,7 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
                 ...session,
                 status: nextStatus,
                 activity: 'idle',
-                updatedAt: Date.now(),
+                updatedAt: eventTimestamp(event),
               },
             },
             mailboxEpoch: state.mailboxEpoch + 1,
