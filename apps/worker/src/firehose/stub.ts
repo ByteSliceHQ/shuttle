@@ -10,5 +10,5 @@ export interface EventFirehoseStub {
 }
 
 export function firehoseStub(env: ShuttleEnv): EventFirehoseStub {
-  return env.EVENT_FIREHOSE.getByName(FIREHOSE_NAME) as unknown as EventFirehoseStub
+  return env.EVENT_FIREHOSE.getByName(FIREHOSE_NAME)
 }

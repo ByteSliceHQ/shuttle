@@ -56,7 +56,7 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
     return this.containerWs
   }
 
-  async ensureRepos(repos: LinkedSandboxRepo[]): Promise<{ root: string }> {
+  async ensureRepos(repos: readonly LinkedSandboxRepo[]): Promise<{ root: string }> {
     const result = await (await this.workspace()).ensureRepos(repos)
     this.preparedRepos = true
     return result

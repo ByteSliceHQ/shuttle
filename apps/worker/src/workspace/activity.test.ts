@@ -12,6 +12,7 @@ import { createLooms } from '@swirls/looms/runtime'
 import { intake } from '../agents/intake'
 import type { ShuttleEnv } from '../env'
 import { codingSession, say, shuttleSession } from '../session/module'
+import { fakeEnv } from '../testing/fake-env'
 import { createWorkspaceActivityProjector } from './activity'
 import {
   deriveActivityFromRunState,
@@ -403,7 +404,7 @@ describe('workspace activity projector', () => {
         agent({ definitions: [conductor, workerAgent, narrator, reflector] }),
         evaluator({ definitions: [intake] }),
         approval(),
-        shuttleSession({ definitions: [codingSession] }),
+        shuttleSession({ definitions: [codingSession], env: fakeEnv() }),
       ],
     })
 

@@ -2,7 +2,6 @@ import { Schema } from 'effect'
 
 import type { ShuttleEnv } from '../env'
 import { sandboxStub } from '../env'
-import type { LinkedSandboxRepo } from '../sandbox/workspace'
 import { readSandboxBinding } from './bind-sandbox'
 import { shuttleModule } from './scope'
 import { readSessionStacks } from './session-stacks'
@@ -53,7 +52,7 @@ export function createPreparePrPublishGateEffect(env: ShuttleEnv, storage?: Dura
 
       if (binding && linked) {
         const sandbox = sandboxStub(env, binding.sandboxName)
-        await sandbox.ensureRepos(binding.repos as LinkedSandboxRepo[])
+        await sandbox.ensureRepos(binding.repos)
         await sandbox.ensureWorktree(ctx.runId)
         const status = await sandbox.stackStatus(ctx.runId, linked.name, linked.defaultBranch)
         stackId = status.currentStack

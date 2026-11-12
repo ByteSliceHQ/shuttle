@@ -1,3 +1,8 @@
+import type { DurableObjectNamespaceLike } from '@swirls/looms/cloudflare'
+
+import type { EventFirehose } from './firehose/durable-object'
+import type { LoomsRunStub } from './looms-stub'
+import type { SessionSandbox } from './sandbox/session-sandbox'
 import type {
   ChangesetResult,
   CheckoutRefInput,
@@ -12,9 +17,13 @@ import type {
 } from './sandbox/workspace'
 
 export interface ShuttleEnv {
-  readonly LOOMS_RUN: DurableObjectNamespace
-  readonly SANDBOX: DurableObjectNamespace
-  readonly EVENT_FIREHOSE: DurableObjectNamespace
+  /**
+   * Typed by the RPC surface Shuttle calls, not by the class: Cloudflare's stub types cannot
+   * expand a class whose methods take recursive JSON.
+   */
+  readonly LOOMS_RUN: DurableObjectNamespaceLike<LoomsRunStub>
+  readonly SANDBOX: DurableObjectNamespace<SessionSandbox>
+  readonly EVENT_FIREHOSE: DurableObjectNamespace<EventFirehose>
   readonly REPLICA?: D1Database
   readonly OPENROUTER_API_KEY?: string
   readonly LOOMS_MODEL?: string
@@ -42,7 +51,7 @@ export interface ShuttleEnv {
 
 /** RPC surface of SessionSandbox / WorkspaceSandbox. */
 export interface SessionSandboxStub {
-  ensureRepos(repos: LinkedSandboxRepo[]): Promise<{ root: string }>
+  ensureRepos(repos: readonly LinkedSandboxRepo[]): Promise<{ root: string }>
   ensureWorktree(runId: string): Promise<WorktreeResult>
   ensureRepo(repoUrl: string | null): Promise<{ root: string }>
   changeset(runId: string, repoName: string, baseBranch?: string): Promise<ChangesetResult>
@@ -90,5 +99,5 @@ export interface SessionSandboxStub {
 }
 
 export function sandboxStub(env: ShuttleEnv, sandboxName: string): SessionSandboxStub {
-  return env.SANDBOX.getByName(sandboxName) as unknown as SessionSandboxStub
+  return env.SANDBOX.getByName(sandboxName)
 }

@@ -2,6 +2,7 @@ import { Schema } from 'effect'
 
 import type { EventEnvelope } from '@swirls/looms/core'
 
+import { isRecord } from '../json'
 import { shuttleModule } from './scope'
 
 const WorkStatusSchema = Schema.Union([
@@ -78,10 +79,8 @@ export const workInitialState: WorkProjectionState = {
   openToolCalls: {},
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {}
+function asRecord(value: unknown): { readonly [key: string]: unknown } {
+  return isRecord(value) ? value : {}
 }
 
 function asString(value: unknown): string | undefined {
@@ -691,6 +690,6 @@ export const work = shuttleModule.projection({
   shape: workShape,
   initialState: workInitialState,
   reduce(state, event) {
-    return reduceWork(state, event as EventEnvelope)
+    return reduceWork(state, event)
   },
 })

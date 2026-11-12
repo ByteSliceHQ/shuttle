@@ -1,16 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { ShuttleEnv } from '../env'
+import { fakeEnv } from '../testing/fake-env'
 import { normalizeWebhook, verifyWebhookSignature } from './webhooks'
 
 describe('github webhooks', () => {
   test('verifies hmac sha256 signatures', async () => {
-    const env = {
+    const env = fakeEnv({
       GITHUB_WEBHOOK_SECRET: 'whsec_test',
-      LOOMS_RUN: {} as DurableObjectNamespace,
-      SANDBOX: {} as DurableObjectNamespace,
-      EVENT_FIREHOSE: {} as DurableObjectNamespace,
-    } satisfies ShuttleEnv
+    })
 
     const rawBody = '{"action":"opened"}'
 

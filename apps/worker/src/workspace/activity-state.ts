@@ -1,5 +1,6 @@
 import type { RunState } from '@swirls/looms/core'
 
+import { isRecord } from '../json'
 import type { SessionActivity } from './scope'
 
 export type OpenToolCallState = 'executing' | 'spawned_child' | 'awaiting_effects'
@@ -74,10 +75,8 @@ export const initialSessionActivityState: SessionActivityState = {
   threads: {},
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {}
+function asRecord(value: unknown): { readonly [key: string]: unknown } {
+  return isRecord(value) ? value : {}
 }
 
 function asString(value: unknown): string | null {
@@ -88,9 +87,12 @@ function asNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-function withoutKey<T>(record: Readonly<Record<string, T>>, key: string): Record<string, T> {
+function withoutKey<T>(
+  record: Readonly<Record<string, T>>,
+  key: string,
+): Readonly<Record<string, T>> {
   if (!(key in record)) {
-    return record as Record<string, T>
+    return record
   }
 
   const next = { ...record }

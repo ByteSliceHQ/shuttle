@@ -1,6 +1,7 @@
-import type { AnyEventEnvelope, ProjectionDefinition } from '@swirls/looms/core'
+import { defineProjection } from '@swirls/looms/core'
 
-import { reduceTabEvent } from './tab-set'
+import type { WorkspaceEvent } from './shuttle-events'
+import { mutateSessionTabs } from './tab-set'
 
 export interface LinkedRepo {
   readonly installationId: number
@@ -133,17 +134,13 @@ function activityEventAt(
     : at
 }
 
-export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
+export const workspaceTree = defineProjection<WorkspaceTree, WorkspaceEvent>({
   name: 'workspaceTree',
   initialState: emptyWorkspaceTree,
-  reduce(state, event: AnyEventEnvelope) {
+  reduce(state, event) {
     switch (event.type) {
       case 'workspace.folder.created': {
-        const payload = event.payload as {
-          folderId: string
-          name: string
-          createdAt: number
-        }
+        const payload = event.payload
 
         if (state.folders[payload.folderId]) {
           return state
@@ -167,7 +164,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
       }
 
       case 'workspace.folder.renamed': {
-        const payload = event.payload as { folderId: string; name: string }
+        const payload = event.payload
         const folder = state.folders[payload.folderId]
 
         if (!folder) {
@@ -184,10 +181,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
       }
 
       case 'workspace.folder.auto_review.set': {
-        const payload = event.payload as {
-          folderId: string
-          autoReview: 'off' | 'others' | 'all'
-        }
+        const payload = event.payload
 
         const folder = state.folders[payload.folderId]
 
@@ -205,7 +199,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
       }
 
       case 'workspace.folder.archived': {
-        const payload = event.payload as { folderId: string }
+        const payload = event.payload
         const folder = state.folders[payload.folderId]
 
         if (!folder) {
@@ -222,7 +216,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
       }
 
       case 'workspace.folder.reordered': {
-        const payload = event.payload as { folderIds: string[] }
+        const payload = event.payload
         const known = new Set(state.folderOrder)
         const next = payload.folderIds.filter((id) => known.has(id))
         const missing = state.folderOrder.filter((id) => !next.includes(id))
@@ -230,10 +224,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
       }
 
       case 'workspace.github.connected': {
-        const payload = event.payload as {
-          installationId: number
-          account: { login: string; type: string; avatarUrl: string }
-        }
+        const payload = event.payload
 
         return {
           ...state,
@@ -248,14 +239,14 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
       }
 
       case 'workspace.github.disconnected': {
-        const payload = event.payload as { installationId: number }
+        const payload = event.payload
         const next = { ...state.installations }
         delete next[String(payload.installationId)]
         return { ...state, installations: next }
       }
 
       case 'workspace.repo.linked': {
-        const payload = event.payload as { folderId: string; repo: LinkedRepo }
+        const payload = event.payload
         const folder = state.folders[payload.folderId]
 
         if (!folder) {
@@ -279,7 +270,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
       }
 
       case 'workspace.repo.unlinked': {
-        const payload = event.payload as { folderId: string; fullName: string }
+        const payload = event.payload
         const folder = state.folders[payload.folderId]
 
         if (!folder) {
@@ -299,11 +290,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
       }
 
       case 'workspace.session.requested': {
-        const payload = event.payload as {
-          runId: string
-          folderId: string
-          goal: string
-        }
+        const payload = event.payload
 
         if (state.sessions[payload.runId]) {
           return state
@@ -332,7 +319,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
       }
 
       case 'workspace.session.launched': {
-        const payload = event.payload as { runId: string }
+        const payload = event.payload
         const session = state.sessions[payload.runId]
 
         if (!session) {
@@ -356,7 +343,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
       }
 
       case 'workspace.session.renamed': {
-        const payload = event.payload as { runId: string; title: string }
+        const payload = event.payload
         const session = state.sessions[payload.runId]
 
         if (!session) {
@@ -379,7 +366,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
       }
 
       case 'workspace.session.archived': {
-        const payload = event.payload as { runId: string }
+        const payload = event.payload
         const session = state.sessions[payload.runId]
 
         if (!session) {
@@ -402,12 +389,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
       }
 
       case 'workspace.session.activity': {
-        const payload = event.payload as {
-          runId: string
-          activity: string
-          at: number
-          seq?: number
-        }
+        const payload = event.payload
 
         const session = state.sessions[payload.runId]
 
@@ -443,7 +425,7 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
       }
 
       case 'runtime.child.settled': {
-        const payload = event.payload as { runId?: string; status?: string }
+        const payload = event.payload
         const runId = typeof payload.runId === 'string' ? payload.runId : null
 
         if (!runId) {
@@ -478,18 +460,47 @@ export const workspaceTree: ProjectionDefinition<WorkspaceTree> = {
         return state
     }
   },
-}
+})
 
-export const sessionTabs: ProjectionDefinition<SessionTabsState> = {
+export const sessionTabs = defineProjection<SessionTabsState, WorkspaceEvent>({
   name: 'sessionTabs',
   initialState: emptySessionTabs,
-  reduce(state, event: AnyEventEnvelope) {
-    return reduceTabEvent(state, {
-      type: event.type,
-      payload: (event.payload ?? {}) as Record<string, unknown>,
-    })
+  reduce(state, event) {
+    switch (event.type) {
+      case 'workspace.tab.opened': {
+        const { runId, tabId, kind, title, target, at } = event.payload
+
+        return mutateSessionTabs(state, runId, {
+          type: 'open',
+          tab: { tabId, kind, title, target, openedAt: at },
+        })
+      }
+
+      case 'workspace.tab.closed': {
+        return mutateSessionTabs(state, event.payload.runId, {
+          type: 'close',
+          tabId: event.payload.tabId,
+        })
+      }
+
+      case 'workspace.tab.reordered': {
+        return mutateSessionTabs(state, event.payload.runId, {
+          type: 'reorder',
+          tabIds: event.payload.tabIds,
+        })
+      }
+
+      case 'workspace.tab.retargeted': {
+        const { runId, tabId, title, target } = event.payload
+
+        return mutateSessionTabs(state, runId, { type: 'retarget', tabId, title, target })
+      }
+
+      default:
+        return state
+    }
   },
-}
+})
 
 async function postJson(path: string, body: object): Promise<Response> {
   return fetch(path, {

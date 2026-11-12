@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 
+import { jsonObject } from '../json'
 import { shuttleModule } from './scope'
 
 export { work } from './work-projection'
@@ -25,12 +26,10 @@ export const brief = shuttleModule.projection({
     if (event.type === 'runtime.thread.started') {
       const input = event.payload.input
 
-      if (input && typeof input === 'object' && !Array.isArray(input)) {
-        const goal = (input as { goal?: unknown }).goal
+      const goal = jsonObject(input).goal
 
-        if (typeof goal === 'string') {
-          return { version: 1, text: goal }
-        }
+      if (typeof goal === 'string') {
+        return { version: 1, text: goal }
       }
     }
 

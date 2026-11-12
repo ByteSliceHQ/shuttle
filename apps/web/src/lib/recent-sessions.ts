@@ -1,3 +1,5 @@
+import { isRecord } from './json'
+
 const STORAGE_KEY = 'shuttle.recent-sessions'
 const LIMIT = 20
 
@@ -8,11 +10,11 @@ export interface RecentSession {
 }
 
 function isRecentSession(value: unknown): value is RecentSession {
-  if (!value || typeof value !== 'object') {
+  if (!isRecord(value)) {
     return false
   }
 
-  const entry = value as Partial<RecentSession>
+  const entry = value
   return (
     typeof entry.runId === 'string' &&
     typeof entry.goal === 'string' &&

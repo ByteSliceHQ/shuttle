@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 
 import type { SessionEvent } from '@/lib/event-catalog'
 
+import { isRecord } from './json'
+
 export type GlobalRunKind = 'session' | 'workspace' | 'playbook' | 'pulls'
 
 export interface GlobalEventFrame {
@@ -174,11 +176,11 @@ export function reduceGlobalEvents(
 }
 
 function isGlobalEventFrame(value: unknown): value is GlobalEventFrame {
-  if (!value || typeof value !== 'object') {
+  if (!isRecord(value)) {
     return false
   }
 
-  const record = value as Record<string, unknown>
+  const record = value
   return (
     typeof record.cursor === 'number' &&
     typeof record.runId === 'string' &&
@@ -285,17 +287,11 @@ export function useGlobalEvents(filter: GlobalEventsFilter = {}) {
           return
         }
 
-        if (
-          payload &&
-          typeof payload === 'object' &&
-          'type' in payload &&
-          (payload as { type?: unknown }).type === 'error' &&
-          'error' in payload
-        ) {
+        if (isRecord(payload) && payload.type === 'error' && 'error' in payload) {
           dispatch({
             type: 'status',
             status: 'error',
-            error: String((payload as { error: unknown }).error),
+            error: String(payload.error),
           })
         }
       })

@@ -12,9 +12,11 @@ import {
   type JsonValue,
   type RuntimeEffect,
   type ThreadDefinition,
+  isJsonObject,
 } from '@swirls/looms/core'
 
 import { isHardStop } from '../agents/intake'
+import { jsonObject } from '../json'
 import {
   buildConductorInput,
   conductorChildThreadId,
@@ -131,7 +133,7 @@ export interface SessionState {
 }
 
 function asObject(value: unknown): { [key: string]: JsonValue } {
-  return Predicate.isObject(value) ? (value as { [key: string]: JsonValue }) : {}
+  return jsonObject(value)
 }
 
 function objectPayload(event: EventEnvelope): { [key: string]: JsonValue } {
@@ -142,14 +144,21 @@ function asString(value: JsonValue | undefined): string | null {
   return Predicate.isString(value) ? value : null
 }
 
+/** The checked fields of an event embedded in a wait wake-up, or null when it is not an object. */
 function asEventLike(
   value: unknown,
-): { type?: string; payload?: JsonValue; threadId?: string | null } | null {
-  if (!Predicate.isObject(value)) {
+): { readonly type?: string; readonly payload?: JsonValue; readonly threadId?: string } | null {
+  if (!isJsonObject(value)) {
     return null
   }
 
-  return value as { type?: string; payload?: JsonValue; threadId?: string | null }
+  const { type, payload, threadId } = value
+
+  return {
+    ...(typeof type === 'string' ? { type } : {}),
+    ...(payload !== undefined ? { payload } : {}),
+    ...(typeof threadId === 'string' ? { threadId } : {}),
+  }
 }
 
 function readKind(value: JsonValue | undefined): InterjectionKind | null {

@@ -1,8 +1,9 @@
-import { readRunLaunchSource, type EventEnvelope, type JsonValue } from '@swirls/looms/core'
+import { readRunLaunchSource, type EventEnvelope } from '@swirls/looms/core'
 import type { Projector } from '@swirls/looms/projectors'
 
 import { workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
+import { jsonObject } from '../json'
 import { loomsStub } from '../looms-stub'
 import {
   deriveSessionActivity,
@@ -59,8 +60,8 @@ export function createWorkspaceActivityProjector(
     const started = events.find((event) => event.type === 'runtime.run.started')
 
     if (started) {
-      const payload = started.payload as { launchedBy?: JsonValue }
-      member = readRunLaunchSource(payload.launchedBy)?.runId === workspaceId
+      const { launchedBy } = jsonObject(started.payload)
+      member = readRunLaunchSource(launchedBy)?.runId === workspaceId
       await storage?.put(MEMBER_KEY, member)
       return member
     }

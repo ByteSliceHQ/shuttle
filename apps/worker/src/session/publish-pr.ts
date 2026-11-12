@@ -80,11 +80,11 @@ export function createPublishPullRequestEffect(env: ShuttleEnv, storage?: Durabl
       }
 
       try {
-        await sandbox.ensureRepos(binding.repos as LinkedSandboxRepo[])
+        await sandbox.ensureRepos(binding.repos)
         await sandbox.ensureWorktree(ctx.runId)
 
         const github = githubMirror(env)
-        const priorStacks: SessionStacks = { ...(input.stacks as SessionStacks | undefined) }
+        const priorStacks: SessionStacks = { ...input.stacks }
         const nextStacks: Record<string, SessionRepoStack> = { ...priorStacks }
         const mirrored: { repo: LinkedSandboxRepo; result: MirroredStack }[] = []
 

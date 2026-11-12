@@ -132,3 +132,8 @@ export function jsonPreview(node: JsonNode, budget = 72): string {
 
   return text ? `${open} ${text} ${close}` : `${open}${close}`
 }
+
+/** True for a plain, non-array object. Its values stay `unknown` until each is checked. */
+export function isRecord(value: unknown): value is { readonly [key: string]: unknown } {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}

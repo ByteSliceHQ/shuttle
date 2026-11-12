@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { ShuttleEnv } from '../env'
+import { fakeEnv } from '../testing/fake-env'
 import { createConductorAgent } from './conductor'
 
-const conductor = createConductorAgent({} as ShuttleEnv, 'run_1')
+const conductor = createConductorAgent(fakeEnv(), 'run_1')
 
 async function toolNames(input: { text: string; repos?: string[] }): Promise<string[]> {
   const resolved = (await conductor.resolveTools?.({ threadId: 'thr_c', turn: 1, input })) ?? []

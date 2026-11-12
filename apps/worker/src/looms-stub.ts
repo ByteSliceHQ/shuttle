@@ -1,5 +1,6 @@
 import type { EventInput, JsonValue, RunState, RunStatusSnapshot } from '@swirls/looms/core'
 
+import type { ShuttleEnv } from './env'
 import type { SessionActivity } from './workspace/module'
 
 /** Narrow RPC surface we call on Looms Durable Object stubs. */
@@ -26,7 +27,6 @@ export interface LoomsRunStub {
   getSessionActivitySnapshot(): Promise<{ activity: SessionActivity; tail: number } | null>
 }
 
-export function loomsStub(namespace: DurableObjectNamespace, runId: string): LoomsRunStub {
-  // Cloudflare RPC exposes these methods on the stub at runtime.
-  return namespace.getByName(runId) as unknown as LoomsRunStub
+export function loomsStub(namespace: ShuttleEnv['LOOMS_RUN'], runId: string): LoomsRunStub {
+  return namespace.getByName(runId)
 }

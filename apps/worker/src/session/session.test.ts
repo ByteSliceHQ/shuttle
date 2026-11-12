@@ -9,6 +9,7 @@ import { evaluator } from '@swirls/looms/evaluator'
 import { createLooms, type Looms } from '@swirls/looms/runtime'
 
 import { intake } from '../agents/intake'
+import { fakeEnv } from '../testing/fake-env'
 import { codingSession, say, shuttleSession, transcript, routing } from './module'
 
 const TextInput = z.object({
@@ -79,7 +80,7 @@ function createSessionLooms(conductor: AgentDefinition) {
       agent({ definitions: [conductor, stubNarrator, stubWorker, stubReflector] }),
       evaluator({ definitions: [intake] }),
       approval(),
-      shuttleSession({ definitions: [codingSession] }),
+      shuttleSession({ definitions: [codingSession], env: fakeEnv() }),
     ],
   })
 }

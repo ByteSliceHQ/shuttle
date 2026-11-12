@@ -26,7 +26,12 @@ CREATE INDEX IF NOT EXISTS firehose_events_run ON firehose_events (run_id, curso
 CREATE INDEX IF NOT EXISTS firehose_events_kind ON firehose_events (run_kind, cursor);
 `
 
-type FirehoseCursor = SqlStorageCursor<Record<string, SqlStorageValue>>
+export type FirehoseSqlRow = Record<string, SqlStorageValue>
+
+/** The part of a Durable Object SQL cursor the firehose reads: its rows and its write count. */
+export interface FirehoseCursor extends Iterable<FirehoseSqlRow> {
+  readonly rowsWritten: number
+}
 
 /** Subset of Durable Object SqlStorage used by the firehose. */
 export interface FirehoseSql {

@@ -10,6 +10,7 @@ import { createLooms } from '@swirls/looms/runtime'
 
 import { intake } from '../agents/intake'
 import { codingSession, shuttleSession } from '../session/module'
+import { fakeEnv } from '../testing/fake-env'
 import {
   archiveFolder,
   closeTab,
@@ -81,7 +82,7 @@ describe('workspace module', () => {
         agent({ definitions: [stubConductor, stubNarrator, stubWorker, stubReflector] }),
         evaluator({ definitions: [intake] }),
         approval(),
-        shuttleSession({ definitions: [codingSession] }),
+        shuttleSession({ definitions: [codingSession], env: fakeEnv() }),
         workspace(),
       ],
     })
@@ -175,7 +176,7 @@ describe('workspace module', () => {
         agent({ definitions: [stubConductor, stubNarrator, stubWorker, stubReflector] }),
         evaluator({ definitions: [intake] }),
         approval(),
-        shuttleSession({ definitions: [codingSession] }),
+        shuttleSession({ definitions: [codingSession], env: fakeEnv() }),
         workspace(),
       ],
     })

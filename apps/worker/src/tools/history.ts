@@ -386,7 +386,7 @@ export function createHistoryTools(env: ShuttleEnv, runId: string) {
 
       return asJson({
         available: true,
-        rows: agents as unknown as Record<string, unknown>[],
+        rows: agents,
         readAt: now,
         ...(work.note ? { note: work.note } : {}),
       })

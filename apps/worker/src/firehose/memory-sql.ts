@@ -1,8 +1,6 @@
 import { Database } from 'bun:sqlite'
 
-import type { FirehoseSql } from './store'
-
-type FirehoseCursor = SqlStorageCursor<Record<string, SqlStorageValue>>
+import type { FirehoseCursor, FirehoseSql, FirehoseSqlRow } from './store'
 
 /**
  * In-memory SqlStorage stand-in for unit tests.
@@ -18,57 +16,26 @@ export function createMemoryFirehoseSql(): FirehoseSql {
         .map((part) => part.trim())
         .filter((part) => part.length > 0)
 
-      let lastChanges = 0
-      let lastRows: Record<string, SqlStorageValue>[] = []
+      let rowsWritten = 0
+      let rows: FirehoseSqlRow[] = []
 
       for (const statement of statements) {
-        const stmt = db.prepare(statement)
+        const stmt = db.prepare<FirehoseSqlRow, SqlStorageValue[]>(statement)
         const isQuery = /^\s*(SELECT|WITH)\b/i.test(statement)
 
         if (isQuery) {
-          lastRows = stmt.all(...bindings) as Record<string, SqlStorageValue>[]
-          lastChanges = 0
+          rows = stmt.all(...bindings)
+          rowsWritten = 0
         } else {
-          const result = stmt.run(...bindings)
-          lastChanges = result.changes
-          lastRows = []
+          rowsWritten = stmt.run(...bindings).changes
+          rows = []
         }
       }
 
-      const rows = lastRows
-      let index = 0
-
-      const cursor = {
-        next() {
-          if (index >= rows.length) {
-            return { done: true as const, value: undefined }
-          }
-
-          const value = rows[index++]
-          return { done: false as const, value }
-        },
-        [Symbol.iterator]() {
-          return cursor
-        },
-        toArray() {
-          return rows.slice(index)
-        },
-        one() {
-          return rows[index] ?? null
-        },
-        raw() {
-          return cursor
-        },
-        columnNames: rows[0] ? Object.keys(rows[0]) : [],
-        get rowsRead() {
-          return rows.length
-        },
-        get rowsWritten() {
-          return lastChanges
-        },
+      return {
+        rowsWritten,
+        [Symbol.iterator]: () => rows[Symbol.iterator](),
       }
-
-      return cursor as unknown as FirehoseCursor
     },
   }
 }

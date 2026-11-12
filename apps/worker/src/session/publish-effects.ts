@@ -2,11 +2,12 @@ import { Predicate } from 'effect'
 
 import { emit, invoke, type JsonValue, type RuntimeEffect } from '@swirls/looms/core'
 
+import { jsonObject } from '../json'
 import { shuttleModule } from './scope'
 import { stacksAsJson, type PendingPrPublish } from './stack-state'
 
 function asObject(value: unknown): { [key: string]: JsonValue } {
-  return Predicate.isObject(value) ? (value as { [key: string]: JsonValue }) : {}
+  return jsonObject(value)
 }
 
 export interface PublishSessionSlice {

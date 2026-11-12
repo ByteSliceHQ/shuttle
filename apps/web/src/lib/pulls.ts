@@ -1,6 +1,7 @@
-import type { AnyEventEnvelope, ProjectionDefinition } from '@swirls/looms/core'
+import { defineProjection } from '@swirls/looms/core'
 
 import type { PublishedPull, PullStackPosition } from './session-feed'
+import type { PullsEvent } from './shuttle-events'
 
 export type AutoReviewMode = 'off' | 'others' | 'all'
 export type ReviewDecision = 'approved' | 'changes_requested' | 'review_required' | 'none'
@@ -88,13 +89,13 @@ export function pullKey(fullName: string, number: number): string {
   return `${fullName}#${number}`
 }
 
-export const pullInbox: ProjectionDefinition<PullInboxState> = {
+export const pullInbox = defineProjection<PullInboxState, PullsEvent>({
   name: 'pullInbox',
   initialState: emptyPullInbox,
-  reduce(state, event: AnyEventEnvelope): PullInboxState {
+  reduce(state, event): PullInboxState {
     switch (event.type) {
       case 'pulls.pull.upserted': {
-        const payload = event.payload as PullInboxSummary & { updatedAt: number }
+        const payload = event.payload
         const key = pullKey(payload.fullName, payload.number)
         const existing = state.pulls[key]
 
@@ -108,6 +109,7 @@ export const pullInbox: ProjectionDefinition<PullInboxState> = {
             ...state.pulls,
             [key]: {
               ...payload,
+              stack: payload.stack ?? null,
               linkedSessions: existing?.linkedSessions ?? [],
               reviewingRunId: existing?.reviewingRunId ?? null,
             },
@@ -116,7 +118,7 @@ export const pullInbox: ProjectionDefinition<PullInboxState> = {
       }
 
       case 'pulls.pull.closed': {
-        const payload = event.payload as { fullName: string; number: number; updatedAt: number }
+        const payload = event.payload
         const key = pullKey(payload.fullName, payload.number)
         const existing = state.pulls[key]
 
@@ -139,12 +141,7 @@ export const pullInbox: ProjectionDefinition<PullInboxState> = {
       }
 
       case 'pulls.checks.updated': {
-        const payload = event.payload as {
-          fullName: string
-          headSha: string
-          checkRollup: CheckRollup
-          updatedAt: number
-        }
+        const payload = event.payload
 
         let changed = false
         const pulls = { ...state.pulls }
@@ -167,12 +164,7 @@ export const pullInbox: ProjectionDefinition<PullInboxState> = {
       }
 
       case 'pulls.review.submitted': {
-        const payload = event.payload as {
-          fullName: string
-          number: number
-          verdict: 'approved' | 'changes_requested' | 'commented'
-          updatedAt: number
-        }
+        const payload = event.payload
 
         const key = pullKey(payload.fullName, payload.number)
         const existing = state.pulls[key]
@@ -214,13 +206,7 @@ export const pullInbox: ProjectionDefinition<PullInboxState> = {
       }
 
       case 'pulls.pull.linked': {
-        const payload = event.payload as {
-          fullName: string
-          number: number
-          runId: string
-          role: 'author' | 'reviewer'
-          threadId?: string
-        }
+        const payload = event.payload
 
         const key = pullKey(payload.fullName, payload.number)
         const existing = state.pulls[key]
@@ -246,11 +232,7 @@ export const pullInbox: ProjectionDefinition<PullInboxState> = {
       }
 
       case 'pulls.repo.policy.set': {
-        const payload = event.payload as {
-          fullName: string
-          installationId: number
-          folders: { folderId: string; autoReview: AutoReviewMode }[]
-        }
+        const payload = event.payload
 
         return {
           ...state,
@@ -265,11 +247,7 @@ export const pullInbox: ProjectionDefinition<PullInboxState> = {
       }
 
       case 'pulls.review.requested': {
-        const payload = event.payload as {
-          fullName: string
-          number: number
-          runId: string
-        }
+        const payload = event.payload
 
         const key = pullKey(payload.fullName, payload.number)
         const existing = state.pulls[key]
@@ -291,7 +269,7 @@ export const pullInbox: ProjectionDefinition<PullInboxState> = {
         return state
     }
   },
-}
+})
 
 export type PullLaneId =
   | 'needs_review'

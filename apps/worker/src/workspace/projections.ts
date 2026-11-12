@@ -1,7 +1,7 @@
 import { Schema } from 'effect'
 
 import { TabKindSchema, workspaceModule, type ArtifactTab } from './scope'
-import { reduceSessionTabsState, type SessionTabSet } from './tab-set'
+import { mutateSessionTabs, type SessionTabSet } from './tab-set'
 
 function activityEventSeq(
   payloadSeq: number | undefined,
@@ -110,51 +110,7 @@ export const workspaceTree = workspaceModule.projection({
     sessions: Schema.Record(Schema.String, SessionSchema),
     installations: Schema.Record(Schema.String, InstallationSchema),
   }),
-  initialState: {
-    folderOrder: [] as string[],
-    folders: {} as Record<
-      string,
-      {
-        folderId: string
-        name: string
-        createdAt: number
-        archived: boolean
-        repos: {
-          installationId: number
-          owner: string
-          name: string
-          fullName: string
-          defaultBranch: string
-          private: boolean
-        }[]
-        autoReview: 'off' | 'others' | 'all'
-      }
-    >,
-    sessions: {} as Record<
-      string,
-      {
-        runId: string
-        folderId: string
-        title: string
-        goal: string
-        status: string
-        activity: string
-        activitySeq?: number
-        activityAt?: number
-        lastCompletedAt?: number
-        createdAt: number
-        updatedAt: number
-        archived: boolean
-      }
-    >,
-    installations: {} as Record<
-      string,
-      {
-        installationId: number
-        account: { login: string; type: string; avatarUrl: string }
-      }
-    >,
-  },
+  initialState: { folderOrder: [], folders: {}, sessions: {}, installations: {} },
   reduce(state, event) {
     switch (event.type) {
       case 'workspace.folder.created': {
@@ -420,13 +376,7 @@ export const workspaceTree = workspaceModule.projection({
       }
 
       case 'runtime.child.settled': {
-        const payload = event.payload as {
-          runId?: string
-          status?: string
-        }
-
-        const runId = typeof payload.runId === 'string' ? payload.runId : null
-        const status = typeof payload.status === 'string' ? payload.status : null
+        const { runId, status } = event.payload
 
         if (!runId) {
           return state
@@ -482,8 +432,40 @@ export type SessionTabsState = Readonly<Record<string, SessionTabSet>>
 export const sessionTabs = workspaceModule.projection({
   name: 'sessionTabs',
   shape: Schema.Record(Schema.String, SessionTabSetSchema),
-  initialState: {} as SessionTabsState,
+  initialState: {},
   reduce(state, event) {
-    return reduceSessionTabsState(state, event)
+    switch (event.type) {
+      case 'workspace.tab.opened': {
+        const { runId, tabId, kind, title, target, at } = event.payload
+
+        return mutateSessionTabs(state, runId, {
+          type: 'open',
+          tab: { tabId, kind, title, target, openedAt: at },
+        })
+      }
+
+      case 'workspace.tab.closed': {
+        return mutateSessionTabs(state, event.payload.runId, {
+          type: 'close',
+          tabId: event.payload.tabId,
+        })
+      }
+
+      case 'workspace.tab.reordered': {
+        return mutateSessionTabs(state, event.payload.runId, {
+          type: 'reorder',
+          tabIds: event.payload.tabIds,
+        })
+      }
+
+      case 'workspace.tab.retargeted': {
+        const { runId, tabId, title, target } = event.payload
+
+        return mutateSessionTabs(state, runId, { type: 'retarget', tabId, title, target })
+      }
+
+      default:
+        return state
+    }
   },
 })

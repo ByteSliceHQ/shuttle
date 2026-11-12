@@ -11,6 +11,7 @@ import { createLooms } from '@swirls/looms/runtime'
 import { intake } from '../agents/intake'
 import { createProposePullRequestTool } from '../agents/tools/pulls'
 import { recordPublished } from '../pulls/signals'
+import { fakeEnv } from '../testing/fake-env'
 import { codingSession, shuttleSession } from './module'
 
 const TextInput = z.object({
@@ -71,7 +72,7 @@ describe('PR publish thread links', () => {
         agent({ definitions: [coder, quiet('narrator'), quiet('worker'), quiet('reflector')] }),
         evaluator({ definitions: [intake] }),
         approval(),
-        shuttleSession({ definitions: [codingSession] }),
+        shuttleSession({ definitions: [codingSession], env: fakeEnv() }),
       ],
     })
 
@@ -162,7 +163,7 @@ describe('PR publish thread links', () => {
         agent({ definitions: [coder, quiet('narrator'), quiet('worker'), quiet('reflector')] }),
         evaluator({ definitions: [intake] }),
         approval(),
-        shuttleSession({ definitions: [codingSession] }),
+        shuttleSession({ definitions: [codingSession], env: fakeEnv() }),
       ],
     })
 

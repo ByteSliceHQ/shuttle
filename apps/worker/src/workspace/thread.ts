@@ -10,6 +10,7 @@ import {
   type ThreadDefinition,
 } from '@swirls/looms/core'
 
+import { jsonObject } from '../json'
 import type { LinkedRepo, SessionActivity } from './scope'
 import { workspaceModule } from './scope'
 
@@ -70,7 +71,7 @@ export interface WorkspaceState {
 }
 
 function asObject(value: unknown): { [key: string]: JsonValue } {
-  return Predicate.isObject(value) ? (value as { [key: string]: JsonValue }) : {}
+  return jsonObject(value)
 }
 
 function asString(value: unknown): string | null {

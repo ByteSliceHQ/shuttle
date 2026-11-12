@@ -16,17 +16,11 @@ import {
 import { createPullsThread } from './thread'
 
 export interface PullsModuleOptions {
-  readonly env?: ShuttleEnv
+  readonly env: ShuttleEnv
 }
 
-export function pulls(options: PullsModuleOptions = {}) {
-  const env =
-    options.env ??
-    ({
-      LOOMS_RUN: {} as DurableObjectNamespace,
-      SANDBOX: {} as DurableObjectNamespace,
-      EVENT_FIREHOSE: {} as DurableObjectNamespace,
-    } satisfies ShuttleEnv)
+export function pulls(options: PullsModuleOptions) {
+  const { env } = options
 
   return defineModule(pullsModule, () => ({
     definitions: [pullsDefinition],

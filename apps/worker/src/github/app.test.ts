@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { ShuttleEnv } from '../env'
+import { fakeEnv } from '../testing/fake-env'
 import { createAppJwt, signState, verifyState } from './app'
 
 async function generatePkcs8Pem(): Promise<string> {
@@ -32,13 +32,10 @@ describe('github app jwt', () => {
   test('signs an RS256 app JWT', async () => {
     const privateKey = await generatePkcs8Pem()
 
-    const env = {
+    const env = fakeEnv({
       GITHUB_APP_ID: '12345',
       GITHUB_APP_PRIVATE_KEY: privateKey,
-      LOOMS_RUN: {} as DurableObjectNamespace,
-      SANDBOX: {} as DurableObjectNamespace,
-      EVENT_FIREHOSE: {} as DurableObjectNamespace,
-    } satisfies ShuttleEnv
+    })
 
     const jwt = await createAppJwt(env)
     const [header, payload, signature] = jwt.split('.')
@@ -54,12 +51,9 @@ describe('github app jwt', () => {
   })
 
   test('signs and verifies oauth state', async () => {
-    const env = {
+    const env = fakeEnv({
       GITHUB_STATE_SECRET: 'test-secret',
-      LOOMS_RUN: {} as DurableObjectNamespace,
-      SANDBOX: {} as DurableObjectNamespace,
-      EVENT_FIREHOSE: {} as DurableObjectNamespace,
-    } satisfies ShuttleEnv
+    })
 
     const state = await signState(env, 'install:nonce:1')
     expect(await verifyState(env, state)).toBe('install:nonce:1')

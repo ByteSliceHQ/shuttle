@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from 'react'
 
+import { isRecord } from './json'
+
 const STORAGE_KEY = 'shuttle.session-seen'
 const SEEN_LIMIT = 250
 
@@ -23,11 +25,11 @@ function parseSnapshot(raw: string | null): SeenSessionsSnapshot | null {
   try {
     const parsed: unknown = JSON.parse(raw)
 
-    if (!parsed || typeof parsed !== 'object') {
+    if (!isRecord(parsed)) {
       return null
     }
 
-    const record = parsed as { baselineAt?: unknown; seen?: unknown }
+    const record = parsed
 
     if (typeof record.baselineAt !== 'number' || !Number.isFinite(record.baselineAt)) {
       return null
@@ -35,8 +37,8 @@ function parseSnapshot(raw: string | null): SeenSessionsSnapshot | null {
 
     const seen: Record<string, number> = {}
 
-    if (record.seen && typeof record.seen === 'object') {
-      for (const [key, value] of Object.entries(record.seen as Record<string, unknown>)) {
+    if (isRecord(record.seen)) {
+      for (const [key, value] of Object.entries(record.seen)) {
         if (typeof value === 'number' && Number.isFinite(value)) {
           seen[key] = value
         }

@@ -1,18 +1,14 @@
 import { z } from 'zod'
 
 import { defineTool } from '@swirls/looms/agent'
-import type { JsonValue } from '@swirls/looms/core'
+import { asJson } from '@swirls/looms/core'
 
 import type { ShuttleEnv } from '../../env'
 import { sandboxStub } from '../../env'
-import type { LinkedSandboxRepo, StackStatus } from '../../sandbox/workspace'
-import { readSandboxBinding } from '../../session/bind-sandbox'
+import type { StackStatus } from '../../sandbox/workspace'
+import { readSandboxBinding, type SandboxBinding } from '../../session/bind-sandbox'
 import { readSessionStacks } from '../../session/session-stacks'
 import { stackKey, type SessionStacks } from '../../session/stack-state'
-
-function asJson(value: unknown): JsonValue {
-  return JSON.parse(JSON.stringify(value)) as JsonValue
-}
 
 /** Compact view for the model: every stack, its layers, and the PR each one maps to. */
 export function describeStacks(status: StackStatus, published: SessionStacks) {
@@ -75,13 +71,13 @@ export function createStackLayerTool(
       const action = input.action
       const repoArg = input.repo ?? null
 
-      const binding = (await readSandboxBinding(storage, runId)) ?? {
+      const binding: SandboxBinding = (await readSandboxBinding(storage, runId)) ?? {
         sandboxName: runId,
-        repos: [] as LinkedSandboxRepo[],
+        repos: [],
       }
 
       const sandbox = sandboxStub(env, binding.sandboxName)
-      await sandbox.ensureRepos(binding.repos as LinkedSandboxRepo[])
+      await sandbox.ensureRepos(binding.repos)
       await sandbox.ensureWorktree(runId)
 
       const repo =

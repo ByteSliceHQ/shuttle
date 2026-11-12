@@ -1,6 +1,8 @@
 import { Predicate } from 'effect'
 
-import type { JsonValue } from '@swirls/looms/core'
+import { asJson, type JsonValue } from '@swirls/looms/core'
+
+import { jsonObject } from '../json'
 
 export interface SessionStackLayer {
   readonly layer: number
@@ -246,5 +248,5 @@ export function withStackPublished<S extends StackSessionSlice>(
 export function stacksAsJson(stacks: SessionStacks): {
   readonly [key: string]: JsonValue
 } {
-  return JSON.parse(JSON.stringify(stacks)) as { readonly [key: string]: JsonValue }
+  return jsonObject(asJson(stacks))
 }

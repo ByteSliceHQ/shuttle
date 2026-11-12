@@ -1,4 +1,4 @@
-import type { ArtifactTab, ArtifactTabKind } from './scope'
+import type { ArtifactTab } from './scope'
 
 export type SessionTabSet = {
   readonly order: readonly string[]
@@ -76,86 +76,20 @@ export function reduceTabMutation(base: SessionTabSet, mutation: TabMutation): S
   }
 }
 
-export function reduceSessionTabsState(
+/** Applies one tab mutation to a session's tab set. Only `open` creates a missing tab set. */
+export function mutateSessionTabs(
   state: Readonly<Record<string, SessionTabSet>>,
-  event: { readonly type: string; readonly payload: unknown },
+  runId: string,
+  mutation: TabMutation,
 ): Readonly<Record<string, SessionTabSet>> {
-  if (
-    event.type !== 'workspace.tab.opened' &&
-    event.type !== 'workspace.tab.closed' &&
-    event.type !== 'workspace.tab.reordered' &&
-    event.type !== 'workspace.tab.retargeted'
-  ) {
+  const existing = state[runId]
+
+  if (!existing && mutation.type !== 'open') {
     return state
   }
 
-  const payload = event.payload as {
-    readonly runId: string
-    readonly tabId?: string
-    readonly tabIds?: readonly string[]
-    readonly kind?: ArtifactTabKind
-    readonly title?: string
-    readonly target?: string
-    readonly at?: number
-  }
+  const base = existing ?? { order: [], tabs: {} }
+  const next = reduceTabMutation(base, mutation)
 
-  const { runId } = payload
-  const existing = state[runId] ?? { order: [], tabs: {} }
-
-  switch (event.type) {
-    case 'workspace.tab.opened': {
-      const next = reduceTabMutation(existing, {
-        type: 'open',
-        tab: {
-          tabId: payload.tabId ?? '',
-          kind: payload.kind ?? 'events',
-          title: payload.title ?? '',
-          target: payload.target ?? '',
-          openedAt: payload.at ?? 0,
-        },
-      })
-
-      return next === existing ? state : { ...state, [runId]: next }
-    }
-
-    case 'workspace.tab.closed': {
-      if (!state[runId]) {
-        return state
-      }
-
-      const next = reduceTabMutation(existing, { type: 'close', tabId: payload.tabId ?? '' })
-      return next === existing ? state : { ...state, [runId]: next }
-    }
-
-    case 'workspace.tab.reordered': {
-      if (!state[runId]) {
-        return state
-      }
-
-      const next = reduceTabMutation(existing, {
-        type: 'reorder',
-        tabIds: payload.tabIds ?? [],
-      })
-
-      return next === existing ? state : { ...state, [runId]: next }
-    }
-
-    case 'workspace.tab.retargeted': {
-      if (!state[runId]) {
-        return state
-      }
-
-      const next = reduceTabMutation(existing, {
-        type: 'retarget',
-        tabId: payload.tabId ?? '',
-        title: payload.title ?? '',
-        target: payload.target ?? '',
-      })
-
-      return next === existing ? state : { ...state, [runId]: next }
-    }
-
-    default:
-      return state
-  }
+  return next === base ? state : { ...state, [runId]: next }
 }
