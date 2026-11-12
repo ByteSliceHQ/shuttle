@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import {
   ArrowDownToLine,
+  Columns3,
   LoaderCircle,
   Pause,
   Play,
@@ -11,7 +12,7 @@ import {
 import { useCallback, useDeferredValue, useMemo, useState } from 'react'
 
 import { EventInspector } from '@/components/event-inspector'
-import { EventRow } from '@/components/event-row'
+import { EventRow, type EventRowColumns } from '@/components/event-row'
 import { FollowList } from '@/components/follow-list'
 import { useWorkspace } from '@/components/sidebar/workspace-context'
 import { Button } from '@/components/ui/button'
@@ -24,9 +25,10 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { PanelHeader, PanelTitle } from '@/components/ui/panel'
-import { shortId } from '@/lib/cn'
+import { cn, shortId } from '@/lib/cn'
 import { eventFamilies, eventMeta, familyColor } from '@/lib/event-catalog'
 import { useGlobalEvents, type GlobalEventFrame, type GlobalRunKind } from '@/lib/global-events'
+import { useWidthBucket } from '@/lib/use-width-bucket'
 
 export const Route = createFileRoute('/events')({
   component: GlobalEventsPage,
@@ -42,6 +44,19 @@ const RUN_KIND_OPTIONS: readonly { readonly id: GlobalRunKind; readonly label: s
 const DEFAULT_HIDDEN = new Set(['effect'])
 const ROW_ESTIMATE = 26
 
+/** Below this width the log gets a column toolbar, since every column no longer fits. */
+const COMPACT_BREAKPOINTS = [640] as const
+
+const COLUMN_OPTIONS: readonly { readonly id: keyof EventRowColumns; readonly label: string }[] = [
+  { id: 'seq', label: 'Seq' },
+  { id: 'time', label: 'Time' },
+  { id: 'session', label: 'Session' },
+  { id: 'detail', label: 'Detail' },
+]
+
+/** The session name is the widest column, so a narrow log starts without it. */
+const COMPACT_COLUMNS: EventRowColumns = { seq: true, time: false, session: false, detail: true }
+
 function GlobalEventsPage() {
   return <GlobalEventLog />
 }
@@ -51,6 +66,10 @@ function GlobalEventLog() {
   const [query, setQuery] = useState('')
   const [follow, setFollow] = useState(true)
   const [selectedCursor, setSelectedCursor] = useState<number | undefined>()
+  const [widthRef, widthBucket] = useWidthBucket<HTMLDivElement>(COMPACT_BREAKPOINTS)
+  const compact = widthBucket === 0
+  const [compactColumns, setCompactColumns] = useState(COMPACT_COLUMNS)
+  const columns = compact ? compactColumns : undefined
 
   const [runKinds, setRunKinds] = useState<ReadonlySet<GlobalRunKind>>(
     () => new Set(RUN_KIND_OPTIONS.map((option) => option.id)),
@@ -202,8 +221,24 @@ function GlobalEventLog() {
     }
   })()
 
+  const searchField = (
+    <div className={cn('relative min-w-0 flex-1 basis-24', !compact && 'ml-auto')}>
+      <Search
+        aria-hidden
+        className="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-3 -translate-y-1/2"
+      />
+      <Input
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Search"
+        aria-label="Search events"
+        className="h-7 w-full rounded-md pl-7 text-xs"
+      />
+    </div>
+  )
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div ref={widthRef} className="flex h-full min-h-0 flex-col">
       <PanelHeader className="gap-1.5 pr-2">
         <PanelTitle
           meta={filtered ? `${visible.length}/${stream.frames.length}` : stream.frames.length}
@@ -218,19 +253,8 @@ function GlobalEventLog() {
           )}
           {statusLabel}
         </span>
-        <div className="relative ml-auto min-w-0 flex-1 basis-24">
-          <Search
-            aria-hidden
-            className="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-3 -translate-y-1/2"
-          />
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search"
-            aria-label="Search events"
-            className="h-7 w-full rounded-md pl-7 text-xs"
-          />
-        </div>
+        {/* A narrow header keeps the title, count and controls; search drops to the row below. */}
+        {compact ? <span aria-hidden className="flex-1" /> : searchField}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
@@ -327,6 +351,33 @@ function GlobalEventLog() {
           <ArrowDownToLine />
         </Button>
       </PanelHeader>
+      {compact ? (
+        <div className="flex h-10 shrink-0 items-center gap-1 border-b px-2">
+          {searchField}
+          <div
+            role="toolbar"
+            aria-label="Columns"
+            title="Columns"
+            className="flex shrink-0 items-center gap-0.5 pl-1"
+          >
+            <Columns3 aria-hidden className="text-muted-foreground mr-0.5 size-3.5 shrink-0" />
+            {COLUMN_OPTIONS.map((option) => (
+              <Button
+                key={option.id}
+                variant="ghost"
+                size="xs"
+                aria-pressed={compactColumns[option.id]}
+                onClick={() =>
+                  setCompactColumns((prev) => ({ ...prev, [option.id]: !prev[option.id] }))
+                }
+                className="aria-pressed:bg-accent aria-pressed:text-foreground px-1.5"
+              >
+                {option.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {stream.hasMoreOlder && stream.oldestCursor !== null ? (
         <div className="flex h-8 shrink-0 items-center justify-center border-b">
           <Button
@@ -367,6 +418,7 @@ function GlobalEventLog() {
                 : frame.runKind
             }
             timeMode="absolute"
+            columns={columns}
             selected={selectedCursor === frame.cursor}
             onSelectSeq={() => {
               if (selectedCursor === frame.cursor) {

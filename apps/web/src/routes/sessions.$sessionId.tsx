@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { Check, Copy, Folder, Users } from 'lucide-react'
+import { Check, Copy, Folder, MessagesSquare, PanelRight, Users } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { AgentTree } from '@/components/agent-tree'
@@ -30,6 +30,7 @@ import {
   type PublishedPull,
   type SessionFeed,
 } from '@/lib/session-feed'
+import { useWidthBucket } from '@/lib/use-width-bucket'
 import type { RunStatus } from '@swirls/looms/core'
 import {
   type LoomsConnectionStatus,
@@ -59,6 +60,14 @@ function SessionPage() {
   return <SessionWorkspace key={sessionId} runId={sessionId} focusThreadId={thread} />
 }
 
+/**
+ * Session-area widths, in CSS pixels, at which a pane is added. Below the first only the
+ * conversation shows (events open over it); from the second the agents pane joins.
+ */
+const PANE_BREAKPOINTS = [640, 980] as const
+
+type PaneLayout = 'one' | 'two' | 'three'
+
 function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThreadId?: string }) {
   const store = useRunStore(runId)
   const summary = useRunSummary(store)
@@ -73,6 +82,10 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
   const [selectedThreadId, setSelectedThreadId] = useState<string | undefined>()
   const [selectedSeq, setSelectedSeq] = useState<number | undefined>()
   const [focusEventsToken, setFocusEventsToken] = useState(0)
+  const [layoutRef, paneCount] = useWidthBucket<HTMLDivElement>(PANE_BREAKPOINTS)
+  const layout: PaneLayout = paneCount >= 2 ? 'three' : paneCount === 1 ? 'two' : 'one'
+  // Only read in the one-pane layout, where the artifact pane opens over the conversation.
+  const [artifactsOpen, setArtifactsOpen] = useState(false)
 
   const identities = useMemo(() => agentIdentities(tree.root), [tree.root])
   const goal = feed.items.find((item) => item.kind === 'user' && item.goal)
@@ -104,6 +117,7 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
     setSelectedThreadId(threadId)
     setSelectedSeq(seq)
     setFocusEventsToken((token) => token + 1)
+    setArtifactsOpen(true)
   }, [])
 
   const focusThreadKnown = focusThreadId !== undefined && identities.has(focusThreadId)
@@ -116,8 +130,25 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
     setFocusEventsToken((token) => token + 1)
   }
 
+  const artifacts = (
+    <ArtifactPane
+      runId={runId}
+      folderId={folderId}
+      events={events}
+      startedAt={summary.startedAt}
+      threadId={selectedThreadId}
+      threadLabel={labelFor(selectedThreadId ?? null)}
+      labelFor={labelFor}
+      onClearThread={() => setSelectedThreadId(undefined)}
+      selectedSeq={selectedSeq}
+      onSelectSeq={setSelectedSeq}
+      identities={identities}
+      focusEventsToken={focusEventsToken}
+    />
+  )
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div ref={layoutRef} className="flex h-full min-h-0 flex-col">
       <SessionHeader
         runId={runId}
         goal={goalText}
@@ -127,31 +158,40 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
         feed={feed}
         labelFor={labelFor}
         onInspect={inspect}
+        artifactsToggle={
+          layout === 'one'
+            ? { open: artifactsOpen, onToggle: () => setArtifactsOpen((open) => !open) }
+            : undefined
+        }
       />
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
-        <ResizablePanel defaultSize="18" minSize={200} maxSize="30">
-          <aside className="bg-sidebar flex h-full min-h-0 flex-col">
-            <PanelHeader>
-              <Users className="text-muted-foreground size-3.5" />
-              <PanelTitle meta={identities.size || undefined}>Agents</PanelTitle>
-            </PanelHeader>
-            <AgentTree
-              root={tree.root}
-              activityState={activityState}
-              identities={identities}
-              eventCounts={eventCounts}
-              totalEventCount={events.length}
-              selectedThreadId={selectedThreadId}
-              onSelect={(threadId) => {
-                setSelectedThreadId(threadId)
-                setSelectedSeq(undefined)
-              }}
-            />
-          </aside>
-        </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel defaultSize="52" minSize={360}>
-          <main className="flex h-full min-h-0 flex-col">
+        {layout === 'three' ? (
+          <>
+            <ResizablePanel id="agents" defaultSize="18" minSize={200} maxSize="30">
+              <aside className="bg-sidebar flex h-full min-h-0 flex-col">
+                <PanelHeader>
+                  <Users className="text-muted-foreground size-3.5" />
+                  <PanelTitle meta={identities.size || undefined}>Agents</PanelTitle>
+                </PanelHeader>
+                <AgentTree
+                  root={tree.root}
+                  activityState={activityState}
+                  identities={identities}
+                  eventCounts={eventCounts}
+                  totalEventCount={events.length}
+                  selectedThreadId={selectedThreadId}
+                  onSelect={(threadId) => {
+                    setSelectedThreadId(threadId)
+                    setSelectedSeq(undefined)
+                  }}
+                />
+              </aside>
+            </ResizablePanel>
+            <ResizableHandle />
+          </>
+        ) : null}
+        <ResizablePanel id="conversation" defaultSize="52" minSize={layout === 'one' ? 0 : 320}>
+          <main className="relative flex h-full min-h-0 flex-col">
             <Conversation
               runId={runId}
               feed={feed}
@@ -166,27 +206,19 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
               disabled={summary.finished}
               showExamples={!hasInterjected}
             />
+            {layout === 'one' && artifactsOpen ? (
+              <aside className="bg-background absolute inset-0 z-20 min-h-0">{artifacts}</aside>
+            ) : null}
           </main>
         </ResizablePanel>
-        <ResizableHandle />
-        <ResizablePanel defaultSize="30" minSize={280}>
-          <aside className="h-full min-h-0">
-            <ArtifactPane
-              runId={runId}
-              folderId={folderId}
-              events={events}
-              startedAt={summary.startedAt}
-              threadId={selectedThreadId}
-              threadLabel={labelFor(selectedThreadId ?? null)}
-              labelFor={labelFor}
-              onClearThread={() => setSelectedThreadId(undefined)}
-              selectedSeq={selectedSeq}
-              onSelectSeq={setSelectedSeq}
-              identities={identities}
-              focusEventsToken={focusEventsToken}
-            />
-          </aside>
-        </ResizablePanel>
+        {layout === 'one' ? null : (
+          <>
+            <ResizableHandle />
+            <ResizablePanel id="artifacts" defaultSize="30" minSize={280}>
+              <aside className="h-full min-h-0">{artifacts}</aside>
+            </ResizablePanel>
+          </>
+        )}
       </ResizablePanelGroup>
     </div>
   )
@@ -201,6 +233,7 @@ function SessionHeader({
   feed,
   labelFor,
   onInspect,
+  artifactsToggle,
 }: {
   runId: string
   goal: string | undefined
@@ -210,6 +243,8 @@ function SessionHeader({
   feed: SessionFeed
   labelFor: (threadId: string | null) => string | undefined
   onInspect: (threadId: string) => void
+  /** Present only in the one-pane layout, where events and files open over the conversation. */
+  artifactsToggle?: { readonly open: boolean; readonly onToggle: () => void }
 }) {
   const [copied, setCopied] = useState(false)
   const tree = useWorkspace()?.tree
@@ -228,8 +263,9 @@ function SessionHeader({
     status === 'completed' || status === 'failed' || status === 'cancelled' ? status : activity
 
   // Two columns: the title only ever truncates, so its length never moves the controls.
+  // The controls drop out by priority as the header narrows; status and pull requests stay.
   return (
-    <header className="grid h-12 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b px-3">
+    <header className="@container grid h-12 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b px-3 @2xl:gap-4">
       <div className="flex min-w-0 items-center gap-1.5">
         {folder ? (
           <>
@@ -258,23 +294,44 @@ function SessionHeader({
         <ConnectionIndicator connection={connection} />
         <StatusBadge status={badgeStatus} className="mr-1" />
         {folder ? (
-          <SessionRepos folderId={folder.folderId} folderName={folder.name} repos={folder.repos} />
+          <div className="hidden @xl:contents">
+            <SessionRepos
+              folderId={folder.folderId}
+              folderName={folder.name}
+              repos={folder.repos}
+            />
+          </div>
         ) : null}
-        <SessionContextButtons feed={feed} />
-        <span aria-hidden className="bg-border mx-1 h-4 w-px" />
-        <Button
-          variant="ghost"
-          size="sm"
-          className="font-mono"
-          title={`Copy run id ${runId}`}
-          onClick={() => {
-            void navigator.clipboard.writeText(runId).then(() => setCopied(true))
-          }}
-          onPointerLeave={() => setCopied(false)}
-        >
-          {copied ? <Check className="text-status-completed" /> : <Copy />}
-          {shortId(runId)}
-        </Button>
+        <div className="hidden @3xl:contents">
+          <SessionContextButtons feed={feed} />
+        </div>
+        <div className="hidden @4xl:contents">
+          <span aria-hidden className="bg-border mx-1 h-4 w-px" />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="font-mono"
+            title={`Copy run id ${runId}`}
+            onClick={() => {
+              void navigator.clipboard.writeText(runId).then(() => setCopied(true))
+            }}
+            onPointerLeave={() => setCopied(false)}
+          >
+            {copied ? <Check className="text-status-completed" /> : <Copy />}
+            {shortId(runId)}
+          </Button>
+        </div>
+        {artifactsToggle ? (
+          <Button
+            variant={artifactsToggle.open ? 'secondary' : 'ghost'}
+            size="sm"
+            aria-pressed={artifactsToggle.open}
+            onClick={artifactsToggle.onToggle}
+          >
+            {artifactsToggle.open ? <MessagesSquare /> : <PanelRight />}
+            {artifactsToggle.open ? 'Chat' : 'Events'}
+          </Button>
+        ) : null}
       </div>
     </header>
   )

@@ -71,7 +71,7 @@ export function PullPublishCard({
           item.decision ? 'bg-card/40' : 'border-brand/30 bg-brand/6',
         )}
       >
-        <div className="text-muted-foreground flex items-center gap-2 text-[11px]">
+        <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
           <GitPullRequest
             className={cn(
               'size-3.5 shrink-0',
@@ -79,7 +79,9 @@ export function PullPublishCard({
               item.publish?.status === 'published' && 'text-status-completed',
             )}
           />
-          <span className="text-foreground/90 font-medium">{publishHeading(item)}</span>
+          <span className="text-foreground/90 font-medium whitespace-nowrap">
+            {publishHeading(item)}
+          </span>
           <span className="shrink-0 whitespace-nowrap tabular-nums">{clockTime(item.ts)}</span>
           {item.decision ? null : (
             <span className="text-brand ml-auto shrink-0">Needs approval</span>
@@ -123,8 +125,12 @@ export function PullPublishCard({
               placeholder="Summary, testing, risks…"
               className="min-h-24 resize-none text-[13px]"
             />
-            <div className="flex items-center justify-end gap-2">
-              {error ? <span className="text-status-failed mr-auto text-xs">{error}</span> : null}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {error ? (
+                <span className="text-status-failed mr-auto min-w-0 text-xs break-words">
+                  {error}
+                </span>
+              ) : null}
               <Button
                 type="button"
                 variant="ghost"

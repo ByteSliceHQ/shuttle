@@ -1179,7 +1179,7 @@ function ToolActivity({
               {identity?.label ?? 'Agent'}
             </span>
           ) : null}
-          <span className="text-muted-foreground shrink-0 whitespace-nowrap">{summary}</span>
+          <span className="text-muted-foreground min-w-0 truncate">{summary}</span>
           {collapsedDetail ? (
             <span className="text-muted-foreground/60 min-w-0 truncate font-mono text-[11px]">
               {collapsedDetail}

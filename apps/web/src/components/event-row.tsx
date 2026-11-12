@@ -3,6 +3,14 @@ import { Link } from '@tanstack/react-router'
 import { cn, shortId } from '@/lib/cn'
 import { eventMeta, familyColor, type SessionEvent } from '@/lib/event-catalog'
 
+/** Which optional columns a row shows. Leave it out for the default set. */
+export interface EventRowColumns {
+  readonly seq: boolean
+  readonly time: boolean
+  readonly session: boolean
+  readonly detail: boolean
+}
+
 export function EventRow({
   event,
   startedAt,
@@ -10,6 +18,7 @@ export function EventRow({
   runLabel,
   runId,
   timeMode = 'offset',
+  columns,
   selected,
   onSelectSeq,
 }: {
@@ -20,6 +29,8 @@ export function EventRow({
   runLabel?: string
   runId?: string
   timeMode?: 'offset' | 'absolute'
+  /** Explicit column choices. Without them the time column follows the container's width. */
+  columns?: EventRowColumns
   selected: boolean
   onSelectSeq: (seq: number | undefined) => void
 }) {
@@ -41,17 +52,26 @@ export function EventRow({
         className="size-1.5 shrink-0 rounded-full"
         style={{ backgroundColor: familyColor(meta.family) }}
       />
-      <span className="text-muted-foreground w-7 shrink-0 text-right tabular-nums">
-        {event.seq}
-      </span>
-      <span className="event-offset text-muted-foreground/60 w-14 shrink-0 text-right tabular-nums">
-        {timeMode === 'absolute'
-          ? formatAbsolute(event.ts)
-          : offset !== undefined
-            ? formatOffset(offset)
-            : ''}
-      </span>
-      {runLabel || runId ? (
+      {(columns?.seq ?? true) ? (
+        <span className="text-muted-foreground w-7 shrink-0 text-right tabular-nums">
+          {event.seq}
+        </span>
+      ) : null}
+      {(columns?.time ?? true) ? (
+        <span
+          className={cn(
+            'text-muted-foreground/60 w-14 shrink-0 text-right tabular-nums',
+            !columns && 'event-offset',
+          )}
+        >
+          {timeMode === 'absolute'
+            ? formatAbsolute(event.ts)
+            : offset !== undefined
+              ? formatOffset(offset)
+              : ''}
+        </span>
+      ) : null}
+      {(columns?.session ?? true) && (runLabel || runId) ? (
         runId ? (
           <Link
             to="/sessions/$sessionId"
@@ -71,7 +91,7 @@ export function EventRow({
       ) : null}
       <span className="min-w-0 flex-1 truncate whitespace-nowrap">
         <span className="text-foreground">{meta.summary.title}</span>
-        {meta.summary.detail ? (
+        {(columns?.detail ?? true) && meta.summary.detail ? (
           <span className="text-muted-foreground ml-1.5">{meta.summary.detail}</span>
         ) : null}
       </span>
