@@ -76,6 +76,17 @@ export function clearStepObserver(signal: AbortSignal): void {
   stepObservers.delete(signal)
 }
 
+/** The Looms thread each running turn belongs to, keyed like the other per-turn observers. */
+const turnThreads = new WeakMap<AbortSignal, string>()
+
+export function bindTurnThread(signal: AbortSignal, threadId: string): void {
+  turnThreads.set(signal, threadId)
+}
+
+export function getTurnThread(signal: AbortSignal | undefined): string | undefined {
+  return signal ? turnThreads.get(signal) : undefined
+}
+
 function isJsonSchema(value: unknown): value is JSONSchema7 {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

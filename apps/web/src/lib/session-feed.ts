@@ -637,6 +637,23 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       }
     }
 
+    case 'shuttle.team.changed': {
+      const members = [
+        payload.workers === true ? 'Shuttle workers' : null,
+        payload.codex === true ? 'Codex' : null,
+        payload.claudeCode === true ? 'Claude Code' : null,
+      ].filter(Boolean)
+
+      return appendItem(feed, {
+        kind: 'notice',
+        id: event.id,
+        seq: event.seq,
+        ts: event.ts,
+        tone: 'info',
+        text: `Team is now ${members.join(', ')}. This applies from the conductor's next turn.`,
+      })
+    }
+
     case 'shuttle.vendor.turn_started': {
       const label = jsonText(payload.label)
       const harness = jsonText(payload.harness)

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { join } from 'node:path'
 
-import { runCodexLogin, runCodexTurn, unwrapShell } from './codex'
+import { listCodexModels, runCodexLogin, runCodexTurn, unwrapShell } from './codex'
 import type { BridgeEventBody, BridgeTurnRequest } from './protocol'
 
 const fake = [process.execPath, join(import.meta.dir, 'testing/fake-codex.ts')]
@@ -111,6 +111,21 @@ describe('codex turn', () => {
 
     expect(events).toHaveLength(1)
     expect(events[0]).toMatchObject({ type: 'turn_done', status: 'failed' })
+  })
+})
+
+describe('codex models', () => {
+  test('lists the models Codex shows in its own picker', async () => {
+    expect(await listCodexModels({ command: fake })).toEqual([
+      {
+        id: 'gpt-test',
+        label: 'GPT Test',
+        description: 'The workhorse.',
+        efforts: ['low', 'high'],
+        defaultEffort: 'low',
+        isDefault: true,
+      },
+    ])
   })
 })
 

@@ -7,6 +7,7 @@ import { intake } from './agents/intake'
 import { createNarratorAgent } from './agents/narrator'
 import { createReflectorAgent } from './agents/reflector'
 import { createReviewerAgent } from './agents/reviewer'
+import { createVendorMemberAgent } from './agents/vendor-member'
 import { createWorkerAgent } from './agents/worker'
 import { resolveEvaluator, resolveLlm } from './config'
 import type { ShuttleEnv } from './env'
@@ -39,7 +40,16 @@ export function shuttleModules(
 
   return [
     agent({
-      definitions: [conductor, worker, narrator, reflector, reviewer],
+      definitions: [
+        conductor,
+        worker,
+        // Vendor agents the conductor can delegate to in a hybrid session.
+        createVendorMemberAgent('codex'),
+        createVendorMemberAgent('claude-code'),
+        narrator,
+        reflector,
+        reviewer,
+      ],
       llm,
     }),
     evaluator({

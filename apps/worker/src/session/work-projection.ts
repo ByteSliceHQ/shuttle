@@ -421,7 +421,8 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
       const argsRecord = asRecord(args)
       const summary = shortArgs(args)
       const startedAt = event.ts
-      const taskText = name === 'delegate' ? taskFromDelegateArgs(argsRecord) : undefined
+      // delegate, delegate_codex and delegate_claude all hand a task to a team member.
+      const taskText = name.startsWith('delegate') ? taskFromDelegateArgs(argsRecord) : undefined
 
       const openToolCalls = {
         ...state.openToolCalls,

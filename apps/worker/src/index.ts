@@ -40,6 +40,18 @@ import { handleShuttleRoutes } from './routes/sessions'
 import { handleWorkspaceRoutes } from './routes/workspace'
 import { parsePreviewHost } from './sandbox/preview-host'
 import { SessionSandbox } from './sandbox/session-sandbox'
+import { DEFAULT_TEAM, readPinnedTeam, writeStoredTeam, type Team } from './team'
+import { CONNECTABLE_HARNESSES } from './vendor/harnesses'
+import {
+  readVendorCatalogue,
+  readVendorModelChoice,
+  writeVendorCatalogue,
+  writeVendorModelChoice,
+  type VendorCatalogue,
+  type VendorModel,
+  type VendorModelChoice,
+  type VendorModelChoices,
+} from './vendor/models'
 import { deriveActivityFromRunState } from './workspace/activity-state'
 import type { SessionActivity } from './workspace/module'
 import { sandboxNameFor } from './workspace/thread'
@@ -86,6 +98,59 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
 
   async setHarness(harness: string): Promise<{ harness: HarnessId }> {
     return { harness: await writeStoredHarness(this.ctx.storage, harness) }
+  }
+
+  /** Who the conductor may delegate to in this session. The workspace run holds the default. */
+  async getTeam(): Promise<{ team: Team }> {
+    const pinned = await readPinnedTeam(this.ctx.storage)
+    const workspace = workspaceRunId(this.env)
+
+    if (pinned || this.ctx.id.name === workspace) {
+      return { team: pinned ?? DEFAULT_TEAM }
+    }
+
+    return loomsStub(this.env.LOOMS_RUN, workspace).getTeam()
+  }
+
+  async setTeam(team: unknown): Promise<{ team: Team }> {
+    return { team: await writeStoredTeam(this.ctx.storage, team) }
+  }
+
+  /**
+   * The model and effort chosen for each vendor agent on this run. The workspace run holds the
+   * most recent choice, which sessions without one of their own fall back to.
+   */
+  async getVendorModelChoices(): Promise<{ choices: VendorModelChoices }> {
+    const choices: VendorModelChoices = {}
+
+    for (const harness of CONNECTABLE_HARNESSES) {
+      const choice = await readVendorModelChoice(this.ctx.storage, harness)
+
+      if (choice) {
+        choices[harness] = choice
+      }
+    }
+
+    return { choices }
+  }
+
+  async setVendorModelChoice(
+    harness: VendorHarnessId,
+    choice: unknown,
+  ): Promise<{ choice: VendorModelChoice }> {
+    return { choice: await writeVendorModelChoice(this.ctx.storage, harness, choice) }
+  }
+
+  /** An agent's own model list, kept on the workspace run so it is not fetched on every open. */
+  async getVendorCatalogue(harness: VendorHarnessId): Promise<VendorCatalogue | null> {
+    return readVendorCatalogue(this.ctx.storage, harness)
+  }
+
+  async putVendorCatalogue(
+    harness: VendorHarnessId,
+    models: readonly VendorModel[],
+  ): Promise<VendorCatalogue> {
+    return writeVendorCatalogue(this.ctx.storage, harness, models)
   }
 
   /**

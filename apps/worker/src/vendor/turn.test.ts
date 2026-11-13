@@ -282,6 +282,25 @@ describe('runVendorTurn', () => {
     expect(second.started[0]?.runKey).toBe('run_1_key2')
   })
 
+  test('the chosen model and effort go to the agent, and nothing is sent when none is chosen', async () => {
+    const turn: BridgeEventBody[] = [{ type: 'turn_done', status: 'completed', text: 'ok' }]
+    const chosen = fakeSandbox([turn])
+
+    await runVendorTurn(
+      deps(chosen.sandbox, { choice: { model: 'gpt-6-astra', effort: 'high' } }),
+      args(),
+    )
+
+    expect(chosen.started[0]?.request).toMatchObject({ model: 'gpt-6-astra', effort: 'high' })
+
+    const unset = fakeSandbox([turn])
+
+    await runVendorTurn(deps(unset.sandbox, { choice: {} }), args())
+
+    expect(unset.started[0]?.request).not.toHaveProperty('model')
+    expect(unset.started[0]?.request).not.toHaveProperty('effort')
+  })
+
   test('a restart mid-turn rejoins the run instead of starting a second agent', async () => {
     const storage = memoryStorage()
 
@@ -324,6 +343,82 @@ describe('runVendorTurn', () => {
     )
 
     expect(narrator.started[0]?.request).not.toHaveProperty('vendorThreadId')
+  })
+
+  test('a team member keeps one conversation across tasks from different threads', async () => {
+    const storage = memoryStorage()
+
+    const first = fakeSandbox([
+      [
+        { type: 'thread', vendorThreadId: 'thr_member' },
+        { type: 'turn_done', status: 'completed', text: 'built' },
+      ],
+    ])
+
+    await runVendorTurn(
+      deps(first.sandbox, { storage, member: { threadId: 'task_1' } }),
+      args({ instructions: 'You are Codex.' }),
+    )
+
+    const second = fakeSandbox([[{ type: 'turn_done', status: 'completed', text: 'fixed' }]])
+
+    await runVendorTurn(
+      deps(second.sandbox, { storage, member: { threadId: 'task_2' }, newRunKey: () => 'key2' }),
+      args({ instructions: 'You are Codex.' }),
+    )
+
+    expect(second.started[0]?.request).toMatchObject({ vendorThreadId: 'thr_member' })
+  })
+
+  test('a second task for a busy member runs in a conversation of its own', async () => {
+    const storage = memoryStorage()
+
+    // task_1 is mid-turn on the member conversation.
+    await storage.put('shuttle:vendor:codex:member', {
+      vendorThreadId: 'thr_member',
+      pending: { runKey: 'run_1_busy', offset: 0, owner: 'task_1' },
+    })
+
+    const parallel = fakeSandbox([
+      [
+        { type: 'thread', vendorThreadId: 'thr_side' },
+        { type: 'turn_done', status: 'completed', text: 'side task done' },
+      ],
+    ])
+
+    const result = await runVendorTurn(
+      deps(parallel.sandbox, { storage, member: { threadId: 'task_2' } }),
+      args(),
+    )
+
+    expect(result.message.content).toBe('side task done')
+    expect(parallel.started[0]?.request).not.toHaveProperty('vendorThreadId')
+
+    // The busy conversation is untouched, and still belongs to task_1.
+    expect(storage.values.get('shuttle:vendor:codex:member')).toEqual({
+      vendorThreadId: 'thr_member',
+      pending: { runKey: 'run_1_busy', offset: 0, owner: 'task_1' },
+    })
+  })
+
+  test('a member conversation left behind by a dead turn is taken over', async () => {
+    const storage = memoryStorage()
+
+    await storage.put('shuttle:vendor:codex:member', {
+      vendorThreadId: 'thr_member',
+      pending: { runKey: 'run_1_dead', offset: 0, owner: 'task_1' },
+    })
+
+    const next = fakeSandbox([[{ type: 'turn_done', status: 'completed', text: 'carried on' }]])
+
+    next.sandbox.agentRunState = async (runKey) => ({
+      state: runKey === 'run_1_dead' ? 'exited' : 'running',
+    })
+
+    await runVendorTurn(deps(next.sandbox, { storage, member: { threadId: 'task_2' } }), args())
+
+    expect(next.started[0]?.request).toMatchObject({ vendorThreadId: 'thr_member' })
+    expect(next.started[0]?.runKey).toBe('run_1_key')
   })
 
   test('a failed turn comes back as a message that says why and how to fix sign-in', async () => {

@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { runClaudeLogin, runClaudeTurn } from './claude.ts'
-import { runCodexLogin, runCodexTurn } from './codex.ts'
+import { listCodexModels, runCodexLogin, runCodexTurn } from './codex.ts'
 import { collectHomeFiles, seedHomeFiles } from './home.ts'
 import {
   BRIDGE_EVENTS_FILE,
@@ -25,6 +25,7 @@ import {
  *   node main.ts login --dir <dir>
  *   node main.ts seed                 (sign-in files as JSON on stdin)
  *   node main.ts collect --paths a,b  (sign-in files as JSON on stdout)
+ *   node main.ts models --harness codex  (the agent's models as JSON on stdout)
  *
  * `<dir>` holds `request.json`. The bridge appends events to `events.jsonl` there and always ends
  * the file with a terminal event, so a reader never waits on a run that has died. SIGTERM
@@ -117,6 +118,13 @@ async function runLogin(
   })
 }
 
+/** Writes to stdout and waits for it. Exiting first cuts a pipe off at its buffer size. */
+function print(output: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    process.stdout.write(output, (error) => (error ? reject(error) : resolve()))
+  })
+}
+
 async function main(): Promise<void> {
   const mode = process.argv[2]
   const dir = argument('dir')
@@ -128,14 +136,20 @@ async function main(): Promise<void> {
 
   if (mode === 'collect') {
     const paths = (argument('paths') ?? '').split(',').filter(Boolean)
-    const output = JSON.stringify(collectHomeFiles(homedir(), paths))
 
-    // Wait for the write to finish. Exiting first cuts a pipe off at its buffer size, which
-    // truncated larger sign-in files.
-    await new Promise<void>((resolve, reject) => {
-      process.stdout.write(output, (error) => (error ? reject(error) : resolve()))
-    })
+    await print(JSON.stringify(collectHomeFiles(homedir(), paths)))
+    return
+  }
 
+  if (mode === 'models') {
+    // Only Codex can list its models. The rest have a fixed list kept by the Worker.
+    if (argument('harness') !== 'codex') {
+      console.error('models: only the codex harness lists its models')
+      process.exitCode = 2
+      return
+    }
+
+    await print(JSON.stringify({ models: await listCodexModels() }))
     return
   }
 

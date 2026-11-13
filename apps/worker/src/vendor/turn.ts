@@ -6,6 +6,7 @@ import type { SessionSandboxStub } from '../env'
 import type { VendorHarnessId } from '../harness'
 import { getStepObserver, getThinkingObserver, type VendorStep } from '../llm'
 import { vendorHarnessInfo } from './harnesses'
+import type { VendorModelChoice } from './models'
 
 /**
  * Runs one agent turn on a vendor coding agent in the sandbox container, in place of a model
@@ -30,6 +31,13 @@ export interface VendorTurnDeps {
     get(harness: VendorHarnessId): Promise<CredentialPayload | null>
     put(harness: VendorHarnessId, payload: CredentialPayload): Promise<void>
   }
+  /**
+   * Set when the agent is a member of a hybrid team, with the Looms thread running this task.
+   * A member keeps one conversation for the whole session, so later tasks build on earlier ones.
+   */
+  readonly member?: { readonly threadId: string }
+  /** The model and effort the developer picked for this agent. Absent parts are the agent's own. */
+  readonly choice?: VendorModelChoice
   readonly sleep?: (ms: number) => Promise<void>
   readonly newRunKey?: () => string
 }
@@ -39,7 +47,12 @@ interface VendorConversation {
   /** The vendor's own conversation id, so the next turn continues it. */
   readonly vendorThreadId?: string
   /** A turn that has started but whose result has not been returned yet. */
-  readonly pending?: { readonly runKey: string; readonly offset: number }
+  readonly pending?: {
+    readonly runKey: string
+    readonly offset: number
+    /** The Looms thread that started this turn, for a team member's shared conversation. */
+    readonly owner?: string
+  }
 }
 
 /**
@@ -126,8 +139,28 @@ export async function runVendorTurn(
 
   // Each Looms agent keeps its own vendor conversation: the conductor's work must not share a
   // context with, say, the narrator answering a side question.
-  const conversationKey = `shuttle:vendor:${harness}:${await shortHash(args.instructions)}`
+  let conversationKey = deps.member
+    ? `shuttle:vendor:${harness}:member`
+    : `shuttle:vendor:${harness}:${await shortHash(args.instructions)}`
+
   let conversation = (await storage.get<VendorConversation>(conversationKey)) ?? {}
+  const owner = deps.member?.threadId
+
+  // The member's conversation is in use by another task (the conductor ran two at once). An
+  // agent cannot take two prompts in one conversation, so this task gets one of its own. A turn
+  // whose process is gone was abandoned, and its conversation is free again.
+  if (deps.member && conversation.pending && conversation.pending.owner !== owner) {
+    const { state } = await sandbox.agentRunState(conversation.pending.runKey)
+
+    if (state === 'exited' || state === 'missing') {
+      conversation = conversation.vendorThreadId
+        ? { vendorThreadId: conversation.vendorThreadId }
+        : {}
+    } else {
+      conversationKey = `shuttle:vendor:${harness}:thread:${owner}`
+      conversation = (await storage.get<VendorConversation>(conversationKey)) ?? {}
+    }
+  }
 
   const save = async (next: VendorConversation) => {
     conversation = next
@@ -144,7 +177,7 @@ export async function runVendorTurn(
 
     // Recorded before the agent starts, so a restart mid-turn rejoins this run and never
     // starts a second agent on the same prompt.
-    pending = { runKey, offset: 0 }
+    pending = { runKey, offset: 0, ...(owner ? { owner } : {}) }
     await save({ ...conversation, pending })
 
     await sandbox.startAgentRun({
@@ -155,6 +188,8 @@ export async function runVendorTurn(
         prompt: lastUserText(args),
         cwd: deps.cwd,
         instructions: SANDBOX_INSTRUCTIONS,
+        ...(deps.choice?.model ? { model: deps.choice.model } : {}),
+        ...(deps.choice?.effort ? { effort: deps.choice.effort } : {}),
         ...(conversation.vendorThreadId ? { vendorThreadId: conversation.vendorThreadId } : {}),
       },
       ...(stored?.env ? { env: stored.env } : {}),
@@ -304,7 +339,7 @@ export async function runVendorTurn(
     if (page.offset !== offset) {
       offset = page.offset
       quietReads = 0
-      await save({ ...conversation, pending: { runKey, offset } })
+      await save({ ...conversation, pending: { ...pending, offset } })
       continue
     }
 

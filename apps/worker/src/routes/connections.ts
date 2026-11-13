@@ -4,7 +4,15 @@ import { CredentialsKeyMissingError } from '../credentials/store'
 import { sandboxStub, type ShuttleEnv } from '../env'
 import { isVendorHarness, parseHarness, type VendorHarnessId } from '../harness'
 import { loomsStub } from '../looms-stub'
+import { parseTeam } from '../team'
 import { CONNECTABLE_HARNESSES, vendorHarnessInfo } from '../vendor/harnesses'
+import {
+  builtInVendorModels,
+  CATALOGUE_TTL_MS,
+  listsOwnModels,
+  parseVendorModels,
+  type VendorModel,
+} from '../vendor/models'
 
 /**
  * Connecting a coding agent subscription. Sign-in is always the vendor CLI's own flow, run in a
@@ -18,6 +26,7 @@ import { CONNECTABLE_HARNESSES, vendorHarnessInfo } from '../vendor/harnesses'
  *   POST   /workspace/connections/:harness/login/:id/code         pass a code back
  *   POST   /workspace/connections/:harness/login/:id/cancel
  *   DELETE /workspace/connections/:harness                        disconnect
+ *   GET    /workspace/connections/:harness/models                 models the agent offers
  *   PUT    /workspace/connections/default                         harness for new sessions
  */
 
@@ -75,6 +84,7 @@ async function route(request: Request, env: ShuttleEnv, url: URL): Promise<Respo
 
     return json({
       defaultHarness: (await credentials.getHarness()).harness,
+      defaultTeam: (await credentials.getTeam()).team,
       mode: (await sandbox.getMode()).mode,
       canStore: Boolean(env.SHUTTLE_CREDENTIALS_KEY?.trim()),
       connections: CONNECTABLE_HARNESSES.map((harness) => ({
@@ -91,15 +101,27 @@ async function route(request: Request, env: ShuttleEnv, url: URL): Promise<Respo
       return json({ error: 'Method not allowed' }, 405)
     }
 
-    const body = (await request.json().catch(() => null)) as { harness?: unknown } | null
-    const preferred = parseHarness(body?.harness)
+    const body = (await request.json().catch(() => null)) as {
+      harness?: unknown
+      team?: unknown
+    } | null
 
-    if (!preferred) {
-      return json({ error: 'unknown harness' }, 400)
+    const preferred = body?.harness === undefined ? undefined : parseHarness(body.harness)
+    const team = body?.team === undefined ? undefined : parseTeam(body.team)
+
+    if (preferred === null || team === null || (!preferred && !team)) {
+      return json({ error: 'unknown harness or invalid team' }, 400)
     }
 
-    // New sessions start on this harness. It is stored on the workspace run.
-    return json({ defaultHarness: (await credentials.setHarness(preferred)).harness })
+    // New sessions start with these. They are stored on the workspace run.
+    return json({
+      defaultHarness: preferred
+        ? (await credentials.setHarness(preferred)).harness
+        : (await credentials.getHarness()).harness,
+      defaultTeam: team
+        ? (await credentials.setTeam(team)).team
+        : (await credentials.getTeam()).team,
+    })
   }
 
   const harness = parseHarness(parts[0])
@@ -114,6 +136,14 @@ async function route(request: Request, env: ShuttleEnv, url: URL): Promise<Respo
     }
 
     return json({ removed: await credentials.removeCredential(harness) })
+  }
+
+  if (parts.length === 2 && parts[1] === 'models') {
+    if (request.method !== 'GET') {
+      return json({ error: 'Method not allowed' }, 405)
+    }
+
+    return json({ harness, models: await vendorModels(harness, { sandbox, credentials }) })
   }
 
   if (parts[1] !== 'login') {
@@ -169,6 +199,40 @@ async function route(request: Request, env: ShuttleEnv, url: URL): Promise<Respo
   }
 
   return json({ error: 'Not found' }, 404)
+}
+
+/**
+ * The models to offer for an agent. An agent that can list its own is asked at most once a day,
+ * in the sign-in sandbox; the built-in list covers every case where it cannot be asked.
+ */
+async function vendorModels(
+  harness: VendorHarnessId,
+  deps: {
+    sandbox: ReturnType<typeof sandboxStub>
+    credentials: ReturnType<typeof loomsStub>
+  },
+): Promise<readonly VendorModel[]> {
+  if (!listsOwnModels(harness)) {
+    return builtInVendorModels(harness)
+  }
+
+  const cached = await deps.credentials.getVendorCatalogue(harness)
+
+  if (cached && Date.now() - cached.fetchedAt < CATALOGUE_TTL_MS) {
+    return cached.models
+  }
+
+  try {
+    const listed = parseVendorModels(await deps.sandbox.listAgentModels(harness))
+
+    if (listed.length > 0) {
+      return (await deps.credentials.putVendorCatalogue(harness, listed)).models
+    }
+  } catch {
+    // No container, or a sandbox image from before the bridge could list models.
+  }
+
+  return cached?.models ?? builtInVendorModels(harness)
 }
 
 async function followLogin(

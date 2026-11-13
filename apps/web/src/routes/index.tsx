@@ -157,6 +157,8 @@ function HomeComposer({ runId, tree }: { runId: string; tree: WorkspaceTree }) {
               <HarnessSwitcher
                 value={agent.harness}
                 onChange={agent.setHarness}
+                team={agent.team}
+                onTeamChange={agent.setTeam}
                 disabled={busy}
                 side="bottom"
               />

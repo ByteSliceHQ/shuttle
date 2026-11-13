@@ -4,6 +4,7 @@ import { JsonRpcPeer } from './jsonrpc.ts'
 import {
   clipToolOutput,
   type BridgeEmit,
+  type BridgeModel,
   type BridgeToolKind,
   type BridgeToolStatus,
   type BridgeTurnRequest,
@@ -118,6 +119,62 @@ function connect(
 async function handshake(peer: JsonRpcPeer): Promise<void> {
   await peer.request('initialize', { clientInfo: CLIENT_INFO })
   peer.notify('initialized', {})
+}
+
+interface CodexModel {
+  readonly id: string
+  readonly model?: string
+  readonly displayName?: string
+  readonly description?: string
+  readonly hidden?: boolean
+  readonly isDefault?: boolean
+  readonly defaultReasoningEffort?: string
+  readonly supportedReasoningEfforts?: ReadonlyArray<{ readonly reasoningEffort: string }>
+}
+
+/** The models Codex offers in its own picker. Codex answers this without being signed in. */
+export async function listCodexModels(options: CodexOptions = {}): Promise<BridgeModel[]> {
+  const peer = connect(options, () => {})
+
+  try {
+    await handshake(peer)
+
+    const models: BridgeModel[] = []
+    let cursor: string | null = null
+
+    // A handful of pages at most. The cap only stops a server that never ends its list.
+    for (let page = 0; page < 10; page += 1) {
+      const listed: { data: CodexModel[]; nextCursor?: string | null } = await peer.request(
+        'model/list',
+        cursor ? { cursor } : {},
+      )
+
+      for (const entry of listed.data) {
+        if (entry.hidden) {
+          continue
+        }
+
+        models.push({
+          id: entry.model ?? entry.id,
+          label: entry.displayName ?? entry.id,
+          description: entry.description ?? '',
+          efforts: (entry.supportedReasoningEfforts ?? []).map((option) => option.reasoningEffort),
+          ...(entry.defaultReasoningEffort ? { defaultEffort: entry.defaultReasoningEffort } : {}),
+          ...(entry.isDefault ? { isDefault: true } : {}),
+        })
+      }
+
+      cursor = listed.nextCursor ?? null
+
+      if (!cursor) {
+        break
+      }
+    }
+
+    return models
+  } finally {
+    peer.kill()
+  }
 }
 
 export async function runCodexTurn(
@@ -302,11 +359,10 @@ export async function runCodexTurn(
 
     threadId = opened.thread.id
 
-    emit({
-      type: 'thread',
-      vendorThreadId: threadId,
-      ...(opened.model ? { model: opened.model } : {}),
-    })
+    // A resumed thread reports the model it started on. The turn runs on the one asked for.
+    const model = request.model ?? opened.model
+
+    emit({ type: 'thread', vendorThreadId: threadId, ...(model ? { model } : {}) })
 
     const started = await peer.request<{ turn: { id: string } }>('turn/start', {
       threadId,
@@ -314,6 +370,7 @@ export async function runCodexTurn(
       // Codex sends no reasoning at all unless a summary is asked for.
       summary: 'auto',
       ...(request.model ? { model: request.model } : {}),
+      ...(request.effort ? { effort: request.effort } : {}),
     })
 
     turnId = started.turn.id

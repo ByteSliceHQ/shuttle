@@ -5,6 +5,7 @@ import type { ShuttleEnv } from '../env'
 import {
   agentRunState,
   collectAgentFiles,
+  listAgentModels,
   readAgentEvents,
   sendAgentInput,
   startAgentRun,
@@ -278,6 +279,11 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
   /** Reads an agent's sign-in files so they can be stored and placed again in a new container. */
   async collectAgentFiles(paths: readonly string[]): Promise<{ files: Record<string, string> }> {
     return { files: await collectAgentFiles(await this.agentContainer(), paths) }
+  }
+
+  /** The models an agent reports for itself. The caller validates them. */
+  async listAgentModels(harness: string): Promise<{ models: unknown[] }> {
+    return { models: await listAgentModels(await this.agentContainer(), harness) }
   }
 
   /**

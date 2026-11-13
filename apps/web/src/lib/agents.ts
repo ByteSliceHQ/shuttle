@@ -1,4 +1,5 @@
 import {
+  Bot,
   Compass,
   Filter,
   Hammer,
@@ -37,6 +38,19 @@ const roles: Record<string, AgentRole> = {
     icon: Hammer,
     tone: 'text-route-idea',
     blurb: 'Edits code inside the sandbox.',
+  },
+  // Vendor agents the conductor delegates to in a hybrid session.
+  codex: {
+    label: 'Codex',
+    icon: Bot,
+    tone: 'text-route-idea',
+    blurb: 'Codex on your subscription, taking tasks from the conductor.',
+  },
+  'claude-code': {
+    label: 'Claude Code',
+    icon: Bot,
+    tone: 'text-route-question',
+    blurb: 'Claude Code on your subscription, taking tasks from the conductor.',
   },
   narrator: {
     label: 'Narrator',

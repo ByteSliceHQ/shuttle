@@ -10,7 +10,23 @@ import {
 } from 'react'
 
 import type { AgentIdentity } from '@/lib/agents'
-import { say, setDefaultHarness, setLlmModel, setSessionHarness, type HarnessId } from '@/lib/api'
+import {
+  DEFAULT_TEAM,
+  fetchSessionTeam,
+  fetchSessionVendorModels,
+  say,
+  setDefaultHarness,
+  setLlmModel,
+  setSessionDefaults,
+  setSessionHarness,
+  setSessionTeam,
+  setSessionVendorModel,
+  type HarnessId,
+  type Team,
+  type VendorHarnessId,
+  type VendorModelChoice,
+  type VendorModelChoices,
+} from '@/lib/api'
 import { cn, errorMessage } from '@/lib/cn'
 import { readStoredLlmModel, writeStoredLlmModel, type OpenRouterModelId } from '@/lib/llm-models'
 import { routeStyles } from '@/lib/routes'
@@ -34,6 +50,35 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 
 const AUTO = 'auto'
 const STEERABLE = new Set(['conductor', 'worker'])
+/** Team members a message can be addressed to, as `@<mention>` for the conductor to route. */
+type Mention = 'worker' | 'codex' | 'claude'
+
+const MENTION_LABELS: Record<Mention, string> = {
+  worker: 'Shuttle worker',
+  codex: 'Codex',
+  claude: 'Claude Code',
+}
+
+const ADDRESSED = /^@(worker|codex|claude)\b/i
+
+function teamMentions(team: Team): Mention[] {
+  const mentions: Mention[] = []
+
+  if (team.workers) {
+    mentions.push('worker')
+  }
+
+  if (team.codex) {
+    mentions.push('codex')
+  }
+
+  if (team.claudeCode) {
+    mentions.push('claude')
+  }
+
+  return mentions
+}
+
 const STARTER_KINDS = ['question', 'idea', 'constraint', 'correction'] as const
 
 export function Composer({
@@ -56,6 +101,9 @@ export function Composer({
   const [kind, setKind] = useState<InterjectionKind | typeof AUTO>(AUTO)
   const [target, setTarget] = useState<string>(AUTO)
   const [model, setModel] = useState<OpenRouterModelId>(() => readStoredLlmModel())
+  const [team, setTeam] = useState<Team>(DEFAULT_TEAM)
+  const [vendorChoices, setVendorChoices] = useState<VendorModelChoices>({})
+  const [mention, setMention] = useState<Mention | null>(null)
   const [sending, setSending] = useState(false)
   const [inputFocused, setInputFocused] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -73,7 +121,22 @@ export function Composer({
     void setLlmModel(runId, preferred).catch((cause: unknown) => {
       setError(errorMessage(cause))
     })
+
+    void fetchSessionTeam(runId).then(
+      (result) => setTeam(result.team),
+      () => {},
+    )
+
+    void fetchSessionVendorModels(runId).then(
+      (result) => setVendorChoices(result.choices),
+      () => {},
+    )
   }, [runId])
+
+  // Only a Shuttle session has a team to address, and only its members can be.
+  const mentions = harness === 'shuttle' ? teamMentions(team) : []
+  const hybrid = mentions.some((member) => member !== 'worker')
+  const activeMention = mention && hybrid && mentions.includes(mention) ? mention : null
 
   const targets = [...identities.values()].filter((identity) =>
     STEERABLE.has(identity.definitionName),
@@ -93,7 +156,10 @@ export function Composer({
       return
     }
 
-    const message = text.trim()
+    const typed = text.trim()
+    const message = activeMention ? `@${activeMention} ${typed}` : typed
+    // A message addressed to an agent is work for it, so it must not be answered as a question.
+    const addressed = activeMention !== null || (hybrid && ADDRESSED.test(typed))
     setSending(true)
     setError(null)
     // Clear optimistically so rapid interjections feel instant; restore on failure.
@@ -102,11 +168,11 @@ export function Composer({
     void say(
       runId,
       message,
-      kind === AUTO ? undefined : kind,
+      addressed ? 'task' : kind === AUTO ? undefined : kind,
       effectiveTarget === AUTO ? undefined : effectiveTarget,
     )
       .catch((cause: unknown) => {
-        setText(message)
+        setText(typed)
         setError(errorMessage(cause))
       })
       .finally(() => {
@@ -134,6 +200,25 @@ export function Composer({
     )
   }
 
+  function onTeamChange(next: Team) {
+    setTeam(next)
+    setError(null)
+
+    // Applies from the conductor's next turn, and to sessions started after this.
+    void Promise.all([setSessionTeam(runId, next), setSessionDefaults({ team: next })]).then(
+      // Show what the session actually stored, so the picker can never disagree with it.
+      ([saved]) => setTeam(saved.team),
+      (cause: unknown) => {
+        setError(errorMessage(cause))
+
+        void fetchSessionTeam(runId).then(
+          (result) => setTeam(result.team),
+          () => {},
+        )
+      },
+    )
+  }
+
   function onModelChange(next: OpenRouterModelId) {
     setModel(next)
     writeStoredLlmModel(next)
@@ -142,6 +227,24 @@ export function Composer({
     void setLlmModel(runId, next).catch((cause: unknown) => {
       setError(errorMessage(cause))
     })
+  }
+
+  function onVendorChoiceChange(agent: VendorHarnessId, choice: VendorModelChoice) {
+    setVendorChoices((current) => ({ ...current, [agent]: choice }))
+    setError(null)
+
+    // Applies from that agent's next turn.
+    void setSessionVendorModel(runId, agent, choice).then(
+      (saved) => setVendorChoices(saved.choices),
+      (cause: unknown) => {
+        setError(errorMessage(cause))
+
+        void fetchSessionVendorModels(runId).then(
+          (result) => setVendorChoices(result.choices),
+          () => {},
+        )
+      },
+    )
   }
 
   return (
@@ -187,8 +290,19 @@ export function Composer({
                 target={effectiveTarget}
                 onTargetChange={setTarget}
                 targets={targets}
+                mentions={hybrid ? mentions : []}
+                mention={activeMention}
+                onMentionChange={setMention}
                 disabled={disabled}
               />
+              {activeMention ? (
+                <OverridePill
+                  label={`@${activeMention}`}
+                  icon={<Target className="size-3 shrink-0 opacity-75" />}
+                  clearLabel={`Stop addressing ${MENTION_LABELS[activeMention]}`}
+                  onClear={() => setMention(null)}
+                />
+              ) : null}
               {kind !== AUTO ? (
                 <OverridePill
                   label={routeStyles[kind].label}
@@ -210,13 +324,23 @@ export function Composer({
             </div>
 
             <div className="flex min-w-0 items-center gap-1">
-              <HarnessSwitcher value={harness} onChange={onHarnessChange} disabled={disabled} />
-              {harness === 'shuttle' ? (
-                <>
-                  <ModelSwitcher value={model} onChange={onModelChange} disabled={disabled} />
-                  <ContextUsage runId={runId} modelId={model} />
-                </>
-              ) : null}
+              <HarnessSwitcher
+                value={harness}
+                onChange={onHarnessChange}
+                team={team}
+                onTeamChange={onTeamChange}
+                disabled={disabled}
+              />
+              <ModelSwitcher
+                harness={harness}
+                team={team}
+                value={model}
+                onChange={onModelChange}
+                vendorChoices={vendorChoices}
+                onVendorChoiceChange={onVendorChoiceChange}
+                disabled={disabled}
+              />
+              {harness === 'shuttle' ? <ContextUsage runId={runId} modelId={model} /> : null}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -334,6 +458,9 @@ function SteerMenu({
   target,
   onTargetChange,
   targets,
+  mentions,
+  mention,
+  onMentionChange,
   disabled,
 }: {
   kind: InterjectionKind | typeof AUTO
@@ -341,10 +468,14 @@ function SteerMenu({
   target: string
   onTargetChange: (next: string) => void
   targets: readonly AgentIdentity[]
+  /** Team members the message can be addressed to. Empty outside a hybrid session. */
+  mentions: readonly Mention[]
+  mention: Mention | null
+  onMentionChange: (next: Mention | null) => void
   disabled: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const hasOverride = kind !== AUTO || target !== AUTO
+  const hasOverride = kind !== AUTO || target !== AUTO || mention !== null
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -392,6 +523,30 @@ function SteerMenu({
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+
+        {mentions.length > 0 ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Hand to</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={mention ?? AUTO}
+              onValueChange={(next) => onMentionChange(next === AUTO ? null : (next as Mention))}
+            >
+              <DropdownMenuRadioItem value={AUTO} description="The conductor picks who does it">
+                <span>Conductor decides</span>
+              </DropdownMenuRadioItem>
+              {mentions.map((member) => (
+                <DropdownMenuRadioItem
+                  key={member}
+                  value={member}
+                  description={`Sent as @${member} for the conductor to pass on`}
+                >
+                  <span>{MENTION_LABELS[member]}</span>
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </>
+        ) : null}
 
         {targets.length > 0 ? (
           <>

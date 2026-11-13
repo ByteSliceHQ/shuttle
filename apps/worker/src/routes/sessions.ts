@@ -1,7 +1,10 @@
-import { playbookRunId } from '../config'
+import { playbookRunId, workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
-import { parseHarness } from '../harness'
+import { isVendorHarness, parseHarness } from '../harness'
 import { loomsStub } from '../looms-stub'
+import { parseTeam } from '../team'
+import { vendorHarnessInfo } from '../vendor/harnesses'
+import { parseVendorModelChoice } from '../vendor/models'
 
 export async function handleShuttleRoutes(
   request: Request,
@@ -29,6 +32,18 @@ export async function handleShuttleRoutes(
 
   if (harnessMatch) {
     return sessionHarness(request, env, decodeURIComponent(harnessMatch[1] ?? ''))
+  }
+
+  const teamMatch = url.pathname.match(/^\/sessions\/([^/]+)\/team$/)
+
+  if (teamMatch) {
+    return sessionTeam(request, env, decodeURIComponent(teamMatch[1] ?? ''))
+  }
+
+  const vendorModelsMatch = url.pathname.match(/^\/sessions\/([^/]+)\/vendor-models$/)
+
+  if (vendorModelsMatch) {
+    return sessionVendorModels(request, env, decodeURIComponent(vendorModelsMatch[1] ?? ''))
   }
 
   const stopMatch = url.pathname.match(/^\/sessions\/([^/]+)\/stop$/)
@@ -130,6 +145,89 @@ async function sessionHarness(request: Request, env: ShuttleEnv, runId: string):
     }
 
     return Response.json(await stub.setHarness(harness))
+  }
+
+  return Response.json({ error: 'Method not allowed' }, { status: 405 })
+}
+
+async function sessionTeam(request: Request, env: ShuttleEnv, runId: string): Promise<Response> {
+  if (!runId) {
+    return Response.json({ error: 'Invalid session id' }, { status: 400 })
+  }
+
+  const stub = loomsStub(env.LOOMS_RUN, runId)
+
+  if (request.method === 'GET') {
+    return Response.json(await stub.getTeam())
+  }
+
+  if (request.method === 'PUT' || request.method === 'POST') {
+    const body = (await request.json().catch(() => null)) as { team?: unknown } | null
+    const team = parseTeam(body?.team)
+
+    if (!team) {
+      return Response.json({ error: 'invalid team' }, { status: 400 })
+    }
+
+    const saved = await stub.setTeam(team)
+
+    // The change takes effect on the conductor's next turn. Put it in the session's history so
+    // "was Codex on the team when I asked?" can be answered from the events.
+    await stub
+      .signal([
+        {
+          type: 'shuttle.team.changed',
+          payload: { ...saved.team },
+          idempotencyKey: `team:${crypto.randomUUID()}`,
+        },
+      ])
+      .catch(() => {})
+
+    return Response.json(saved)
+  }
+
+  return Response.json({ error: 'Method not allowed' }, { status: 405 })
+}
+
+/** The model and effort each vendor agent runs on in this session. */
+async function sessionVendorModels(
+  request: Request,
+  env: ShuttleEnv,
+  runId: string,
+): Promise<Response> {
+  if (!runId) {
+    return Response.json({ error: 'Invalid session id' }, { status: 400 })
+  }
+
+  const session = loomsStub(env.LOOMS_RUN, runId)
+  const workspace = loomsStub(env.LOOMS_RUN, workspaceRunId(env))
+
+  const current = async () => ({
+    // A session's own choice wins. Without one it runs on the most recent choice made anywhere.
+    choices: {
+      ...(await workspace.getVendorModelChoices()).choices,
+      ...(await session.getVendorModelChoices()).choices,
+    },
+  })
+
+  if (request.method === 'GET') {
+    return Response.json(await current())
+  }
+
+  if (request.method === 'PUT' || request.method === 'POST') {
+    const body = (await request.json().catch(() => null)) as { harness?: unknown } | null
+    const harness = parseHarness(body?.harness)
+    const choice = parseVendorModelChoice(body)
+
+    if (!harness || !isVendorHarness(harness) || !vendorHarnessInfo(harness).supported || !choice) {
+      return Response.json({ error: 'unknown agent or invalid model' }, { status: 400 })
+    }
+
+    await session.setVendorModelChoice(harness, choice)
+    // Remembered as the starting point for sessions that have not picked a model.
+    await workspace.setVendorModelChoice(harness, choice)
+
+    return Response.json(await current())
   }
 
   return Response.json({ error: 'Method not allowed' }, { status: 405 })

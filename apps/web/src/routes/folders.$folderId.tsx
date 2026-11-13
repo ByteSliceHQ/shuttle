@@ -190,6 +190,8 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
                 <HarnessSwitcher
                   value={agent.harness}
                   onChange={agent.setHarness}
+                  team={agent.team}
+                  onTeamChange={agent.setTeam}
                   disabled={busy}
                   side="bottom"
                 />

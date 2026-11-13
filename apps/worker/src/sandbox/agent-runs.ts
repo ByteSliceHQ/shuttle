@@ -8,6 +8,7 @@ import {
   parseBridgeEvents,
   type BridgeEvent,
   type BridgeLoginRequest,
+  type BridgeModel,
   type BridgeTurnRequest,
 } from '../../bridge/protocol'
 
@@ -237,4 +238,24 @@ export async function collectAgentFiles(
   }
 
   return JSON.parse(new TextDecoder().decode(collected.stdout)) as Record<string, string>
+}
+
+/**
+ * Asks an agent which models it offers. Throws when it cannot say, which includes a sandbox image
+ * built before the bridge could ask.
+ */
+export async function listAgentModels(
+  container: AgentRunContainer,
+  harness: string,
+  options: AgentRunOptions = {},
+): Promise<BridgeModel[]> {
+  const listed = await run(container, bridgeArgv(options, 'models', '--harness', harness))
+
+  if (listed.exitCode !== 0) {
+    throw new Error(`could not list ${harness} models: ${listed.stderr.trim()}`)
+  }
+
+  const parsed = JSON.parse(new TextDecoder().decode(listed.stdout)) as { models?: BridgeModel[] }
+
+  return parsed.models ?? []
 }

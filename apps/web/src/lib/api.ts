@@ -214,9 +214,27 @@ export interface Connection {
   readonly updatedAt: number | null
 }
 
+export type TeamPreset =
+  | 'none'
+  | 'codex-builds-claude-reviews'
+  | 'claude-builds-codex-reviews'
+  | 'claude-plans-codex-implements'
+
+/** Who Shuttle's conductor may hand work to in a session. */
+export interface Team {
+  readonly workers: boolean
+  readonly codex: boolean
+  readonly claudeCode: boolean
+  readonly preset: TeamPreset
+}
+
+export const DEFAULT_TEAM: Team = { workers: true, codex: false, claudeCode: false, preset: 'none' }
+
 export interface ConnectionsState {
   /** The harness new sessions start on. */
   readonly defaultHarness: HarnessId
+  /** The team new Shuttle sessions start with. */
+  readonly defaultTeam: Team
   /** Subscriptions need the container sandbox; `memory` cannot run the agents. */
   readonly mode: 'memory' | 'container'
   /** False when the worker has no key to encrypt stored sign-ins with. */
@@ -253,7 +271,15 @@ export function fetchConnections(): Promise<ConnectionsState> {
 }
 
 export function setDefaultHarness(harness: HarnessId): Promise<{ defaultHarness: HarnessId }> {
-  return connectionsRequest('/default', { method: 'PUT', body: JSON.stringify({ harness }) })
+  return setSessionDefaults({ harness })
+}
+
+/** What new sessions start with. Either part may be left out to keep it as it is. */
+export function setSessionDefaults(defaults: {
+  harness?: HarnessId
+  team?: Team
+}): Promise<{ defaultHarness: HarnessId; defaultTeam: Team }> {
+  return connectionsRequest('/default', { method: 'PUT', body: JSON.stringify(defaults) })
 }
 
 export function startLogin(harness: string): Promise<{ loginId: string }> {
@@ -316,4 +342,88 @@ export async function setSessionHarness(
   }
 
   return (await response.json()) as { harness: HarnessId }
+}
+
+export async function fetchSessionTeam(runId: string): Promise<{ team: Team }> {
+  const response = await fetch(`/sessions/${encodeURIComponent(runId)}/team`, {
+    headers: { accept: 'application/json' },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to load the session's team: ${response.status}`)
+  }
+
+  return (await response.json()) as { team: Team }
+}
+
+export async function setSessionTeam(runId: string, team: Team): Promise<{ team: Team }> {
+  const response = await fetch(`/sessions/${encodeURIComponent(runId)}/team`, {
+    method: 'PUT',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({ team }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to change the team: ${response.status} ${await response.text()}`)
+  }
+
+  return (await response.json()) as { team: Team }
+}
+
+export type VendorHarnessId = Exclude<HarnessId, 'shuttle'>
+
+/** A model a vendor agent offers under the developer's own subscription. */
+export interface VendorModel {
+  readonly id: string
+  readonly label: string
+  readonly description: string
+  /** Reasoning efforts the model accepts, lowest first. Empty when it takes none. */
+  readonly efforts: readonly string[]
+  readonly defaultEffort?: string
+  /** True for the model the agent uses when none is chosen. */
+  readonly isDefault?: boolean
+}
+
+/** Either part may be absent, which leaves that part to the agent's own default. */
+export interface VendorModelChoice {
+  readonly model?: string
+  readonly effort?: string
+}
+
+export type VendorModelChoices = Partial<Record<VendorHarnessId, VendorModelChoice>>
+
+export function fetchVendorModels(
+  harness: VendorHarnessId,
+): Promise<{ models: readonly VendorModel[] }> {
+  return connectionsRequest(`/${encodeURIComponent(harness)}/models`)
+}
+
+export async function fetchSessionVendorModels(
+  runId: string,
+): Promise<{ choices: VendorModelChoices }> {
+  const response = await fetch(`/sessions/${encodeURIComponent(runId)}/vendor-models`)
+
+  if (!response.ok) {
+    throw new Error(`Failed to load agent models: ${response.status}`)
+  }
+
+  return (await response.json()) as { choices: VendorModelChoices }
+}
+
+export async function setSessionVendorModel(
+  runId: string,
+  harness: VendorHarnessId,
+  choice: VendorModelChoice,
+): Promise<{ choices: VendorModelChoices }> {
+  const response = await fetch(`/sessions/${encodeURIComponent(runId)}/vendor-models`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ harness, ...choice }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to set agent model: ${response.status} ${await response.text()}`)
+  }
+
+  return (await response.json()) as { choices: VendorModelChoices }
 }

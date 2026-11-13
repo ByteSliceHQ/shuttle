@@ -191,6 +191,18 @@ function summarizeShuttle(event: SessionEvent): EventSummary | undefined {
         detail: jsonText(payload.delta),
       }
 
+    case 'shuttle.team.changed':
+      return {
+        title: 'team changed',
+        detail: [
+          payload.workers === true ? 'workers' : null,
+          payload.codex === true ? 'codex' : null,
+          payload.claudeCode === true ? 'claude-code' : null,
+        ]
+          .filter(Boolean)
+          .join(', '),
+      }
+
     case 'shuttle.vendor.turn_started': {
       const model = jsonText(payload.model)
 

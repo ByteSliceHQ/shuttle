@@ -1,46 +1,23 @@
 import { Effect } from 'effect'
 
 import { callLlmEffect } from '@swirls/looms/agent'
-import {
-  isPrimitiveEffect,
-  type EffectMiddleware,
-  type EventInput,
-  type JsonValue,
-} from '@swirls/looms/core'
+import { onEffect, type EventInput } from '@swirls/looms/core'
 
 import {
   bindStepObserver,
   bindThinkingObserver,
+  bindTurnThread,
   clearStepObserver,
   clearThinkingObserver,
   type VendorStep,
 } from '../llm'
 
-/** The turn number from an `agent.callLLM` input, or null when the input does not carry one. */
-function turnOf(input: JsonValue): number | null {
-  if (input === null || typeof input !== 'object' || !('turn' in input)) {
-    return null
-  }
-
-  const turn = input.turn
-
-  return typeof turn === 'number' ? turn : null
-}
-
 /**
  * Wraps `agent.callLLM`: streams thinking deltas as ephemeral events while the model runs, then
  * records the finished thought on the log just before the agent's message.
  */
-export const thinkingMiddleware: EffectMiddleware = (effect, ctx, next) => {
-  if (isPrimitiveEffect(effect) || effect.type !== callLlmEffect.type) {
-    return next(effect, ctx)
-  }
-
-  const turn = turnOf(effect.input)
-
-  if (turn === null) {
-    return next(effect, ctx)
-  }
+export const thinkingMiddleware = onEffect(callLlmEffect, (input, ctx, next) => {
+  const turn = input.turn
 
   return Effect.gen(function* () {
     let thinking = ''
@@ -72,6 +49,8 @@ export const thinkingMiddleware: EffectMiddleware = (effect, ctx, next) => {
     // to be returned with the turn's result, which is what makes it part of the history.
     const steps: EventInput[] = []
 
+    bindTurnThread(ctx.signal, ctx.threadId)
+
     bindStepObserver(ctx.signal, {
       onStep: async (step) => {
         const event = vendorStepEvent(step, turn, ctx.threadId)
@@ -82,7 +61,7 @@ export const thinkingMiddleware: EffectMiddleware = (effect, ctx, next) => {
     })
 
     try {
-      const produced = yield* next(effect, ctx)
+      const produced = yield* next()
       const events = insertBeforeMessage(produced, steps)
       const text = thinking.trim()
 
@@ -106,7 +85,7 @@ export const thinkingMiddleware: EffectMiddleware = (effect, ctx, next) => {
       clearStepObserver(ctx.signal)
     }
   })
-}
+})
 
 /** Places `extra` just before the turn's message, or at the end when the turn produced none. */
 function insertBeforeMessage<T extends { readonly type: string }>(

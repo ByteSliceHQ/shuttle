@@ -14,10 +14,25 @@ export interface BridgeTurnRequest {
   /** Working directory for the agent, normally the session worktree. */
   readonly cwd: string
   readonly model?: string
+  /** How hard the model should think, in the agent's own terms (`low`, `high`, ...). */
+  readonly effort?: string
   /** The vendor's own conversation id from an earlier turn. Set to continue that conversation. */
   readonly vendorThreadId?: string
   /** Extra standing instructions, such as playbook lessons. */
   readonly instructions?: string
+}
+
+/** A model the agent offers, as the model picker shows it. */
+export interface BridgeModel {
+  /** What to pass back as `model` on a turn. */
+  readonly id: string
+  readonly label: string
+  readonly description: string
+  /** Reasoning efforts this model accepts, lowest first. Empty when it takes none. */
+  readonly efforts: readonly string[]
+  readonly defaultEffort?: string
+  /** True for the model the agent uses when none is chosen. */
+  readonly isDefault?: boolean
 }
 
 export interface BridgeLoginRequest {

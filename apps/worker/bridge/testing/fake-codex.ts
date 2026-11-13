@@ -93,6 +93,27 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       break
     }
 
+    case 'model/list': {
+      reply({
+        data: [
+          {
+            id: 'gpt-test',
+            model: 'gpt-test',
+            displayName: 'GPT Test',
+            description: 'The workhorse.',
+            hidden: false,
+            isDefault: true,
+            defaultReasoningEffort: 'low',
+            supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }],
+          },
+          { id: 'gpt-secret', displayName: 'Hidden', hidden: true },
+        ],
+        nextCursor: null,
+      })
+
+      break
+    }
+
     case 'turn/interrupt': {
       reply({})
       note('turn/completed', { turn: turn('interrupted') })

@@ -12,6 +12,7 @@ import type { Projector } from '@swirls/looms/projectors'
 import { d1ReplicaDatabase, sqliteReplica } from '@swirls/looms/projectors/replica/sqlite'
 
 import { classifyHeuristic, parseIntakeMessage } from './agents/intake'
+import { vendorHarnessOfModel } from './agents/vendor-member'
 import { shuttleAttributes } from './attributes'
 import { sandboxStub, type ShuttleEnv } from './env'
 import { createFirehoseProjector } from './firehose/projector'
@@ -19,12 +20,15 @@ import { isVendorHarness, readPinnedHarness, writeStoredHarness } from './harnes
 import {
   createReasoningLlm,
   createStubThinkingLlm,
+  getTurnThread,
   reasoningEffortFor,
   type ReasoningEffort,
 } from './llm'
 import { loomsStub } from './looms-stub'
 import { readSandboxBinding } from './session/bind-sandbox'
+import { onTeam, readPinnedTeam, writeStoredTeam, type Team } from './team'
 import { vendorHarnessInfo } from './vendor/harnesses'
+import { readVendorModelChoice } from './vendor/models'
 import { runVendorTurn } from './vendor/turn'
 import { createWorkspaceActivityProjector } from './workspace/activity'
 
@@ -45,6 +49,24 @@ function rejectsReasoningParams(cause: unknown): boolean {
 
 export function defaultLlmModel(env: ShuttleEnv): string {
   return env.LOOMS_MODEL?.trim() || DEFAULT_LLM_MODEL
+}
+
+/**
+ * The team for a session. One with no team of its own takes the workspace default on first use
+ * and keeps it, like its harness.
+ */
+export async function resolveTeam(env: ShuttleEnv, storage: DurableObjectStorage): Promise<Team> {
+  const pinned = await readPinnedTeam(storage)
+
+  if (pinned) {
+    return pinned
+  }
+
+  const preferred = await loomsStub(env.LOOMS_RUN, workspaceRunId(env)).getTeam()
+
+  // The developer may have set this session's team while the default was being fetched. Their
+  // choice wins over the default.
+  return (await readPinnedTeam(storage)) ?? writeStoredTeam(storage, preferred.team)
 }
 
 /**
@@ -75,19 +97,39 @@ export function resolveLlm(
 
       // A session with no harness of its own takes the workspace default on its first turn and
       // keeps it, so changing the default later does not switch a session that is under way.
-      let harness = await readPinnedHarness(storage)
+      let sessionHarness = await readPinnedHarness(storage)
 
-      if (!harness) {
+      if (!sessionHarness) {
         const preferred = await loomsStub(env.LOOMS_RUN, workspaceRunId(env)).getHarness()
-        harness = await writeStoredHarness(storage, preferred.harness)
+
+        // A harness the developer picked while the default was being fetched wins over it.
+        sessionHarness =
+          (await readPinnedHarness(storage)) ??
+          (await writeStoredHarness(storage, preferred.harness))
       }
+
+      // In a hybrid session the conductor delegates to vendor agents on its team. Such an agent
+      // names its harness as its model, whatever the session itself runs on.
+      const memberHarness = vendorHarnessOfModel(args.model)
+      const harness = memberHarness ?? sessionHarness
 
       if (!isVendorHarness(harness)) {
         return openRouter.complete(args)
       }
 
-      const sandbox = sandboxStub(env, binding.sandboxName)
       const label = vendorHarnessInfo(harness).label
+
+      if (memberHarness && !onTeam(await resolveTeam(env, storage), memberHarness)) {
+        return {
+          message: {
+            role: 'assistant',
+            content: `${label} is not on this session's team. Add it from the agent picker to delegate to it.`,
+          },
+          usage: { input: 0, output: 0 },
+        }
+      }
+
+      const sandbox = sandboxStub(env, binding.sandboxName)
 
       if ((await sandbox.getMode()).mode !== 'container') {
         return {
@@ -104,6 +146,12 @@ export function resolveLlm(
 
       const credentials = loomsStub(env.LOOMS_RUN, workspaceRunId(env))
 
+      // Read last, so a model picked while the sandbox was being prepared still applies. A
+      // session with no choice of its own uses the most recent one made anywhere.
+      const choice =
+        (await readVendorModelChoice(storage, harness)) ??
+        (await credentials.getVendorModelChoices()).choices[harness]
+
       return runVendorTurn(
         {
           harness,
@@ -111,6 +159,10 @@ export function resolveLlm(
           cwd: `/workspace/.wt/${runId}/${binding.repos[0]?.name ?? 'demo'}`,
           sandbox,
           storage,
+          ...(choice ? { choice } : {}),
+          ...(memberHarness
+            ? { member: { threadId: getTurnThread(args.signal) ?? crypto.randomUUID() } }
+            : {}),
           credentials: {
             get: (id) => credentials.getCredential(id),
             put: (id, payload) => credentials.putCredential(id, payload),

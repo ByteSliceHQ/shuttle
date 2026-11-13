@@ -104,6 +104,7 @@ export interface SessionSandboxStub {
   stopAgentRun(runKey: string): Promise<{ ok: true }>
   sendAgentInput(runKey: string, text: string): Promise<{ ok: true }>
   collectAgentFiles(paths: readonly string[]): Promise<{ files: Record<string, string> }>
+  listAgentModels(harness: string): Promise<{ models: unknown[] }>
   fetch(request: Request): Promise<Response>
 }
 

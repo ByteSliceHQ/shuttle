@@ -3,6 +3,13 @@ import type { EventInput, JsonValue, RunState, RunStatusSnapshot } from '@swirls
 import type { CredentialPayload, CredentialSummary } from './credentials/store'
 import type { ShuttleEnv } from './env'
 import type { HarnessId, VendorHarnessId } from './harness'
+import type { Team } from './team'
+import type {
+  VendorCatalogue,
+  VendorModel,
+  VendorModelChoice,
+  VendorModelChoices,
+} from './vendor/models'
 import type { SessionActivity } from './workspace/module'
 
 /** Narrow RPC surface we call on Looms Durable Object stubs. */
@@ -27,6 +34,18 @@ export interface LoomsRunStub {
   setLlmModel(model: string): Promise<{ model: string }>
   getHarness(): Promise<{ harness: HarnessId }>
   setHarness(harness: string): Promise<{ harness: HarnessId }>
+  getTeam(): Promise<{ team: Team }>
+  setTeam(team: unknown): Promise<{ team: Team }>
+  getVendorModelChoices(): Promise<{ choices: VendorModelChoices }>
+  setVendorModelChoice(
+    harness: VendorHarnessId,
+    choice: unknown,
+  ): Promise<{ choice: VendorModelChoice }>
+  getVendorCatalogue(harness: VendorHarnessId): Promise<VendorCatalogue | null>
+  putVendorCatalogue(
+    harness: VendorHarnessId,
+    models: readonly VendorModel[],
+  ): Promise<VendorCatalogue>
   getStreamTail(): Promise<number>
   getCredential(harness: VendorHarnessId): Promise<CredentialPayload | null>
   putCredential(harness: VendorHarnessId, payload: CredentialPayload): Promise<void>

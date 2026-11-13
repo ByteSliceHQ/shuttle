@@ -141,6 +141,7 @@ function runAttempt(
     'bypassPermissions',
     ...(resume ? ['--resume', resume] : []),
     ...(request.model ? ['--model', request.model] : []),
+    ...(request.effort ? ['--effort', request.effort] : []),
     ...(request.instructions ? ['--append-system-prompt', request.instructions] : []),
   ]
 
