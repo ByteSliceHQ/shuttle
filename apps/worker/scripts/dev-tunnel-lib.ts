@@ -1,6 +1,10 @@
 /** Pure helpers shared by `dev-setup` and `dev-tunnel`. */
 
-const SECRET_KEYS = ['GITHUB_WEBHOOK_SECRET', 'GITHUB_STATE_SECRET'] as const
+const SECRET_KEYS = [
+  'GITHUB_WEBHOOK_SECRET',
+  'GITHUB_STATE_SECRET',
+  'SHUTTLE_CREDENTIALS_KEY',
+] as const
 
 export type SecretKey = (typeof SECRET_KEYS)[number]
 
@@ -25,6 +29,20 @@ export function parseTunnelUrlFromMetrics(metricsText: string): string | null {
   )
 
   return match?.[1] ?? null
+}
+
+/**
+ * Adds an empty `SHUTTLE_CREDENTIALS_KEY=` line to a `.dev.vars` file that predates it, so
+ * `fillEmptySecrets` can fill it. Without the key, coding agent sign-ins cannot be stored.
+ */
+export function ensureCredentialsKeyLine(text: string): string {
+  if (/^SHUTTLE_CREDENTIALS_KEY=/m.test(text)) {
+    return text
+  }
+
+  const comment = '# Encrypts stored coding agent subscription credentials.'
+
+  return `${text.replace(/\n*$/, '')}\n\n${comment}\nSHUTTLE_CREDENTIALS_KEY=\n`
 }
 
 /** Fill empty secret assignments in a `.dev.vars` file; leave set values alone. */

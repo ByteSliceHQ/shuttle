@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { useMemo, useState, type KeyboardEvent } from 'react'
 
+import { HarnessSwitcher, useDefaultHarness } from '@/components/harness-switcher'
 import { useWorkspace, WorkspacePending } from '@/components/sidebar/workspace-context'
 import { Button } from '@/components/ui/button'
 import { EmptyState, Kbd } from '@/components/ui/panel'
@@ -58,6 +59,7 @@ function HomeComposer({ runId, tree }: { runId: string; tree: WorkspaceTree }) {
   const [folderId, setFolderId] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const agent = useDefaultHarness()
   const selectedFolderId = folderId || preferredFolderId(tree) || ''
 
   async function ensureFolder(): Promise<string> {
@@ -80,7 +82,9 @@ function HomeComposer({ runId, tree }: { runId: string; tree: WorkspaceTree }) {
     setBusy(true)
     setError(null)
 
-    void ensureFolder()
+    void agent
+      .save()
+      .then(ensureFolder)
       .then((resolvedFolderId) => {
         rememberLastFolder(resolvedFolderId)
         return startWorkspaceSession({ folderId: resolvedFolderId, goal: trimmed })
@@ -150,6 +154,12 @@ function HomeComposer({ runId, tree }: { runId: string; tree: WorkspaceTree }) {
                   Creates a General folder
                 </span>
               )}
+              <HarnessSwitcher
+                value={agent.harness}
+                onChange={agent.setHarness}
+                disabled={busy}
+                side="bottom"
+              />
               <span className="text-muted-foreground ml-auto hidden items-center gap-1 text-[11px] sm:inline-flex">
                 <Kbd>⌘</Kbd>
                 <Kbd>↵</Kbd>

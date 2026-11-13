@@ -1,0 +1,5 @@
+# The image only needs the agent bridge from this directory.
+*
+!bridge
+bridge/testing
+bridge/*.test.ts

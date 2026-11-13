@@ -15,6 +15,9 @@ export async function ensureContainerRunning(
     container.start({
       image: container.images.base,
       entrypoint: ['sleep', 'infinity'],
+      // The image carries the vendor agent CLIs (about 3 GB), which does not fit the smaller
+      // instance disks once repositories are cloned.
+      instance: 'standard-1',
       enableInternet: true,
     })
   }

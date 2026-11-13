@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 
 import {
   fillEmptyGithubToken,
+  ensureCredentialsKeyLine,
   fillEmptySecrets,
   randomHexSecret,
 } from '../apps/worker/scripts/dev-tunnel-lib'
@@ -25,7 +26,7 @@ if (!existsSync(varsPath)) {
   notes.push('created apps/worker/.dev.vars from .dev.vars.example')
 }
 
-let text = readFileSync(varsPath, 'utf8')
+let text = ensureCredentialsKeyLine(readFileSync(varsPath, 'utf8'))
 const { text: withSecrets, filled } = fillEmptySecrets(text, () => randomHexSecret())
 text = withSecrets
 

@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { ArrowRight, Link2, LoaderCircle, Plus } from 'lucide-react'
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 
+import { HarnessSwitcher, useDefaultHarness } from '@/components/harness-switcher'
 import { NotFound } from '@/components/not-found'
 import { PullInboxPanel, PullInboxSheetButton, usePullInbox } from '@/components/pulls/pull-inbox'
 import { ActivityDot } from '@/components/sidebar/activity-dot'
@@ -69,6 +70,7 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [linkOpen, setLinkOpen] = useState(false)
+  const agent = useDefaultHarness()
   const [showAllRepos, setShowAllRepos] = useState(false)
 
   const sessions = useMemo(() => sessionsForFolder(tree, folder.folderId), [tree, folder])
@@ -89,7 +91,9 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
     setBusy(true)
     setError(null)
 
-    void startWorkspaceSession({ folderId: folder.folderId, goal: trimmed })
+    void agent
+      .save()
+      .then(() => startWorkspaceSession({ folderId: folder.folderId, goal: trimmed }))
       .then(({ runId: sessionId }) => {
         rememberSession({ runId: sessionId, goal: trimmed })
         return navigate({ to: '/sessions/$sessionId', params: { sessionId } })
@@ -183,6 +187,12 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
                 className="max-h-80 min-h-24 resize-none border-0 bg-transparent text-sm focus-visible:ring-0"
               />
               <div className="flex items-center gap-2 px-1.5 pb-0.5">
+                <HarnessSwitcher
+                  value={agent.harness}
+                  onChange={agent.setHarness}
+                  disabled={busy}
+                  side="bottom"
+                />
                 <span className="text-muted-foreground ml-auto hidden items-center gap-1 text-[11px] sm:inline-flex">
                   <Kbd>⌘</Kbd>
                   <Kbd>↵</Kbd>

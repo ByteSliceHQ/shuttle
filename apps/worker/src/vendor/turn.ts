@@ -1,0 +1,380 @@
+import type { AgentTurnResult, LlmCompleteArgs } from '@swirls/looms/agent'
+
+import type { BridgeEvent, BridgeToolKind } from '../../bridge/protocol'
+import type { CredentialPayload } from '../credentials/store'
+import type { SessionSandboxStub } from '../env'
+import type { VendorHarnessId } from '../harness'
+import { getStepObserver, getThinkingObserver, type VendorStep } from '../llm'
+import { vendorHarnessInfo } from './harnesses'
+
+/**
+ * Runs one agent turn on a vendor coding agent in the sandbox container, in place of a model
+ * call. The vendor agent plans and edits with its own tools; this follows its event stream and
+ * hands the result back to Looms as an ordinary assistant message.
+ */
+
+type SandboxForTurn = Pick<
+  SessionSandboxStub,
+  'startAgentRun' | 'readAgentEvents' | 'agentRunState' | 'stopAgentRun' | 'collectAgentFiles'
+>
+
+type TurnStorage = Pick<DurableObjectStorage, 'get' | 'put'>
+
+export interface VendorTurnDeps {
+  readonly harness: VendorHarnessId
+  readonly runId: string
+  readonly cwd: string
+  readonly sandbox: SandboxForTurn
+  readonly storage: TurnStorage
+  readonly credentials: {
+    get(harness: VendorHarnessId): Promise<CredentialPayload | null>
+    put(harness: VendorHarnessId, payload: CredentialPayload): Promise<void>
+  }
+  readonly sleep?: (ms: number) => Promise<void>
+  readonly newRunKey?: () => string
+}
+
+/** What a conversation remembers between turns, and across a restart in the middle of one. */
+interface VendorConversation {
+  /** The vendor's own conversation id, so the next turn continues it. */
+  readonly vendorThreadId?: string
+  /** A turn that has started but whose result has not been returned yet. */
+  readonly pending?: { readonly runKey: string; readonly offset: number }
+}
+
+/**
+ * Standing instructions for a vendor agent working inside Shuttle's sandbox. The agent's process
+ * tree is stopped when its turn ends, so anything meant to keep running has to be detached.
+ */
+export const SANDBOX_INSTRUCTIONS = [
+  'You are working inside Shuttle, in a Linux sandbox container. Your working directory is the worktree for this session.',
+  'Any process you start is stopped when your turn ends, unless you detach it. To run a dev server or anything else that must keep running, start it detached and return immediately:',
+  '  setsid nohup <command> > /tmp/<name>.log 2>&1 < /dev/null &',
+  'Then confirm it is listening (for example with curl) and read its log if it is not. Never leave a server running in the foreground.',
+  'Servers must listen on 0.0.0.0, not only localhost. The user opens them in the Browser tab of Shuttle by port number, so tell them the port. A localhost URL does not work for the user.',
+].join('\n')
+
+const POLL_MS = 400
+/** Consecutive reads with no events from a dead process before the turn is given up. */
+const DEAD_READS = 3
+const STOP_WAIT_MS = 15_000
+
+async function shortHash(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+
+  return [...new Uint8Array(digest).slice(0, 8)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+function lastUserText(args: LlmCompleteArgs): string {
+  const last = args.messages.toReversed().find((message) => message.role === 'user')
+
+  if (!last) {
+    return ''
+  }
+
+  return typeof last.content === 'string' ? last.content : JSON.stringify(last.content)
+}
+
+/** Shapes a vendor tool like one of Shuttle's own so the session view renders it the same way. */
+export function vendorToolCall(
+  tool: { id: string; kind: BridgeToolKind; title: string },
+  cwd = '',
+): {
+  id: string
+  name: string
+  arguments: Record<string, string>
+} {
+  if (tool.kind === 'command') {
+    return { id: tool.id, name: 'bash', arguments: { command: tool.title } }
+  }
+
+  if (tool.kind === 'file_change') {
+    // Agents report absolute paths. Inside the session's worktree the prefix is only noise.
+    const path = cwd ? tool.title.replaceAll(`${cwd.replace(/\/$/, '')}/`, '') : tool.title
+
+    return { id: tool.id, name: 'edit_file', arguments: { path } }
+  }
+
+  if (tool.kind === 'web_search') {
+    return { id: tool.id, name: 'web_search', arguments: { query: tool.title } }
+  }
+
+  return { id: tool.id, name: tool.title, arguments: {} }
+}
+
+function sameFiles(
+  left: Readonly<Record<string, string>> | undefined,
+  right: Readonly<Record<string, string>>,
+): boolean {
+  const keys = Object.keys(right)
+
+  return (
+    Object.keys(left ?? {}).length === keys.length &&
+    keys.every((key) => left?.[key] === right[key])
+  )
+}
+
+export async function runVendorTurn(
+  deps: VendorTurnDeps,
+  args: LlmCompleteArgs,
+): Promise<AgentTurnResult> {
+  const { harness, sandbox, storage } = deps
+  const info = vendorHarnessInfo(harness)
+  const sleep = deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
+
+  // Each Looms agent keeps its own vendor conversation: the conductor's work must not share a
+  // context with, say, the narrator answering a side question.
+  const conversationKey = `shuttle:vendor:${harness}:${await shortHash(args.instructions)}`
+  let conversation = (await storage.get<VendorConversation>(conversationKey)) ?? {}
+
+  const save = async (next: VendorConversation) => {
+    conversation = next
+    await storage.put(conversationKey, next)
+  }
+
+  const stored = await deps.credentials.get(harness)
+  let pending = conversation.pending
+
+  if (!pending) {
+    const runKey = `${deps.runId.replaceAll(/[^A-Za-z0-9_-]/g, '_').slice(0, 60)}_${
+      deps.newRunKey?.() ?? crypto.randomUUID()
+    }`
+
+    // Recorded before the agent starts, so a restart mid-turn rejoins this run and never
+    // starts a second agent on the same prompt.
+    pending = { runKey, offset: 0 }
+    await save({ ...conversation, pending })
+
+    await sandbox.startAgentRun({
+      runKey,
+      mode: 'turn',
+      request: {
+        harness,
+        prompt: lastUserText(args),
+        cwd: deps.cwd,
+        instructions: SANDBOX_INSTRUCTIONS,
+        ...(conversation.vendorThreadId ? { vendorThreadId: conversation.vendorThreadId } : {}),
+      },
+      ...(stored?.env ? { env: stored.env } : {}),
+      ...(stored?.files ? { files: stored.files } : {}),
+    })
+  }
+
+  const { runKey } = pending
+  let offset = pending.offset
+  const signal = args.signal
+  const thinking = signal ? getThinkingObserver(signal) : undefined
+  const steps = signal ? getStepObserver(signal) : undefined
+  /**
+   * The agent's latest message, not yet shown as a step. A turn usually has several: each is
+   * recorded as its own step once something follows it, and the last becomes the turn's reply.
+   */
+  let heldMessage: string | undefined
+  let thinkingStartedAt: number | undefined
+  let usage = { input: 0, output: 0 }
+  let done: Extract<BridgeEvent, { type: 'turn_done' }> | undefined
+  let quietReads = 0
+  let stopRequestedAt: number | undefined
+  let announced = false
+
+  thinking?.reset()
+
+  /** Says which agent is working before its first step, so the session can name it. */
+  const announce = async (model?: string) => {
+    if (!announced) {
+      announced = true
+
+      await steps?.onStep({
+        type: 'started',
+        harness,
+        label: info.label,
+        ...(model ? { model } : {}),
+      })
+    }
+  }
+
+  const step = async (next: VendorStep) => {
+    await announce()
+    await steps?.onStep(next)
+  }
+
+  const releaseHeldMessage = async () => {
+    if (heldMessage !== undefined) {
+      const text = heldMessage
+
+      heldMessage = undefined
+      await step({ type: 'message', text })
+    }
+  }
+
+  const handle = async (event: BridgeEvent) => {
+    switch (event.type) {
+      case 'thread': {
+        await save({ ...conversation, vendorThreadId: event.vendorThreadId })
+        await announce(event.model)
+        break
+      }
+
+      case 'text_delta': {
+        await releaseHeldMessage()
+        await args.onTextDelta?.(event.delta)
+        break
+      }
+
+      case 'thought_delta': {
+        await releaseHeldMessage()
+        thinkingStartedAt ??= Date.now()
+        await thinking?.onDelta(event.delta)
+        break
+      }
+
+      case 'thought': {
+        await releaseHeldMessage()
+
+        await step({
+          type: 'thought',
+          text: event.text,
+          ...(thinkingStartedAt === undefined
+            ? {}
+            : { durationMs: Math.max(0, Date.now() - thinkingStartedAt) }),
+        })
+
+        thinkingStartedAt = undefined
+        break
+      }
+
+      case 'message': {
+        await releaseHeldMessage()
+        heldMessage = event.text
+        break
+      }
+
+      case 'tool_started': {
+        await releaseHeldMessage()
+        await step({ type: 'tool_started', toolCall: vendorToolCall(event, deps.cwd) })
+        break
+      }
+
+      case 'tool_finished': {
+        await step({
+          type: 'tool_finished',
+          toolCallId: event.id,
+          result: event.output ?? '',
+          // The output stays the result. The error only says how it ended.
+          ...(event.status === 'completed'
+            ? {}
+            : {
+                error: event.exitCode === undefined ? event.status : `exit code ${event.exitCode}`,
+              }),
+        })
+
+        break
+      }
+
+      case 'usage': {
+        usage = { input: event.input, output: event.output }
+        break
+      }
+
+      case 'turn_done': {
+        done = event
+        break
+      }
+
+      default: {
+        break
+      }
+    }
+  }
+
+  while (!done) {
+    if (signal?.aborted && stopRequestedAt === undefined) {
+      stopRequestedAt = Date.now()
+      await sandbox.stopAgentRun(runKey)
+    }
+
+    const page = await sandbox.readAgentEvents(runKey, offset)
+
+    for (const event of page.events) {
+      await handle(event)
+    }
+
+    if (page.offset !== offset) {
+      offset = page.offset
+      quietReads = 0
+      await save({ ...conversation, pending: { runKey, offset } })
+      continue
+    }
+
+    if (stopRequestedAt !== undefined && Date.now() - stopRequestedAt > STOP_WAIT_MS) {
+      break
+    }
+
+    const { state } = await sandbox.agentRunState(runKey)
+
+    quietReads = state === 'exited' || state === 'missing' ? quietReads + 1 : 0
+
+    if (quietReads >= DEAD_READS) {
+      done = {
+        type: 'turn_done',
+        status: 'failed',
+        text: '',
+        error: `the ${info.label} agent stopped without finishing`,
+        seq: 0,
+        at: Date.now(),
+      }
+
+      break
+    }
+
+    await sleep(POLL_MS)
+  }
+
+  await save(conversation.vendorThreadId ? { vendorThreadId: conversation.vendorThreadId } : {})
+
+  // Agents refresh their sign-in while they work. Keep the newest copy, or the next container
+  // would start from a stale one.
+  if (info.credentialFiles.length > 0) {
+    try {
+      const { files } = await sandbox.collectAgentFiles(info.credentialFiles)
+
+      if (Object.keys(files).length > 0 && !sameFiles(stored?.files, files)) {
+        await deps.credentials.put(harness, { ...stored, files })
+      }
+    } catch {
+      // Saving the refreshed sign-in is best effort; the turn's result still stands.
+    }
+  }
+
+  if (signal?.aborted) {
+    // What the agent had already said still belongs in the history of a stopped turn.
+    await releaseHeldMessage()
+    throw new Error('Aborted')
+  }
+
+  await announce()
+
+  const text = heldMessage?.trim() || done?.text.trim() || ''
+
+  if (done?.status === 'failed') {
+    const reason = done.error ?? 'unknown error'
+
+    const hint = /401|unauthorized|not logged in|login|authenticat/i.test(reason)
+      ? ` Connect ${info.label} under Connections, then send your message again.`
+      : ''
+
+    const failure = `${info.label} could not finish this turn: ${reason}.${hint}`
+
+    return {
+      message: { role: 'assistant', content: text ? `${text}\n\n${failure}` : failure },
+      usage,
+    }
+  }
+
+  return {
+    message: { role: 'assistant', content: text || `${info.label} finished without a message.` },
+    usage,
+  }
+}

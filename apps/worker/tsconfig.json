@@ -4,8 +4,9 @@
     "moduleResolution": "bundler",
     "types": ["@cloudflare/workers-types", "@types/bun"],
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "declaration": false,
     "declarationMap": false
   },
-  "include": ["src/**/*", "scripts/**/*", "worker-configuration.d.ts"]
+  "include": ["src/**/*", "scripts/**/*", "bridge/**/*", "worker-configuration.d.ts"]
 }

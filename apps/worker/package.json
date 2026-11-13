@@ -11,7 +11,7 @@
     "deploy": "wrangler deploy",
     "build": "bun x tsc -p tsconfig.json --noEmit",
     "check-types": "bun x tsc -p tsconfig.json --noEmit",
-    "test": "bun test src scripts"
+    "test": "bun test src scripts bridge"
   },
   "dependencies": {
     "@ai-sdk/typesafe-ai": "^3.0.35",

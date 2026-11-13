@@ -13,14 +13,19 @@ import { d1ReplicaDatabase, sqliteReplica } from '@swirls/looms/projectors/repli
 
 import { classifyHeuristic, parseIntakeMessage } from './agents/intake'
 import { shuttleAttributes } from './attributes'
-import type { ShuttleEnv } from './env'
+import { sandboxStub, type ShuttleEnv } from './env'
 import { createFirehoseProjector } from './firehose/projector'
+import { isVendorHarness, readPinnedHarness, writeStoredHarness } from './harness'
 import {
   createReasoningLlm,
   createStubThinkingLlm,
   reasoningEffortFor,
   type ReasoningEffort,
 } from './llm'
+import { loomsStub } from './looms-stub'
+import { readSandboxBinding } from './session/bind-sandbox'
+import { vendorHarnessInfo } from './vendor/harnesses'
+import { runVendorTurn } from './vendor/turn'
 import { createWorkspaceActivityProjector } from './workspace/activity'
 
 export const DEFAULT_LLM_MODEL = 'anthropic/claude-sonnet-5.5'
@@ -42,7 +47,82 @@ export function defaultLlmModel(env: ShuttleEnv): string {
   return env.LOOMS_MODEL?.trim() || DEFAULT_LLM_MODEL
 }
 
-export function resolveLlm(env: ShuttleEnv, storage?: DurableObjectStorage): LlmAdapter {
+/**
+ * The model adapter for a run. A session set to a vendor harness (Codex, Claude Code) runs each
+ * turn on that agent in the sandbox container; every other session uses OpenRouter.
+ */
+export function resolveLlm(
+  env: ShuttleEnv,
+  storage?: DurableObjectStorage,
+  runId?: string,
+): LlmAdapter {
+  const openRouter = resolveOpenRouterLlm(env, storage)
+
+  if (!storage || !runId) {
+    return openRouter
+  }
+
+  return {
+    complete: async (args: LlmCompleteArgs) => {
+      // Only a coding session, which has a sandbox bound to it, runs on a vendor agent. Side
+      // runs such as reflection have none: they must not spend the developer's subscription or
+      // start a container of their own.
+      const binding = await readSandboxBinding(storage, runId)
+
+      if (!binding) {
+        return openRouter.complete(args)
+      }
+
+      // A session with no harness of its own takes the workspace default on its first turn and
+      // keeps it, so changing the default later does not switch a session that is under way.
+      let harness = await readPinnedHarness(storage)
+
+      if (!harness) {
+        const preferred = await loomsStub(env.LOOMS_RUN, workspaceRunId(env)).getHarness()
+        harness = await writeStoredHarness(storage, preferred.harness)
+      }
+
+      if (!isVendorHarness(harness)) {
+        return openRouter.complete(args)
+      }
+
+      const sandbox = sandboxStub(env, binding.sandboxName)
+      const label = vendorHarnessInfo(harness).label
+
+      if ((await sandbox.getMode()).mode !== 'container') {
+        return {
+          message: {
+            role: 'assistant',
+            content: `${label} sessions need the container sandbox. Set SHUTTLE_WORKSPACE_MODE=container and restart Shuttle.`,
+          },
+          usage: { input: 0, output: 0 },
+        }
+      }
+
+      await sandbox.ensureRepos([...binding.repos])
+      await sandbox.ensureWorktree(runId)
+
+      const credentials = loomsStub(env.LOOMS_RUN, workspaceRunId(env))
+
+      return runVendorTurn(
+        {
+          harness,
+          runId,
+          cwd: `/workspace/.wt/${runId}/${binding.repos[0]?.name ?? 'demo'}`,
+          sandbox,
+          storage,
+          credentials: {
+            get: (id) => credentials.getCredential(id),
+            put: (id, payload) => credentials.putCredential(id, payload),
+          },
+        },
+        args,
+      )
+    },
+  }
+}
+
+function resolveOpenRouterLlm(env: ShuttleEnv, storage?: DurableObjectStorage): LlmAdapter {
   const apiKey = env.OPENROUTER_API_KEY
 
   if (!apiKey) {

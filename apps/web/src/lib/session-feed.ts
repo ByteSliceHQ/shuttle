@@ -181,6 +181,14 @@ export interface SessionFeed {
   readonly draftReviewComments: readonly DraftReviewComment[]
   /** Open submit-review approval, if any. */
   readonly pendingReviewApprovalId?: string
+  /** Threads run by a vendor agent (Codex, Claude Code), keyed by thread id. */
+  readonly vendorAgents: Readonly<Record<string, VendorAgent>>
+}
+
+export interface VendorAgent {
+  readonly harness: string
+  readonly label: string
+  readonly model?: string
 }
 
 export interface PlaybookLessonRef {
@@ -204,6 +212,7 @@ const initialFeed: SessionFeed = {
   toolIndex: {},
   questionIndex: {},
   pendingThoughts: {},
+  vendorAgents: {},
 }
 
 function withoutKey<T>(record: Readonly<Record<string, T>>, key: string): Record<string, T> {
@@ -628,6 +637,47 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       }
     }
 
+    case 'shuttle.vendor.turn_started': {
+      const label = jsonText(payload.label)
+      const harness = jsonText(payload.harness)
+
+      if (!label || !harness || !event.threadId) {
+        return feed
+      }
+
+      const model = jsonText(payload.model)
+
+      return {
+        ...feed,
+        vendorAgents: {
+          ...feed.vendorAgents,
+          [event.threadId]: { harness, label, ...(model ? { model } : {}) },
+        },
+      }
+    }
+
+    // A vendor agent says several things in one turn. Each is its own message in the feed.
+    case 'shuttle.vendor.message': {
+      const text = jsonText(payload.text)?.trim()
+
+      if (!text || !event.threadId) {
+        return feed
+      }
+
+      const taken = takePendingThought(feed, event.threadId, jsonNumber(payload.turn))
+
+      return appendItem(taken.feed, {
+        kind: 'agent',
+        id: event.id,
+        seq: event.seq,
+        ts: event.ts,
+        threadId: event.threadId,
+        text,
+        replyTo: taken.feed.narrators[event.threadId],
+        ...(taken.thought ? { thought: taken.thought } : {}),
+      })
+    }
+
     case 'agent.message': {
       const message = jsonFields(payload.message)
       const text = jsonText(message.content)?.trim()
@@ -652,6 +702,8 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
     }
 
     case 'agent.tool_call.requested':
+    // A vendor agent's own tools are recorded in the same shape as Shuttle's.
+    case 'shuttle.vendor.tool_started':
       return onToolCall(feed, event)
 
     case 'approval.requested': {
@@ -795,6 +847,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
     }
 
     case 'agent.tool.result':
+    case 'shuttle.vendor.tool_finished':
       return onToolResult(feed, event)
 
     case 'agent.turn.settled':
@@ -832,7 +885,82 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
 export const sessionFeed: ProjectionDefinition<SessionFeed> = {
   name: 'shuttleSessionFeed',
   initialState: initialFeed,
-  reduce: reduceFeed,
+  // Live copies of a vendor agent's steps are folded by `vendorLiveFeed`; the durable copies
+  // that arrive with the turn's result are the ones that belong here.
+  reduce: (feed, event) => (event.ephemeral ? feed : reduceFeed(feed, event)),
+}
+
+const VENDOR_STEP_TYPES = new Set([
+  'shuttle.vendor.turn_started',
+  'shuttle.vendor.message',
+  'shuttle.vendor.tool_started',
+  'shuttle.vendor.tool_finished',
+  'shuttle.turn.thought',
+])
+
+const TURN_ENDED_TYPES = new Set([
+  'agent.message',
+  'agent.turn.settled',
+  'agent.turn.stopped',
+  'runtime.thread.completed',
+  'runtime.thread.failed',
+  'runtime.thread.cancelled',
+])
+
+/**
+ * What each vendor agent has done so far in a turn that is still running, as a small feed per
+ * thread. A vendor turn's steps only become durable when the turn ends, so this is what shows
+ * the agent working in the meantime. It empties for a thread once that turn's result lands.
+ */
+export const vendorLiveFeed: LiveFoldDefinition<
+  Readonly<Record<string, SessionFeed>>,
+  SessionEvent
+> = {
+  kind: 'liveFold',
+  name: 'shuttleVendorLiveFeed',
+  initialState: {},
+  reduce(state, event) {
+    const threadId = event.threadId
+
+    if (!threadId) {
+      return state
+    }
+
+    if (event.ephemeral && VENDOR_STEP_TYPES.has(event.type)) {
+      return { ...state, [threadId]: reduceFeed(state[threadId] ?? initialFeed, event) }
+    }
+
+    const durableStep = !event.ephemeral && VENDOR_STEP_TYPES.has(event.type)
+
+    if ((durableStep || TURN_ENDED_TYPES.has(event.type)) && threadId in state) {
+      return withoutKey(state, threadId)
+    }
+
+    return state
+  },
+}
+
+/** The durable feed with every running vendor turn's steps so far appended. */
+export function withLiveVendorSteps(
+  feed: SessionFeed,
+  live: Readonly<Record<string, SessionFeed>>,
+): SessionFeed {
+  const threads = Object.entries(live)
+
+  if (threads.length === 0) {
+    return feed
+  }
+
+  let items = feed.items
+  let vendorAgents = feed.vendorAgents
+
+  for (const [threadId, steps] of threads) {
+    // A thought with nothing after it yet still shows, as its own row.
+    items = [...items, ...flushPendingThought(steps, threadId).items]
+    vendorAgents = { ...vendorAgents, ...steps.vendorAgents }
+  }
+
+  return { ...feed, items, vendorAgents }
 }
 
 export interface StreamingTurn {
@@ -879,6 +1007,16 @@ export const streamingTurns: LiveFoldDefinition<
     const payload = jsonFields(event.payload)
     const turn = jsonNumber(payload.turn) ?? state[threadId]?.turn ?? 0
     const current = state[threadId]
+
+    // A vendor agent's turn has several messages and thoughts. Once one is recorded as a step,
+    // it stops being streamed text and the next one starts from empty.
+    if (current && event.ephemeral && event.type === 'shuttle.vendor.message') {
+      return { ...state, [threadId]: { ...current, text: '' } }
+    }
+
+    if (current && event.ephemeral && event.type === 'shuttle.turn.thought') {
+      return { ...state, [threadId]: { turn: current.turn, thinking: '', text: current.text } }
+    }
 
     const base: StreamingTurn = current ?? {
       turn,

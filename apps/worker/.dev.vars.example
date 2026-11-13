@@ -30,5 +30,9 @@ GITHUB_TOKEN=
 GITHUB_STATE_SECRET=
 GITHUB_WEBHOOK_SECRET=
 
+# Encrypts stored coding agent subscription credentials. Auto-filled by `bun run dev`
+# when empty. Changing it makes existing connections unreadable.
+SHUTTLE_CREDENTIALS_KEY=
+
 # Set to `off` to skip the Cloudflare quick tunnel (inbox Sync still works).
 # SHUTTLE_TUNNEL=off

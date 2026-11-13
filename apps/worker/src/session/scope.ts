@@ -189,6 +189,33 @@ export const shuttleCatalog = defineEventCatalog('shuttle', {
     turn: Schema.Finite,
     delta: Schema.String,
   }),
+  // What a vendor agent (Codex, Claude Code) did during a turn inside the sandbox. Looms does
+  // not run these steps; they are recorded so the session shows the agent's work. Each is sent
+  // live as it happens and again, durably, when the turn ends.
+  'vendor.turn_started': Schema.Struct({
+    turn: Schema.Finite,
+    harness: Schema.String,
+    label: Schema.String,
+    model: Schema.optional(Schema.String),
+  }),
+  'vendor.message': Schema.Struct({
+    turn: Schema.Finite,
+    text: Schema.String,
+  }),
+  'vendor.tool_started': Schema.Struct({
+    turn: Schema.Finite,
+    toolCall: Schema.Struct({
+      id: Schema.String,
+      name: Schema.String,
+      arguments: Schema.Record(Schema.String, Schema.String),
+    }),
+  }),
+  'vendor.tool_finished': Schema.Struct({
+    turn: Schema.Finite,
+    toolCallId: Schema.String,
+    result: Schema.String,
+    error: Schema.optional(Schema.String),
+  }),
   'turn.thought': Schema.Struct({
     turn: Schema.Finite,
     text: Schema.String,

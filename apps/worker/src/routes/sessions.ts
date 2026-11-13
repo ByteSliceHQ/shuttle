@@ -1,5 +1,6 @@
 import { playbookRunId } from '../config'
 import type { ShuttleEnv } from '../env'
+import { parseHarness } from '../harness'
 import { loomsStub } from '../looms-stub'
 
 export async function handleShuttleRoutes(
@@ -22,6 +23,12 @@ export async function handleShuttleRoutes(
 
   if (modelMatch) {
     return sessionLlmModel(request, env, decodeURIComponent(modelMatch[1] ?? ''))
+  }
+
+  const harnessMatch = url.pathname.match(/^\/sessions\/([^/]+)\/harness$/)
+
+  if (harnessMatch) {
+    return sessionHarness(request, env, decodeURIComponent(harnessMatch[1] ?? ''))
   }
 
   const stopMatch = url.pathname.match(/^\/sessions\/([^/]+)\/stop$/)
@@ -98,6 +105,31 @@ async function sessionLlmModel(
     }
 
     return Response.json(await stub.setLlmModel(model))
+  }
+
+  return Response.json({ error: 'Method not allowed' }, { status: 405 })
+}
+
+async function sessionHarness(request: Request, env: ShuttleEnv, runId: string): Promise<Response> {
+  if (!runId) {
+    return Response.json({ error: 'Invalid session id' }, { status: 400 })
+  }
+
+  const stub = loomsStub(env.LOOMS_RUN, runId)
+
+  if (request.method === 'GET') {
+    return Response.json(await stub.getHarness())
+  }
+
+  if (request.method === 'PUT' || request.method === 'POST') {
+    const body = (await request.json().catch(() => null)) as { harness?: unknown } | null
+    const harness = parseHarness(body?.harness)
+
+    if (!harness) {
+      return Response.json({ error: 'unknown harness' }, { status: 400 })
+    }
+
+    return Response.json(await stub.setHarness(harness))
   }
 
   return Response.json({ error: 'Method not allowed' }, { status: 405 })

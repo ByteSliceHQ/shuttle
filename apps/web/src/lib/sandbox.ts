@@ -117,14 +117,23 @@ export function previewUrl(port: number, folderId: string, previewHost?: string)
   const host = previewHost ?? `${window.location.hostname.replace(/^www\./, '')}`
 
   const workerPort = import.meta.env.DEV
-    ? ':8790'
+    ? `:${import.meta.env.VITE_SHUTTLE_WORKER_PORT ?? '8790'}`
     : typeof window !== 'undefined' && window.location.port
       ? `:${window.location.port}`
       : ''
 
-  const baseHost = host.includes('localhost') || host.endsWith('.local') ? 'localhost' : host
+  // A preview needs a subdomain, which an IP address cannot have. Loopback addresses map to
+  // `localhost`, whose subdomains browsers resolve to the same machine.
+  const loopback = host.includes('localhost') || host.endsWith('.local') || isLoopbackAddress(host)
+  const baseHost = loopback ? 'localhost' : host
 
   return `http://p${port}-${sanitizeFolderLabel(folderId)}.${baseHost}${workerPort}`
+}
+
+function isLoopbackAddress(host: string): boolean {
+  return (
+    /^127(\.\d{1,3}){3}$/.test(host) || host === '0.0.0.0' || host === '[::1]' || host === '::1'
+  )
 }
 
 export function sanitizeFolderLabel(folderId: string): string {

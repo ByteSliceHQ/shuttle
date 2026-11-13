@@ -33,6 +33,49 @@ export function clearThinkingObserver(signal: AbortSignal): void {
   thinkingObservers.delete(signal)
 }
 
+/**
+ * One thing a vendor agent (Codex, Claude Code) did during a turn, in the order it happened. The
+ * agent plans and runs its own tools, so these are how its work becomes visible in the session.
+ * Tool calls are shaped like Looms tool calls so the UI treats them alike.
+ */
+export type VendorStep =
+  | {
+      readonly type: 'started'
+      readonly harness: string
+      readonly label: string
+      readonly model?: string
+    }
+  | { readonly type: 'message'; readonly text: string }
+  | { readonly type: 'thought'; readonly text: string; readonly durationMs?: number }
+  | {
+      readonly type: 'tool_started'
+      readonly toolCall: { id: string; name: string; arguments: Record<string, string> }
+    }
+  | {
+      readonly type: 'tool_finished'
+      readonly toolCallId: string
+      readonly result: string
+      readonly error?: string
+    }
+
+export interface TurnStepObserver {
+  onStep(step: VendorStep): void | Promise<void>
+}
+
+const stepObservers = new WeakMap<AbortSignal, TurnStepObserver>()
+
+export function bindStepObserver(signal: AbortSignal, observer: TurnStepObserver): void {
+  stepObservers.set(signal, observer)
+}
+
+export function getStepObserver(signal: AbortSignal): TurnStepObserver | undefined {
+  return stepObservers.get(signal)
+}
+
+export function clearStepObserver(signal: AbortSignal): void {
+  stepObservers.delete(signal)
+}
+
 function isJsonSchema(value: unknown): value is JSONSchema7 {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

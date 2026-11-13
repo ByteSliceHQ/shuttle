@@ -14,7 +14,8 @@ import { StatusBadge } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
 import { PanelHeader, PanelTitle } from '@/components/ui/panel'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
-import { agentIdentities } from '@/lib/agents'
+import { agentIdentities, withVendorAgents } from '@/lib/agents'
+import { fetchSessionHarness, type HarnessId } from '@/lib/api'
 import { shortId } from '@/lib/cn'
 import {
   authoredPullsForSession,
@@ -26,6 +27,8 @@ import { rememberSession } from '@/lib/recent-sessions'
 import { sessionActivity, type SessionActivity } from '@/lib/session-activity'
 import {
   sessionFeed,
+  vendorLiveFeed,
+  withLiveVendorSteps,
   streamingTurns,
   type PublishedPull,
   type SessionFeed,
@@ -74,7 +77,14 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
   const tree = useThreadTree(store)
   const events = useRunEvents(store)
   const eventCounts = useEventCounts(store)
-  const feed = useProjection(store, sessionFeed)
+  const durableFeed = useProjection(store, sessionFeed)
+  const liveVendorSteps = useLiveFold(store, vendorLiveFeed)
+
+  const feed = useMemo(
+    () => withLiveVendorSteps(durableFeed, liveVendorSteps),
+    [durableFeed, liveVendorSteps],
+  )
+
   const activityState = useProjection(store, sessionActivity)
   const streaming = useLiveFold(store, streamingTurns)
   const reportLiveSession = useReportLiveSession()
@@ -87,7 +97,22 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
   // Only read in the one-pane layout, where the artifact pane opens over the conversation.
   const [artifactsOpen, setArtifactsOpen] = useState(false)
 
-  const identities = useMemo(() => agentIdentities(tree.root), [tree.root])
+  // Which agent runs the session is known before its first step, so the thread carries the
+  // agent's name from the start and never shows as Shuttle's conductor first.
+  const [harness, setHarness] = useState<HarnessId>('shuttle')
+
+  useEffect(() => {
+    fetchSessionHarness(runId).then(
+      (result) => setHarness(result.harness),
+      () => {},
+    )
+  }, [runId])
+
+  const identities = useMemo(
+    () => withVendorAgents(agentIdentities(tree.root), feed.vendorAgents, harness),
+    [tree.root, feed.vendorAgents, harness],
+  )
+
   const goal = feed.items.find((item) => item.kind === 'user' && item.goal)
   const hasInterjected = feed.items.some((item) => item.kind === 'user' && !item.goal)
   const goalText = goal?.kind === 'user' ? goal.text : undefined
@@ -202,6 +227,8 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
             />
             <Composer
               runId={runId}
+              harness={harness}
+              onHarnessChange={setHarness}
               identities={identities}
               disabled={summary.finished}
               showExamples={!hasInterjected}

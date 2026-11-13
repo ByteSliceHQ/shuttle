@@ -8,7 +8,13 @@ import {
   type JsonValue,
 } from '@swirls/looms/core'
 
-import { bindThinkingObserver, clearThinkingObserver } from '../llm'
+import {
+  bindStepObserver,
+  bindThinkingObserver,
+  clearStepObserver,
+  clearThinkingObserver,
+  type VendorStep,
+} from '../llm'
 
 /** The turn number from an `agent.callLLM` input, or null when the input does not carry one. */
 function turnOf(input: JsonValue): number | null {
@@ -61,8 +67,23 @@ export const thinkingMiddleware: EffectMiddleware = (effect, ctx, next) => {
       },
     })
 
+    // A vendor agent does its own planning and tool use inside the turn. Anything emitted while
+    // an effect runs is ephemeral, so each step goes out live for the session view and is kept
+    // to be returned with the turn's result, which is what makes it part of the history.
+    const steps: EventInput[] = []
+
+    bindStepObserver(ctx.signal, {
+      onStep: async (step) => {
+        const event = vendorStepEvent(step, turn, ctx.threadId)
+
+        steps.push(event)
+        await ctx.emit(event)
+      },
+    })
+
     try {
-      const events = yield* next(effect, ctx)
+      const produced = yield* next(effect, ctx)
+      const events = insertBeforeMessage(produced, steps)
       const text = thinking.trim()
 
       if (!text) {
@@ -79,15 +100,87 @@ export const thinkingMiddleware: EffectMiddleware = (effect, ctx, next) => {
         threadId: ctx.threadId,
       }
 
-      const messageIndex = events.findIndex((event) => event.type === 'agent.message')
-
-      if (messageIndex < 0) {
-        return [...events, thought]
-      }
-
-      return [...events.slice(0, messageIndex), thought, ...events.slice(messageIndex)]
+      return insertBeforeMessage(events, [thought])
     } finally {
       clearThinkingObserver(ctx.signal)
+      clearStepObserver(ctx.signal)
     }
   })
+}
+
+/** Places `extra` just before the turn's message, or at the end when the turn produced none. */
+function insertBeforeMessage<T extends { readonly type: string }>(
+  events: ReadonlyArray<T>,
+  extra: ReadonlyArray<T>,
+): ReadonlyArray<T> {
+  if (extra.length === 0) {
+    return events
+  }
+
+  const messageIndex = events.findIndex((event) => event.type === 'agent.message')
+
+  if (messageIndex < 0) {
+    return [...events, ...extra]
+  }
+
+  return [...events.slice(0, messageIndex), ...extra, ...events.slice(messageIndex)]
+}
+
+export function vendorStepEvent(step: VendorStep, turn: number, threadId: string): EventInput {
+  switch (step.type) {
+    case 'started': {
+      return {
+        type: 'shuttle.vendor.turn_started',
+        payload: {
+          turn,
+          harness: step.harness,
+          label: step.label,
+          ...(step.model ? { model: step.model } : {}),
+        },
+        threadId,
+      }
+    }
+
+    case 'message': {
+      return { type: 'shuttle.vendor.message', payload: { turn, text: step.text }, threadId }
+    }
+
+    case 'thought': {
+      return {
+        type: 'shuttle.turn.thought',
+        payload: {
+          turn,
+          text: step.text,
+          ...(step.durationMs !== undefined ? { durationMs: step.durationMs } : {}),
+        },
+        threadId,
+      }
+    }
+
+    case 'tool_started': {
+      return {
+        type: 'shuttle.vendor.tool_started',
+        payload: { turn, toolCall: step.toolCall },
+        threadId,
+      }
+    }
+
+    case 'tool_finished': {
+      return {
+        type: 'shuttle.vendor.tool_finished',
+        payload: {
+          turn,
+          toolCallId: step.toolCallId,
+          result: step.result,
+          ...(step.error ? { error: step.error } : {}),
+        },
+        threadId,
+      }
+    }
+
+    default: {
+      const exhaustive: never = step
+      return exhaustive
+    }
+  }
 }

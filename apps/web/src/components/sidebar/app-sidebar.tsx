@@ -7,6 +7,7 @@ import {
   Orbit,
   PanelLeftClose,
   PanelLeftOpen,
+  Plug,
   Plus,
   Radio,
   SquarePen,
@@ -326,6 +327,18 @@ function SidebarRail({
           </Link>
         </Button>
       </IconTip>
+      <IconTip label="Connections" side="right">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className={cn(pathname === '/connections' && 'bg-accent text-foreground')}
+          asChild
+        >
+          <Link to="/connections" aria-label="Connections">
+            <Plug />
+          </Link>
+        </Button>
+      </IconTip>
     </aside>
   )
 }
@@ -377,6 +390,9 @@ function SidebarPanel({
         </SidebarNavLink>
         <SidebarNavLink to="/events" icon={<Radio />} active={pathname === '/events'}>
           Events
+        </SidebarNavLink>
+        <SidebarNavLink to="/connections" icon={<Plug />} active={pathname === '/connections'}>
+          Connections
         </SidebarNavLink>
       </nav>
 
@@ -710,7 +726,7 @@ function SidebarNavLink({
   shortcut,
   children,
 }: {
-  to: '/' | '/playbook' | '/events'
+  to: '/' | '/playbook' | '/events' | '/connections'
   icon: React.ReactNode
   active: boolean
   shortcut?: readonly string[]

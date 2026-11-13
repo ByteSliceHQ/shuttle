@@ -191,6 +191,37 @@ function summarizeShuttle(event: SessionEvent): EventSummary | undefined {
         detail: jsonText(payload.delta),
       }
 
+    case 'shuttle.vendor.turn_started': {
+      const model = jsonText(payload.model)
+
+      return {
+        title: `${jsonText(payload.label) ?? 'agent'} turn started`,
+        detail: model ? `turn ${jsonNumber(payload.turn) ?? ''} · ${model}` : undefined,
+      }
+    }
+
+    case 'shuttle.vendor.message':
+      return { title: 'agent said', detail: jsonText(payload.text) }
+
+    case 'shuttle.vendor.tool_started': {
+      const call = jsonFields(payload.toolCall)
+      const args = jsonFields(call.arguments)
+
+      return {
+        title: `ran ${jsonText(call.name) ?? 'tool'}`,
+        detail: jsonText(args.command) ?? jsonText(args.path) ?? jsonText(args.query),
+      }
+    }
+
+    case 'shuttle.vendor.tool_finished': {
+      const error = jsonText(payload.error)
+
+      return {
+        title: error ? 'tool failed' : 'tool finished',
+        detail: error ?? jsonText(payload.result),
+      }
+    }
+
     case 'shuttle.turn.thought': {
       const durationMs = jsonNumber(payload.durationMs)
       return {

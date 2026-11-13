@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { loopbackPreviewPort, resolveBrowserTarget } from './sandbox'
+import { loopbackPreviewPort, previewUrl, resolveBrowserTarget } from './sandbox'
 
 describe('resolveBrowserTarget', () => {
   const folderId = '9f0a7be4-4c4c-4bdc-8c3f-c9e93a7951db'
@@ -36,5 +36,23 @@ describe('resolveBrowserTarget', () => {
     expect(loopbackPreviewPort('localhost:3000')).toBe(3000)
     expect(loopbackPreviewPort('http://127.0.0.1:4000/path')).toBe(4000)
     expect(loopbackPreviewPort('https://example.com:443')).toBeNull()
+  })
+})
+
+describe('previewUrl', () => {
+  const folderId = 'df0984d0-45a3-497e-a51a-3d2fc170d3e6'
+
+  test('uses a localhost subdomain when the app is opened on a loopback address', () => {
+    for (const host of ['127.0.0.1', 'localhost', '[::1]']) {
+      const url = new URL(previewUrl(4067, folderId, host))
+
+      expect(url.hostname).toBe(`p4067-${folderId}.localhost`)
+    }
+  })
+
+  test('keeps a real preview host', () => {
+    expect(new URL(previewUrl(3000, folderId, 'preview.example.com')).hostname).toBe(
+      `p3000-${folderId}.preview.example.com`,
+    )
   })
 })

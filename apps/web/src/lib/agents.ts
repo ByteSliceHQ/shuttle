@@ -106,3 +106,61 @@ export function agentIdentities(root: ThreadNode | null): ReadonlyMap<string, Ag
 
   return identities
 }
+
+const HARNESS_LABELS: Readonly<Record<string, string>> = {
+  codex: 'Codex',
+  'claude-code': 'Claude Code',
+  cursor: 'Cursor',
+}
+
+/** Thread definitions whose turns run on the session's vendor agent. */
+const VENDOR_RUN_DEFINITIONS = new Set(['conductor'])
+
+function renamed(identity: AgentIdentity, label: string, model?: string): AgentIdentity {
+  return {
+    ...identity,
+    label,
+    role: {
+      ...identity.role,
+      label,
+      blurb: model
+        ? `${label} on your subscription, running ${model}.`
+        : `${label} on your subscription.`,
+    },
+  }
+}
+
+/**
+ * Renames threads that a vendor agent runs. A Codex or Claude Code session is still driven
+ * through Shuttle's conductor thread, but it is that agent doing the work, so it carries its name.
+ *
+ * `vendorAgents` records what actually ran each thread. Before a thread's first step there is no
+ * record yet, so `sessionHarness`, the agent the session is set to, names it in the meantime.
+ */
+export function withVendorAgents(
+  identities: ReadonlyMap<string, AgentIdentity>,
+  vendorAgents: Readonly<Record<string, { label: string; model?: string }>>,
+  sessionHarness?: string,
+): ReadonlyMap<string, AgentIdentity> {
+  const pendingLabel = sessionHarness ? HARNESS_LABELS[sessionHarness] : undefined
+
+  if (Object.keys(vendorAgents).length === 0 && !pendingLabel) {
+    return identities
+  }
+
+  const next = new Map<string, AgentIdentity>()
+
+  for (const [threadId, identity] of identities) {
+    const agent = vendorAgents[threadId]
+
+    if (agent) {
+      next.set(threadId, renamed(identity, agent.label, agent.model))
+    } else if (pendingLabel && VENDOR_RUN_DEFINITIONS.has(identity.definitionName)) {
+      next.set(threadId, renamed(identity, pendingLabel))
+    } else {
+      next.set(threadId, identity)
+    }
+  }
+
+  return next
+}

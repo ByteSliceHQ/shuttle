@@ -2,7 +2,23 @@ import { SandboxFileError } from '@cloudflare/sandbox'
 import { DurableObject } from 'cloudflare:workers'
 
 import type { ShuttleEnv } from '../env'
-import { reapplyInactivityTimeout, requireContainerMode } from './container-runtime'
+import {
+  agentRunState,
+  collectAgentFiles,
+  readAgentEvents,
+  sendAgentInput,
+  startAgentRun,
+  stopAgentRun,
+  type AgentEventsPage,
+  type AgentRunContainer,
+  type AgentRunInput,
+  type AgentRunState,
+} from './agent-runs'
+import {
+  ensureContainerRunning,
+  reapplyInactivityTimeout,
+  requireContainerMode,
+} from './container-runtime'
 import { ContainerWorkspace } from './container-workspace'
 import { MemoryWorkspace } from './memory-workspace'
 import { parsePreviewHost } from './preview-host'
@@ -225,6 +241,43 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
   async kill(execId?: string): Promise<{ ok: true }> {
     await (await this.workspace()).kill(execId)
     return { ok: true }
+  }
+
+  /** The running container for vendor agent runs. They cannot run in memory mode. */
+  private async agentContainer(): Promise<AgentRunContainer> {
+    if (this.mode() !== 'container') {
+      throw new Error('container-mode-required')
+    }
+
+    return ensureContainerRunning(this.ctx.container)
+  }
+
+  /** Starts a vendor agent turn or sign-in. Returns at once; follow it with readAgentEvents. */
+  async startAgentRun(input: AgentRunInput): Promise<{ started: boolean }> {
+    return startAgentRun(await this.agentContainer(), input)
+  }
+
+  async readAgentEvents(runKey: string, offset: number): Promise<AgentEventsPage> {
+    return readAgentEvents(await this.agentContainer(), runKey, offset)
+  }
+
+  async agentRunState(runKey: string): Promise<{ state: AgentRunState }> {
+    return { state: await agentRunState(await this.agentContainer(), runKey) }
+  }
+
+  async stopAgentRun(runKey: string): Promise<{ ok: true }> {
+    await stopAgentRun(await this.agentContainer(), runKey)
+    return { ok: true }
+  }
+
+  async sendAgentInput(runKey: string, text: string): Promise<{ ok: true }> {
+    await sendAgentInput(await this.agentContainer(), runKey, text)
+    return { ok: true }
+  }
+
+  /** Reads an agent's sign-in files so they can be stored and placed again in a new container. */
+  async collectAgentFiles(paths: readonly string[]): Promise<{ files: Record<string, string> }> {
+    return { files: await collectAgentFiles(await this.agentContainer(), paths) }
   }
 
   /**

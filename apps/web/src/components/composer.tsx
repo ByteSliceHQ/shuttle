@@ -10,13 +10,14 @@ import {
 } from 'react'
 
 import type { AgentIdentity } from '@/lib/agents'
-import { say, setLlmModel } from '@/lib/api'
+import { say, setDefaultHarness, setLlmModel, setSessionHarness, type HarnessId } from '@/lib/api'
 import { cn, errorMessage } from '@/lib/cn'
 import { readStoredLlmModel, writeStoredLlmModel, type OpenRouterModelId } from '@/lib/llm-models'
 import { routeStyles } from '@/lib/routes'
 import { interjectionKinds, isInterjectionKind, type InterjectionKind } from '@/lib/session-feed'
 
 import { ContextUsage } from './context-usage'
+import { HarnessSwitcher } from './harness-switcher'
 import { ModelSwitcher } from './model-switcher'
 import { Button } from './ui/button'
 import {
@@ -38,10 +39,15 @@ const STARTER_KINDS = ['question', 'idea', 'constraint', 'correction'] as const
 export function Composer({
   runId,
   identities,
+  harness,
+  onHarnessChange: reportHarness,
   disabled = false,
   showExamples = true,
 }: {
   runId: string
+  /** Which agent runs this session. Owned by the session page, which also names the agent. */
+  harness: HarnessId
+  onHarnessChange: (harness: HarnessId) => void
   identities: ReadonlyMap<string, AgentIdentity>
   disabled?: boolean
   showExamples?: boolean
@@ -114,6 +120,18 @@ export function Composer({
       event.preventDefault()
       submit()
     }
+  }
+
+  function onHarnessChange(next: HarnessId) {
+    reportHarness(next)
+    setError(null)
+
+    // Applies from this session's next turn, and to sessions started after this.
+    void Promise.all([setSessionHarness(runId, next), setDefaultHarness(next)]).catch(
+      (cause: unknown) => {
+        setError(errorMessage(cause))
+      },
+    )
   }
 
   function onModelChange(next: OpenRouterModelId) {
@@ -192,8 +210,13 @@ export function Composer({
             </div>
 
             <div className="flex min-w-0 items-center gap-1">
-              <ModelSwitcher value={model} onChange={onModelChange} disabled={disabled} />
-              <ContextUsage runId={runId} modelId={model} />
+              <HarnessSwitcher value={harness} onChange={onHarnessChange} disabled={disabled} />
+              {harness === 'shuttle' ? (
+                <>
+                  <ModelSwitcher value={model} onChange={onModelChange} disabled={disabled} />
+                  <ContextUsage runId={runId} modelId={model} />
+                </>
+              ) : null}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button

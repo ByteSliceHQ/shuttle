@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { verifyWebhookSignature } from '../src/github/webhooks'
 import {
   fillEmptyGithubToken,
+  ensureCredentialsKeyLine,
   fillEmptySecrets,
   parseTunnelUrl,
   parseTunnelUrlFromMetrics,
@@ -43,6 +44,22 @@ describe('parseTunnelUrlFromMetrics', () => {
 
   test('returns null when the counter is missing', () => {
     expect(parseTunnelUrlFromMetrics('cloudflared_tunnel_ha_connections 1')).toBeNull()
+  })
+})
+
+describe('ensureCredentialsKeyLine', () => {
+  test('adds the line once to a file that lacks it', () => {
+    const added = ensureCredentialsKeyLine('OPENROUTER_API_KEY=abc\n')
+
+    expect(added).toContain('OPENROUTER_API_KEY=abc\n')
+    expect(added.endsWith('SHUTTLE_CREDENTIALS_KEY=\n')).toBe(true)
+    expect(ensureCredentialsKeyLine(added)).toBe(added)
+  })
+
+  test('leaves a set key alone', () => {
+    const text = 'SHUTTLE_CREDENTIALS_KEY=already\n'
+
+    expect(ensureCredentialsKeyLine(text)).toBe(text)
   })
 })
 

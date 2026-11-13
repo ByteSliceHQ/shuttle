@@ -29,7 +29,7 @@ export function shuttleModules(
   options: ShuttleModulesOptions = {},
 ) {
   const storage = options.storage
-  const llm = resolveLlm(env, storage)
+  const llm = resolveLlm(env, storage, runId)
   const { evaluator: evaluatorAdapter, evaluatorPolicy } = resolveEvaluator(env)
   const conductor = createConductorAgent(env, runId, storage)
   const worker = createWorkerAgent(env, runId, storage)

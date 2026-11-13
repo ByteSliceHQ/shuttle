@@ -2,6 +2,7 @@ import type { DurableObjectNamespaceLike } from '@swirls/looms/cloudflare'
 
 import type { EventFirehose } from './firehose/durable-object'
 import type { LoomsRunStub } from './looms-stub'
+import type { AgentEventsPage, AgentRunInput, AgentRunState } from './sandbox/agent-runs'
 import type { SessionSandbox } from './sandbox/session-sandbox'
 import type {
   ChangesetResult,
@@ -47,6 +48,8 @@ export interface ShuttleEnv {
    */
   readonly GITHUB_TOKEN?: string
   readonly SHUTTLE_PULLS_RUN_ID?: string
+  /** Long random secret that encrypts stored vendor agent credentials. */
+  readonly SHUTTLE_CREDENTIALS_KEY?: string
 }
 
 /** RPC surface of SessionSandbox / WorkspaceSandbox. */
@@ -95,6 +98,12 @@ export interface SessionSandboxStub {
   gitDiff(cwd?: string): Promise<{ diff: string }>
   kill(execId?: string): Promise<{ ok: true }>
   getMode(): Promise<{ mode: 'memory' | 'container' }>
+  startAgentRun(input: AgentRunInput): Promise<{ started: boolean }>
+  readAgentEvents(runKey: string, offset: number): Promise<AgentEventsPage>
+  agentRunState(runKey: string): Promise<{ state: AgentRunState }>
+  stopAgentRun(runKey: string): Promise<{ ok: true }>
+  sendAgentInput(runKey: string, text: string): Promise<{ ok: true }>
+  collectAgentFiles(paths: readonly string[]): Promise<{ files: Record<string, string> }>
   fetch(request: Request): Promise<Response>
 }
 
