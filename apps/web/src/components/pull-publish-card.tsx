@@ -82,7 +82,9 @@ export function PullPublishCard({
           <span className="text-foreground/90 font-medium whitespace-nowrap">
             {publishHeading(item)}
           </span>
-          <span className="shrink-0 whitespace-nowrap tabular-nums">{clockTime(item.ts)}</span>
+          <span className="message-time shrink-0 whitespace-nowrap tabular-nums">
+            {clockTime(item.ts)}
+          </span>
           {item.decision ? null : (
             <span className="text-brand ml-auto shrink-0">Needs approval</span>
           )}

@@ -1,6 +1,8 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import {
+  ArrowLeft,
   Check,
+  ChevronRight,
   Copy,
   Ellipsis,
   Files,
@@ -14,7 +16,7 @@ import {
   Users,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { AgentTree } from '@/components/agent-tree'
 import { ArtifactPane } from '@/components/artifacts/artifact-pane'
@@ -64,6 +66,7 @@ import {
 } from '@/lib/session-panes'
 import { statusClass, statusLabel } from '@/lib/status'
 import { useTenant } from '@/lib/tenant'
+import { threadParents, threadPath } from '@/lib/timeline'
 import { useSessionTabs } from '@/lib/use-session-tabs'
 import { useWidthBucket } from '@/lib/use-width-bucket'
 import type { WorkspaceFolder } from '@/lib/workspace'
@@ -81,18 +84,40 @@ import {
 interface SessionSearch {
   /** Agent thread to inspect on open, e.g. the one that opened a linked PR. */
   readonly thread?: string
+  /** Agent thread whose own timeline is open in the conversation. */
+  readonly view?: string
 }
 
 export const Route = createFileRoute('/sessions/$sessionId')({
-  validateSearch: (search: Record<string, unknown>): SessionSearch =>
-    typeof search.thread === 'string' && search.thread ? { thread: search.thread } : {},
+  validateSearch: (search: Record<string, unknown>): SessionSearch => ({
+    ...(typeof search.thread === 'string' && search.thread ? { thread: search.thread } : {}),
+    ...(typeof search.view === 'string' && search.view ? { view: search.view } : {}),
+  }),
   component: SessionPage,
 })
 
 function SessionPage() {
   const { sessionId } = Route.useParams()
-  const { thread } = Route.useSearch()
-  return <SessionWorkspace key={sessionId} runId={sessionId} focusThreadId={thread} />
+  const { thread, view } = Route.useSearch()
+  const navigate = Route.useNavigate()
+
+  // The open thread lives in the URL, so a timeline can be linked to and Back leaves it.
+  const openThread = useCallback(
+    (threadId: string | undefined) => {
+      void navigate({ search: (previous) => ({ ...previous, view: threadId }) })
+    },
+    [navigate],
+  )
+
+  return (
+    <SessionWorkspace
+      key={sessionId}
+      runId={sessionId}
+      focusThreadId={thread}
+      viewParam={view}
+      onOpenThread={openThread}
+    />
+  )
 }
 
 /**
@@ -108,7 +133,17 @@ const ARTIFACTS_SHORTCUT = { key: 'b', shift: true } as const
 const EVENTS_SHORTCUT = { key: 'j' } as const
 const PALETTE_SHORTCUT = { key: 'k' } as const
 
-function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThreadId?: string }) {
+function SessionWorkspace({
+  runId,
+  focusThreadId,
+  viewParam,
+  onOpenThread,
+}: {
+  runId: string
+  focusThreadId?: string
+  viewParam?: string
+  onOpenThread: (threadId: string | undefined) => void
+}) {
   const store = useRunStore(runId)
   const summary = useRunSummary(store)
   const tree = useThreadTree(store)
@@ -181,6 +216,49 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
   )
 
   const [paletteOpen, setPaletteOpen] = useState(false)
+
+  // The conversation shows one timeline at a time: the session's top level, or one agent's.
+  // The session's own thread is the top level.
+  const viewThreadId = viewParam && viewParam !== tree.root?.threadId ? viewParam : undefined
+
+  // The agents above the open thread, top down, ending with it.
+  const viewPath = useMemo(
+    () => (viewThreadId ? threadPath(viewThreadId, threadParents(tree.root)) : []),
+    [viewThreadId, tree.root],
+  )
+
+  const leaveThread = useCallback(() => {
+    // One level up. From an agent the top level delegated to, that is the session itself,
+    // which already shows the delegating agent's side of the work.
+    onOpenThread(viewPath.length > 2 ? viewPath.at(-2) : undefined)
+  }, [onOpenThread, viewPath])
+
+  useEffect(() => {
+    if (!viewThreadId) {
+      return
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target
+
+      // Escape belongs first to whatever is open or being typed into.
+      if (
+        event.key !== 'Escape' ||
+        event.defaultPrevented ||
+        (target instanceof HTMLElement &&
+          (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) ||
+        document.querySelector('[role="dialog"], [role="menu"], [role="listbox"]')
+      ) {
+        return
+      }
+
+      leaveThread()
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [viewThreadId, leaveThread])
 
   // Everything the default view keeps out of sight, findable by name.
   const commands: Command[] = [
@@ -403,16 +481,14 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
                       identities={identities}
                       eventCounts={eventCounts}
                       totalEventCount={events.length}
-                      selectedThreadId={selectedThreadId}
+                      selectedThreadId={viewThreadId ?? selectedThreadId}
                       showCounts={eventsOpen}
                       onSelect={(threadId) => {
+                        // Picking an agent opens its timeline. Event history, when it is
+                        // open, follows along.
                         setSelectedThreadId(threadId)
                         setSelectedSeq(undefined)
-
-                        // Picking an agent is asking what it did: show its events.
-                        if (threadId) {
-                          setEventsOpen(true)
-                        }
+                        onOpenThread(threadId)
                       }}
                       onStop={(threadId) => stopThread(runId, threadId)}
                     />
@@ -436,6 +512,9 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
                   eventsOpen={eventsOpen}
                   onToggleEvents={() => setEventsOpen(!eventsOpen)}
                   onOpenPalette={() => setPaletteOpen(true)}
+                  viewPath={viewPath}
+                  onOpenThread={onOpenThread}
+                  onLeaveThread={leaveThread}
                   leading={
                     layout === 'three' && !agentsOpen ? (
                       <PaneToggle
@@ -470,6 +549,9 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
                     identities={identities}
                     onInspect={inspect}
                     onOpenArtifact={openArtifact}
+                    root={tree.root}
+                    openThreadId={viewThreadId}
+                    onOpenThread={onOpenThread}
                   />
                   <Composer
                     runId={runId}
@@ -478,6 +560,7 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
                     identities={identities}
                     disabled={summary.finished}
                     showExamples={!hasInterjected}
+                    targetThreadId={viewThreadId}
                     context={
                       <>
                         {folder ? (
@@ -663,6 +746,9 @@ function SessionTitleBar({
   eventsOpen,
   onToggleEvents,
   onOpenPalette,
+  viewPath,
+  onOpenThread,
+  onLeaveThread,
   leading,
   trailing,
 }: {
@@ -680,6 +766,10 @@ function SessionTitleBar({
   eventsOpen: boolean
   onToggleEvents: () => void
   onOpenPalette: () => void
+  /** The agents above the open thread, top down, ending with it. Empty at the top level. */
+  viewPath: readonly string[]
+  onOpenThread: (threadId: string | undefined) => void
+  onLeaveThread: () => void
   /** Sits before the title: the control that brings back a closed agents pane. */
   leading?: ReactNode
   /** Sits at the far end: the control that shows or hides the artifacts pane. */
@@ -721,9 +811,19 @@ function SessionTitleBar({
               </span>
             </>
           ) : null}
-          <h1 className="min-w-0 truncate text-[13px] font-medium" dir="auto" title={title}>
-            {title}
-          </h1>
+          {viewPath.length === 0 ? (
+            <h1 className="min-w-0 truncate text-[13px] font-medium" dir="auto" title={title}>
+              {title}
+            </h1>
+          ) : (
+            <ThreadBreadcrumb
+              title={title}
+              path={viewPath}
+              labelFor={labelFor}
+              onOpenThread={onOpenThread}
+              onLeave={onLeaveThread}
+            />
+          )}
         </div>
       </div>
       <div className="flex items-center gap-0.5">
@@ -768,6 +868,82 @@ function SessionTitleBar({
         {trailing}
       </div>
     </header>
+  )
+}
+
+/**
+ * Where the open timeline sits: the session, the agents above it, then the agent itself. Each
+ * step but the last goes back to that level.
+ */
+function ThreadBreadcrumb({
+  title,
+  path,
+  labelFor,
+  onOpenThread,
+  onLeave,
+}: {
+  title: string
+  path: readonly string[]
+  labelFor: (threadId: string | null) => string | undefined
+  onOpenThread: (threadId: string | undefined) => void
+  onLeave: () => void
+}) {
+  const crumbClass =
+    'text-muted-foreground hover:text-foreground min-w-0 truncate text-[13px] transition-colors duration-100'
+
+  return (
+    <nav aria-label="Open thread" className="flex min-w-0 items-center gap-1">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon-sm" aria-label="Back" onClick={onLeave}>
+            <ArrowLeft />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" align="start">
+          <span className="inline-flex items-center gap-1.5">
+            Back <Kbd>Esc</Kbd>
+          </span>
+        </TooltipContent>
+      </Tooltip>
+      <button
+        type="button"
+        onClick={() => onOpenThread(undefined)}
+        title={title}
+        dir="auto"
+        className={cn(crumbClass, 'hidden max-w-48 shrink @lg:block')}
+      >
+        {title}
+      </button>
+      {path.map((threadId, index) => {
+        const last = index === path.length - 1
+        const label = labelFor(threadId) ?? 'Agent'
+
+        return (
+          <Fragment key={threadId}>
+            <ChevronRight
+              aria-hidden
+              className={cn(
+                'text-muted-foreground/60 size-3 shrink-0',
+                // The first separator follows the title, which is hidden where space is short.
+                index === 0 && 'hidden @lg:block',
+                !last && index > 0 && 'hidden @2xl:block',
+              )}
+            />
+            {last ? (
+              <h1 className="min-w-0 truncate text-[13px] font-medium">{label}</h1>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onOpenThread(threadId)}
+                className={cn(crumbClass, 'hidden shrink-0 @2xl:block')}
+              >
+                {label}
+              </button>
+            )}
+          </Fragment>
+        )
+      })}
+    </nav>
   )
 }
 

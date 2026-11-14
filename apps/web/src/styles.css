@@ -401,6 +401,27 @@
   animation: knot-in 250ms var(--ease-snappy) 900ms both;
 }
 
+/*
+ * The conversation keeps message times out of the way: each shows while its row is hovered or
+ * holds focus. The space stays reserved, so nothing moves when one appears. Where there is no
+ * hover, as on a touch screen, times always show.
+ */
+.message-row .message-time {
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+
+.message-row:hover .message-time,
+.message-row:focus-within .message-time {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .message-row .message-time {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .lost-shuttle,
   .lost-trail,

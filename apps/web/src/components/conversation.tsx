@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
+import { StatusDot } from '@/components/status-dot'
 import type { AgentIdentity } from '@/lib/agents'
 import { agentRole } from '@/lib/agents'
 import { answerQuestion, decideStructuredApproval, reroute, stopSession } from '@/lib/api'
@@ -28,6 +29,7 @@ import { jsonFields, jsonText } from '@/lib/json'
 import { provisionalRouteSummary, routeStyles } from '@/lib/routes'
 import {
   deriveRouteWaitFallback,
+  resolveThreadActivityTone,
   type RouteWaitFallback,
   type SessionActivityState,
 } from '@/lib/session-activity'
@@ -42,9 +44,19 @@ import {
   type ThoughtInfo,
   type ToolCallItem,
 } from '@/lib/session-feed'
+import { statusClass, statusLabel } from '@/lib/status'
 import { useTenant } from '@/lib/tenant'
 import { clockTime } from '@/lib/time'
+import {
+  projectTimeline,
+  repeatedMessages,
+  threadParents,
+  threadSpeaks,
+  type DelegationRow,
+  type TimelineRow,
+} from '@/lib/timeline'
 import { useNow } from '@/lib/use-now'
+import type { ThreadNode } from '@swirls/looms/core'
 
 import { FollowList } from './follow-list'
 import { Markdown } from './markdown'
@@ -61,7 +73,7 @@ import { EmptyState } from './ui/panel'
 import { Textarea } from './ui/textarea'
 
 type Row =
-  | FeedItem
+  | TimelineRow
   | {
       readonly kind: 'stream'
       readonly id: string
@@ -86,6 +98,11 @@ interface ConversationContext {
   readonly identities: ReadonlyMap<string, AgentIdentity>
   readonly onInspect: (threadId: string, seq?: number) => void
   readonly onOpenArtifact?: OpenArtifact
+  /** Opens an agent's own timeline. */
+  readonly onOpenThread: (threadId: string) => void
+  readonly threadNodes: ReadonlyMap<string, ThreadNode>
+  /** Agent messages that repeat an earlier one, which fold to a line. */
+  readonly repeats: ReadonlySet<string>
   readonly thoughtOpen: ReadonlyMap<string, boolean>
   readonly setThoughtOpen: (key: string, open: boolean) => void
   readonly liveByToolCardId: ReadonlyMap<string, StreamingTurn>
@@ -155,6 +172,7 @@ function rowSpeakerThreadId(row: Row | undefined): string | undefined {
       return row.threadId
     case 'user':
     case 'notice':
+    case 'delegation':
       return undefined
 
     default: {
@@ -172,6 +190,9 @@ export function Conversation({
   identities,
   onInspect,
   onOpenArtifact,
+  root,
+  openThreadId,
+  onOpenThread,
 }: {
   runId: string
   feed: SessionFeed
@@ -181,7 +202,27 @@ export function Conversation({
   onInspect: (threadId: string, seq?: number) => void
   /** Left out, messages carry no links into the artifacts pane. */
   onOpenArtifact?: OpenArtifact
+  /** The session's threads, which decide what the timeline folds away. */
+  root: ThreadNode | null
+  /** The agent whose own timeline is open. Left out, it is the session's top level. */
+  openThreadId?: string
+  onOpenThread: (threadId: string) => void
 }) {
+  const { parents, threadNodes } = useMemo(() => {
+    const nodes = new Map<string, ThreadNode>()
+
+    function visit(node: ThreadNode) {
+      nodes.set(node.threadId, node)
+      node.children.forEach(visit)
+    }
+
+    if (root) {
+      visit(root)
+    }
+
+    return { parents: threadParents(root), threadNodes: nodes }
+  }, [root])
+
   const { rows, liveByToolCardId, inlineNarratorByMessageId } = useMemo(() => {
     let lastUserIndex = -1
 
@@ -212,7 +253,8 @@ export function Conversation({
     const liveRows: Row[] = []
 
     for (const [threadId, turn] of Object.entries(streaming)) {
-      if (feed.narrators[threadId]) {
+      // A thread that is folded away or outside this view has no bubble of its own.
+      if (feed.narrators[threadId] || !threadSpeaks(threadId, parents, openThreadId)) {
         continue
       }
 
@@ -253,16 +295,21 @@ export function Conversation({
       }
     }
 
-    const visibleItems = feed.items.filter(
-      (item) => !(item.kind === 'agent' && item.replyTo !== undefined),
-    )
+    // At the top level a narrator's reply sits under the message it answers. Inside the
+    // narrator's own thread there is no such message, so it shows in the timeline.
+    const visibleItems =
+      openThreadId === undefined
+        ? feed.items.filter((item) => !(item.kind === 'agent' && item.replyTo !== undefined))
+        : feed.items
 
     return {
-      rows: [...visibleItems, ...liveRows],
+      rows: [...projectTimeline(visibleItems, parents, openThreadId), ...liveRows],
       liveByToolCardId: attached,
       inlineNarratorByMessageId: narratorRepliesByMessageId,
     }
-  }, [feed.items, feed.narrators, streaming])
+  }, [feed.items, feed.narrators, streaming, parents, openThreadId])
+
+  const repeats = useMemo(() => repeatedMessages(feed.items), [feed.items])
 
   // History replayed on load renders still; live arrivals settle in once, even if virtualization remounts them.
   const [mountedAt] = useState(() => Date.now())
@@ -293,6 +340,9 @@ export function Conversation({
       identities,
       onInspect,
       onOpenArtifact,
+      onOpenThread,
+      threadNodes,
+      repeats,
       thoughtOpen,
       setThoughtOpen,
       liveByToolCardId,
@@ -306,6 +356,9 @@ export function Conversation({
       identities,
       onInspect,
       onOpenArtifact,
+      onOpenThread,
+      threadNodes,
+      repeats,
       thoughtOpen,
       setThoughtOpen,
       liveByToolCardId,
@@ -316,6 +369,8 @@ export function Conversation({
 
   return (
     <FollowList
+      // A different thread is a different timeline: start it at its latest, not mid-scroll.
+      key={openThreadId ?? 'session'}
       items={rows}
       getKey={(row) => row.id}
       estimateSize={72}
@@ -325,15 +380,21 @@ export function Conversation({
       viewportClassName="conversation-fade"
       itemClassName="px-4 sm:px-6"
       empty={
-        <EmptyState icon={<MessageSquareDashed />} title="Connecting to the session">
-          Events stream in from the Durable Object as soon as the run starts.
-        </EmptyState>
+        openThreadId === undefined ? (
+          <EmptyState icon={<MessageSquareDashed />} title="Connecting to the session">
+            Events stream in from the Durable Object as soon as the run starts.
+          </EmptyState>
+        ) : (
+          <EmptyState icon={<MessageSquareDashed />} title="Nothing here yet">
+            This agent has not said or done anything so far.
+          </EmptyState>
+        )
       }
       renderItem={(row, index) => {
         const previousThreadId = rowSpeakerThreadId(index > 0 ? rows[index - 1] : undefined)
 
         return (
-          <div className="mx-auto w-full max-w-3xl py-1.5">
+          <div className="message-row mx-auto w-full max-w-3xl py-1.5">
             <RowView
               row={row}
               previousThreadId={previousThreadId}
@@ -406,6 +467,8 @@ const RowView = memo(function RowView({
       return <QuestionCard className={className} item={row} context={context} />
     case 'notice':
       return <Notice className={className} item={row} context={context} />
+    case 'delegation':
+      return <DelegationCard className={className} row={row} context={context} />
     case 'stream':
       return (
         <AgentBubble
@@ -464,7 +527,7 @@ function UserMessage({
           <span className="text-foreground/80 font-medium">
             {item.goal ? 'Goal' : item.author && item.author.id !== me ? item.author.name : 'You'}
           </span>
-          <span className="tabular-nums">{clockTime(item.ts)}</span>
+          <span className="message-time tabular-nums">{clockTime(item.ts)}</span>
         </div>
         <div
           className={cn(
@@ -529,6 +592,7 @@ function InlineNarratorReplies({
           thought={item.thought}
           ts={item.ts}
           seq={item.seq}
+          repeat={context.repeats.has(item.id)}
           context={context}
           onInspect={context.onInspect}
         />
@@ -865,6 +929,7 @@ function AgentBubble({
   seq,
   replyTo,
   streaming = false,
+  repeat = false,
   context,
   onInspect,
   className,
@@ -881,6 +946,8 @@ function AgentBubble({
   seq?: number
   replyTo?: string
   streaming?: boolean
+  /** Says what an earlier message already said, so it starts folded to one line. */
+  repeat?: boolean
   context?: ConversationContext
   onInspect: (threadId: string, seq?: number) => void
   className?: string
@@ -904,6 +971,10 @@ function AgentBubble({
         : null
 
   const open = key && context ? Boolean(context.thoughtOpen.get(key)) : false
+  // A finished thought of a second or so is routine, and is left out.
+  const [repeatShown, setRepeatShown] = useState(false)
+  const folded = repeat && !repeatShown
+  const briefThought = !activelyThinking && durationMs !== undefined && durationMs < 2000
 
   return (
     <div className={cn('flex gap-3', className)}>
@@ -918,19 +989,32 @@ function AgentBubble({
             {identity?.label ?? 'Agent'}
           </button>
           {ts !== undefined ? (
-            <span className="shrink-0 whitespace-nowrap tabular-nums">{clockTime(ts)}</span>
+            <span className="message-time shrink-0 whitespace-nowrap tabular-nums">
+              {clockTime(ts)}
+            </span>
           ) : null}
           {status ? (
             <span className="text-status-running shrink-0 whitespace-nowrap">{status}</span>
           ) : null}
         </div>
-        {replyTo ? (
+        {folded ? (
+          <button
+            type="button"
+            onClick={() => setRepeatShown(true)}
+            aria-expanded={false}
+            className="text-muted-foreground/80 hover:text-foreground mt-1 inline-flex max-w-full items-center gap-1 text-left text-[12.5px] transition-colors duration-100"
+          >
+            <ChevronRight className="size-3 shrink-0" />
+            <span className="truncate">Same reply as before</span>
+          </button>
+        ) : null}
+        {replyTo && !folded ? (
           <p className="text-muted-foreground mt-1 flex items-center gap-1 truncate text-[11px]">
             <CornerDownRight className="size-3 shrink-0" />
             <span className="truncate italic">{replyTo}</span>
           </p>
         ) : null}
-        {thinkingText && key && context ? (
+        {thinkingText && key && context && !folded && !briefThought ? (
           <ThinkingTrace
             text={thinkingText}
             durationMs={activelyThinking ? undefined : durationMs}
@@ -939,7 +1023,7 @@ function AgentBubble({
             onToggle={() => context.setThoughtOpen(key, !open)}
           />
         ) : null}
-        {replyText ? (
+        {replyText && !folded ? (
           <Markdown
             text={text}
             className={cn(
@@ -948,7 +1032,7 @@ function AgentBubble({
             )}
           />
         ) : null}
-        {replyText && !streaming && context?.onOpenArtifact ? (
+        {replyText && !streaming && !folded && context?.onOpenArtifact ? (
           <PreviewLinks text={text ?? ''} onOpen={context.onOpenArtifact} />
         ) : null}
       </div>
@@ -1020,6 +1104,7 @@ function AgentMessage({
       ts={item.ts}
       seq={item.seq}
       replyTo={replyTo}
+      repeat={context.repeats.has(item.id)}
       context={context}
       onInspect={context.onInspect}
     />
@@ -1150,9 +1235,8 @@ function ToolActivity({
   const running = runningCalls.length
   const lastRunningCall = runningCalls.at(-1)
   const failed = item.calls.filter((call) => call.status === 'error').length
-  // Short bursts stay expanded; long ones collapse until the reader opens them.
-  const [choice, setOpen] = useState<boolean | null>(null)
-  const open = choice ?? item.calls.length <= 4
+  // A burst shows as its one-line summary until the reader opens it.
+  const [open, setOpen] = useState(false)
 
   const summary =
     running > 0
@@ -1298,6 +1382,74 @@ function ToolActivity({
   )
 }
 
+/**
+ * An agent's delegated work as one row: who did it, what it came to, and whether it is still
+ * going. Opening it shows that agent's own timeline.
+ */
+function DelegationCard({
+  row,
+  context,
+  className,
+}: {
+  row: DelegationRow
+  context: ConversationContext
+  className?: string
+}) {
+  const identity = context.identities.get(row.threadId)
+  const node = context.threadNodes.get(row.threadId)
+  const tone = node ? resolveThreadActivityTone(context.activity, node) : 'idle'
+  const label = identity?.label ?? 'Agent'
+
+  const facts = [
+    row.agents > 1 ? `${row.agents.toLocaleString()} agents` : null,
+    row.toolCalls > 0
+      ? `${row.toolCalls.toLocaleString()} ${row.toolCalls === 1 ? 'step' : 'steps'}`
+      : null,
+    row.changedFiles > 0
+      ? `${row.changedFiles.toLocaleString()} ${row.changedFiles === 1 ? 'file' : 'files'} changed`
+      : null,
+  ].filter((fact) => fact !== null)
+
+  return (
+    <div className={cn('pl-10', className)}>
+      <button
+        type="button"
+        onClick={() => context.onOpenThread(row.threadId)}
+        aria-label={`Open ${label}'s work`}
+        className="group/delegation bg-card/60 hover:bg-accent/50 ease-snappy flex w-full min-w-0 items-center gap-2.5 rounded-xl border px-3 py-2 text-left transition-[background-color,transform] duration-150 active:scale-[0.995]"
+      >
+        <AgentAvatar identity={identity} threadId={row.threadId} />
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="flex min-w-0 items-center gap-2 text-[12px]">
+            <span className="text-foreground/90 shrink-0 font-medium">{label}</span>
+            <StatusDot status={tone} />
+            {tone === 'idle' || tone === 'completed' ? null : (
+              <span className={cn('shrink-0 text-[11px]', statusClass(tone))}>
+                {statusLabel(tone)}
+              </span>
+            )}
+            <span className="text-muted-foreground min-w-0 truncate text-[11.5px] tabular-nums">
+              {facts.join(' · ')}
+            </span>
+            {row.failed > 0 ? (
+              <span className="text-status-failed inline-flex shrink-0 items-center gap-1 text-[11.5px] tabular-nums">
+                <TriangleAlert className="size-3" />
+                {row.failed.toLocaleString()} failed
+              </span>
+            ) : null}
+          </span>
+          {row.lastText ? (
+            <span className="text-muted-foreground truncate text-[12px]" dir="auto">
+              {cleanSnippet(row.lastText.split('\n').find((line) => line.trim()) ?? '')}
+            </span>
+          ) : null}
+        </span>
+        <ChevronRight className="text-muted-foreground group-hover/delegation:text-foreground size-3.5 shrink-0 transition-colors duration-100" />
+      </button>
+    </div>
+  )
+}
+
 function QuestionCard({
   item,
   context,
@@ -1366,7 +1518,9 @@ function AskUserCard({
           >
             {identity?.label ?? 'Agent'} asks
           </button>
-          <span className="shrink-0 whitespace-nowrap tabular-nums">{clockTime(item.ts)}</span>
+          <span className="message-time shrink-0 whitespace-nowrap tabular-nums">
+            {clockTime(item.ts)}
+          </span>
           {item.decision ? null : (
             <span className="text-brand ml-auto shrink-0 whitespace-nowrap">Waiting on you</span>
           )}
@@ -1518,7 +1672,9 @@ function PullReviewCard({
             className={cn('size-3.5 shrink-0', item.decision ? undefined : 'text-brand')}
           />
           <span className="text-foreground/90 font-medium">Submit review</span>
-          <span className="shrink-0 whitespace-nowrap tabular-nums">{clockTime(item.ts)}</span>
+          <span className="message-time shrink-0 whitespace-nowrap tabular-nums">
+            {clockTime(item.ts)}
+          </span>
           {item.decision ? null : (
             <span className="text-brand ml-auto shrink-0">Needs approval</span>
           )}

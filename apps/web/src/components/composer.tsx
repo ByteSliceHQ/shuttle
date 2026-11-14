@@ -89,6 +89,7 @@ export function Composer({
   disabled = false,
   showExamples = true,
   context,
+  targetThreadId,
 }: {
   runId: string
   /** Which agent runs this session. Owned by the session page, which also names the agent. */
@@ -97,12 +98,25 @@ export function Composer({
   identities: ReadonlyMap<string, AgentIdentity>
   disabled?: boolean
   showExamples?: boolean
+  /**
+   * The agent whose timeline is open. Messages go to it while it is, unless the sender picks
+   * someone else.
+   */
+  targetThreadId?: string
   /** What the session works from (repos, brief), shown under the composer on the left. */
   context?: ReactNode
 }) {
   const [text, setText] = useState('')
   const [kind, setKind] = useState<InterjectionKind | typeof AUTO>(AUTO)
-  const [target, setTarget] = useState<string>(AUTO)
+  const [target, setTarget] = useState<string>(targetThreadId ?? AUTO)
+  const [followedThreadId, setFollowedThreadId] = useState(targetThreadId)
+
+  // Opening or leaving an agent's timeline re-aims the composer at it.
+  if (followedThreadId !== targetThreadId) {
+    setFollowedThreadId(targetThreadId)
+    setTarget(targetThreadId ?? AUTO)
+  }
+
   const [model, setModel] = useState<OpenRouterModelId>(() => readStoredLlmModel())
   const [team, setTeam] = useState<Team>(DEFAULT_TEAM)
   const [vendorChoices, setVendorChoices] = useState<VendorModelChoices>({})
