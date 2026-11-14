@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button'
 import { PanelHeader, PanelTitle } from '@/components/ui/panel'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { agentIdentities, withVendorAgents } from '@/lib/agents'
-import { fetchSessionHarness, type HarnessId } from '@/lib/api'
+import { fetchSessionHarness, stopThread, type HarnessId } from '@/lib/api'
 import { shortId } from '@/lib/cn'
 import { possessive, useOrgPeople } from '@/lib/org-people'
 import { authoredPullsForSession, pullInbox, usePullsRunId, type PullInboxState } from '@/lib/pulls'
@@ -171,7 +171,6 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
       onClearThread={() => setSelectedThreadId(undefined)}
       selectedSeq={selectedSeq}
       onSelectSeq={setSelectedSeq}
-      identities={identities}
       focusEventsToken={focusEventsToken}
     />
   )
@@ -213,6 +212,7 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
                     setSelectedThreadId(threadId)
                     setSelectedSeq(undefined)
                   }}
+                  onStop={(threadId) => stopThread(runId, threadId)}
                 />
               </aside>
             </ResizablePanel>

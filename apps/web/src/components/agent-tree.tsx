@@ -1,4 +1,4 @@
-import { ChevronRight, Layers } from 'lucide-react'
+import { ChevronRight, Layers, LoaderCircle, Square } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 
 import type { AgentIdentity } from '@/lib/agents'
@@ -54,6 +54,7 @@ export function AgentTree({
   totalEventCount,
   selectedThreadId,
   onSelect,
+  onStop,
 }: {
   root: ThreadNode | null
   activityState: SessionActivityState
@@ -62,6 +63,8 @@ export function AgentTree({
   totalEventCount: number
   selectedThreadId: string | undefined
   onSelect: (threadId: string | undefined) => void
+  /** Stops a thread and everything beneath it. Left out, agents cannot be stopped from here. */
+  onStop?: (threadId: string) => Promise<void>
 }) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   const rows = useMemo(() => flatten(root, collapsed), [root, collapsed])
@@ -113,6 +116,8 @@ export function AgentTree({
               collapsed={collapsed.has(row.node.threadId)}
               onToggle={toggle}
               onSelect={onSelect}
+              // The session's own thread is not an agent to stop.
+              onStop={row.depth > 0 ? onStop : undefined}
             />
           ))
         )}
@@ -130,6 +135,7 @@ function TreeRow({
   collapsed,
   onToggle,
   onSelect,
+  onStop,
 }: {
   row: FlatNode
   activityState: SessionActivityState
@@ -139,12 +145,35 @@ function TreeRow({
   collapsed: boolean
   onToggle: (threadId: string) => void
   onSelect: (threadId: string | undefined) => void
+  onStop?: (threadId: string) => Promise<void>
 }) {
   const { node, depth } = row
+  const [stopping, setStopping] = useState(false)
+  const [stopError, setStopError] = useState<string | null>(null)
   const role = identity?.role ?? agentRole(node.definitionName)
   const Icon = role.icon
   const hasChildren = node.children.length > 0
   const tone = resolveThreadActivityTone(activityState, node)
+  const label = identity?.label ?? role.label
+
+  // A thread that has already ended has nothing left to stop.
+  const stoppable =
+    onStop && node.status !== 'completed' && node.status !== 'failed' && node.status !== 'cancelled'
+
+  const stop = () => {
+    if (!onStop || stopping) {
+      return
+    }
+
+    setStopping(true)
+    setStopError(null)
+
+    onStop(node.threadId)
+      .catch((cause: unknown) => {
+        setStopError(cause instanceof Error ? cause.message : 'Could not stop it')
+      })
+      .finally(() => setStopping(false))
+  }
 
   return (
     <div
@@ -187,12 +216,43 @@ function TreeRow({
         onClick={() => onSelect(node.threadId)}
       >
         <Icon className={cn('size-3.5 shrink-0', role.tone)} />
-        <span className="min-w-0 truncate font-medium">{identity?.label ?? role.label}</span>
+        <span className="min-w-0 truncate font-medium">{label}</span>
         <StatusDot status={tone} className="ml-0.5" />
-        <span className="text-muted-foreground ml-auto shrink-0 font-mono text-[10px] tabular-nums">
+        <span
+          className={cn(
+            'text-muted-foreground ml-auto shrink-0 font-mono text-[10px] tabular-nums',
+            // The stop button takes the count's place while the row is hovered or focused.
+            stoppable && 'group-focus-within/row:invisible group-hover/row:invisible',
+            stopping && 'invisible',
+          )}
+        >
           {count}
         </span>
       </button>
+      {stoppable ? (
+        <button
+          type="button"
+          onClick={stop}
+          disabled={stopping}
+          aria-label={hasChildren ? `Stop ${label} and the agents under it` : `Stop ${label}`}
+          title={
+            stopError ?? (hasChildren ? `Stop ${label} and the agents under it` : `Stop ${label}`)
+          }
+          className={cn(
+            'hover:bg-destructive/15 hover:text-destructive focus-visible:ring-ring/50 absolute right-1.5 flex size-5 items-center justify-center rounded-sm outline-none focus-visible:ring-2',
+            stopError ? 'text-destructive' : 'text-muted-foreground',
+            stopping
+              ? 'opacity-100'
+              : 'opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100',
+          )}
+        >
+          {stopping ? (
+            <LoaderCircle className="size-3 animate-spin" />
+          ) : (
+            <Square className="size-2.5 fill-current" />
+          )}
+        </button>
+      ) : null}
     </div>
   )
 }

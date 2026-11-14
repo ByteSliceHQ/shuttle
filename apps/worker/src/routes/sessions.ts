@@ -1,3 +1,5 @@
+import { ACTOR_HEADER } from '@swirls/looms/runtime'
+
 import { getAuth } from '../auth/auth'
 import {
   codeStorageClient,
@@ -44,6 +46,17 @@ export async function handleShuttleRoutes(
 
   if (request.method === 'POST' && sayMatch) {
     return sessionSay(request, env, actor, decodeURIComponent(sayMatch[1] ?? ''))
+  }
+
+  const threadStopMatch = url.pathname.match(/^\/sessions\/([^/]+)\/threads\/([^/]+)\/stop$/)
+
+  if (request.method === 'POST' && threadStopMatch) {
+    return stopThread(
+      env,
+      actor,
+      decodeURIComponent(threadStopMatch[1] ?? ''),
+      decodeURIComponent(threadStopMatch[2] ?? ''),
+    )
   }
 
   const listingMatch = url.pathname.match(/^\/sessions\/([^/]+)\/(rename|archive)$/)
@@ -185,6 +198,49 @@ const INTERJECTION_KINDS = ['question', 'idea', 'constraint', 'correction', 'tas
  *
  * The author is taken from the sign-in, so a message can never be sent in someone else's name.
  */
+/**
+ * Stops one agent thread and every thread beneath it, the way Looms cancels a subtree. The
+ * session itself keeps going: a stopped conductor is started again by the next task.
+ *
+ * The session's own thread cannot be stopped this way. Cancelling it ends the session for good,
+ * which is not what a stop button on an agent means.
+ */
+async function stopThread(
+  env: ShuttleEnv,
+  actor: Actor,
+  runId: string,
+  threadId: string,
+): Promise<Response> {
+  const stub = loomsStub(env.LOOMS_RUN, runId)
+  const run = await stub.getRun()
+
+  if (!run.threads[threadId]) {
+    return Response.json({ error: 'No such agent in this session' }, { status: 404 })
+  }
+
+  if (threadId === run.rootThreadId) {
+    return Response.json({ error: 'The session itself cannot be stopped' }, { status: 400 })
+  }
+
+  const response = await stub.fetch(
+    new Request(`https://shuttle.internal/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: 'POST',
+      // Recorded as the person who pressed stop.
+      headers: { 'content-type': 'application/json', [ACTOR_HEADER]: actor.userId },
+      body: JSON.stringify({ threadId }),
+    }),
+  )
+
+  if (!response.ok) {
+    return Response.json(
+      { error: `Could not stop the agent: ${(await response.text()).slice(0, 300)}` },
+      { status: 502 },
+    )
+  }
+
+  return Response.json({ ok: true, threadId })
+}
+
 async function sessionSay(
   request: Request,
   env: ShuttleEnv,

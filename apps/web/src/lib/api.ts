@@ -102,6 +102,20 @@ export async function say(
   return { messageId }
 }
 
+/** Stops one agent thread in a session, and every thread beneath it. */
+export async function stopThread(runId: string, threadId: string): Promise<void> {
+  const response = await postJson(
+    `/sessions/${encodeURIComponent(runId)}/threads/${encodeURIComponent(threadId)}/stop`,
+    {},
+  )
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null
+
+    throw new Error(body?.error ?? `Could not stop the agent: ${response.status}`)
+  }
+}
+
 export async function reroute(
   runId: string,
   messageId: string,
