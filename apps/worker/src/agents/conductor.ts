@@ -66,7 +66,7 @@ export function createConductorAgent(
       'When you summarize, say which agent did what.',
       'You may run multiple delegate calls in one turn for parallel work only when the tasks touch disjoint files.',
       'Workers share one worktree per repo under /workspace/.wt/<run>/<repo> — parallel edits to the same file will collide.',
-      'When the session lists linked repositories, name the repo worktree path in each task. Changes outside those worktrees (for example /workspace/repos) are never published.',
+      'Name the session worktree path in each task, whether or not repositories are linked. Changes outside the session worktree (for example /workspace/repos, or a new folder under /workspace) are never shown, saved, shared or published.',
       'Container sandboxes ship node, npm, python3, git, rg, curl, and bash; workers may apk add or install project-local deps via bash when needed.',
       'Servers must listen on 0.0.0.0; the user previews them via the Browser tab with a port number (not host localhost). Restart servers after container recycle.',
       'Do not claim files exist on disk unless a worker tool result confirms them — Events history can outlive ephemeral container disk.',

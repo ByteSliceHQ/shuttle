@@ -26,6 +26,7 @@ import {
 } from './llm'
 import { loomsStub } from './looms-stub'
 import { sandboxesArePersonal } from './sandbox/names'
+import { sessionWorkDir } from './sandbox/workspace'
 import { readSandboxBinding, sandboxNameForSession } from './session/bind-sandbox'
 import { prepareSessionSandbox } from './session/handoff'
 import { resolveSponsor } from './session/sponsor'
@@ -174,7 +175,7 @@ export function resolveLlm(
         {
           harness,
           runId,
-          cwd: `/workspace/.wt/${runId}/${binding.repos[0]?.name ?? 'demo'}`,
+          cwd: sessionWorkDir(runId, binding.repos),
           sandbox,
           storage,
           ...(choice ? { choice } : {}),

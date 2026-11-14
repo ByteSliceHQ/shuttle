@@ -1,5 +1,6 @@
 import { shellQuote } from './exec-argv'
 import { repoCheckoutPath, worktreeRepoPath, type ExecOptions, type ExecResult } from './workspace'
+import { baseCommitScript, GIT_IGNORING, IGNORE_SETUP } from './workspace-summary'
 
 /**
  * Moves a session's work between sandboxes through a git remote.
@@ -43,6 +44,8 @@ export function sessionRemoteRefs(runId: string, repoName: string) {
   return {
     branches: `refs/heads/sessions/${runId}/b/`,
     work: `refs/heads/sessions/${runId}/w/${repoName}`,
+    /** The commit the session's work started from, so a saved copy can say what changed. */
+    base: `refs/heads/sessions/${runId}/x/${repoName}`,
   }
 }
 
@@ -142,6 +145,7 @@ export async function snapshotSession(
   runId: string,
   repoName: string,
   remote: SyncRemote,
+  defaultBranch = 'main',
 ): Promise<SessionSnapshot> {
   const refs = sessionRemoteRefs(runId, repoName)
 
@@ -153,12 +157,16 @@ export async function snapshotSession(
     // Stage everything into a copy of the index, so the real index and branch are untouched.
     'index=$(mktemp)',
     'cp "$(git rev-parse --git-path index)" "$index" 2>/dev/null || true',
-    'GIT_INDEX_FILE="$index" git add -A',
+    IGNORE_SETUP,
+    `GIT_INDEX_FILE="$index" ${GIT_IGNORING} add -A`,
+    'rm -f "$ignore"',
     'tree=$(GIT_INDEX_FILE="$index" git write-tree)',
     'rm -f "$index"',
     'snapshot=$(git -c user.name=Shuttle -c user.email=shuttle@local commit-tree "$tree" -p "$headSha" -m "Shuttle snapshot")',
     `branches=$(git for-each-ref --format='%(refname:short)' refs/heads/shuttle/ | grep -E ${shellQuote(sessionBranchPattern(runId))} || true)`,
+    baseCommitScript(defaultBranch),
     `set -- "$snapshot:${refs.work}"`,
+    `if [ -n "$base" ]; then set -- "$@" "$base:${refs.base}"; fi`,
     // Branch names hold no spaces, so the list splits cleanly on whitespace.
     // The remote name drops the `shuttle/<runId>` the local one starts with: see `remoteBranchRef`.
     `for name in $branches; do set -- "$@" "refs/heads/$name:${refs.branches}s\${name#shuttle/${runId}}"; done`,

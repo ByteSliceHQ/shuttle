@@ -54,6 +54,16 @@ import type {
   Workspace,
   WorktreeResult,
 } from './workspace'
+import {
+  adoptStrayScript,
+  baseFileScript,
+  fileDiffScript,
+  isAdoptable,
+  parseWorkspaceSummary,
+  workspaceSummaryScript,
+  type SummaryRepo,
+  type WorkspaceSummary,
+} from './workspace-summary'
 
 /**
  * One sandbox Durable Object per workspace folder (named `folder:<folderId>`).
@@ -67,6 +77,9 @@ import type {
  */
 /** How long a Daytona sandbox is assumed to still be running before it is checked again. */
 const DAYTONA_RECHECK_MS = 60_000
+
+/** Longest a look at the session's files may take, in milliseconds. */
+const SUMMARY_TIMEOUT_MS = 30_000
 
 /** How long an answer to "is it running?" is reused. The Files tab asks every few seconds. */
 const DAYTONA_PEEK_MS = 10_000
@@ -397,6 +410,62 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
     return { mode: this.mode() === 'memory' ? 'memory' : 'container' }
   }
 
+  /** The session's files and what it has changed, repository by repository. */
+  async workspaceSummary(runId: string, repos: readonly SummaryRepo[]): Promise<WorkspaceSummary> {
+    const result = await (
+      await this.workspace()
+    ).exec(workspaceSummaryScript(runId, repos), { timeoutMs: SUMMARY_TIMEOUT_MS })
+
+    return parseWorkspaceSummary(result.stdout)
+  }
+
+  /** One file's changes since the session started, as a unified diff. */
+  async fileDiff(runId: string, repo: SummaryRepo, path: string): Promise<{ diff: string }> {
+    const result = await (
+      await this.workspace()
+    ).exec(fileDiffScript(repo.defaultBranch, path), {
+      cwd: worktreeRepoPath(runId, repo.name),
+      timeoutMs: SUMMARY_TIMEOUT_MS,
+    })
+
+    return { diff: result.stdout }
+  }
+
+  /** One file as it was when the session started. Null when it did not exist then. */
+  async baseFile(
+    runId: string,
+    repo: SummaryRepo,
+    path: string,
+  ): Promise<{ content: string | null }> {
+    const result = await (
+      await this.workspace()
+    ).exec(baseFileScript(repo.defaultBranch, path), {
+      cwd: worktreeRepoPath(runId, repo.name),
+      timeoutMs: SUMMARY_TIMEOUT_MS,
+    })
+
+    return { content: result.exitCode === 0 ? result.stdout : null }
+  }
+
+  /** Moves something an agent left under /workspace into one of the session's repositories. */
+  async adoptStray(
+    runId: string,
+    repoName: string,
+    stray: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    if (!isAdoptable(stray)) {
+      return { ok: false, error: `${stray} cannot be moved into the workspace` }
+    }
+
+    const result = await (
+      await this.workspace()
+    ).exec(adoptStrayScript(stray, worktreeRepoPath(runId, repoName)))
+
+    return result.exitCode === 0
+      ? { ok: true }
+      : { ok: false, error: result.stderr.trim() || 'Could not move it' }
+  }
+
   async gitDiff(cwd?: string): Promise<{ diff: string }> {
     return { diff: await (await this.workspace()).gitDiff(cwd) }
   }
@@ -424,7 +493,7 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
       return {
         snapshot:
           present.exitCode === 0
-            ? await snapshotSession(workspace, runId, repo.name, remote)
+            ? await snapshotSession(workspace, runId, repo.name, remote, repo.defaultBranch)
             : null,
       }
     })

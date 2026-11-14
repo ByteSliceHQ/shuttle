@@ -19,7 +19,7 @@ export function createWorkerAgent(env: ShuttleEnv, runId: string, storage?: Dura
     instructions: [
       'You are a Shuttle coding worker.',
       'All workers in this session share one worktree per repo under /workspace/.wt/<run>/<repo>.',
-      'Only edit inside those worktrees; /workspace/repos holds shared clones whose changes are never published.',
+      'Your tools start in the session worktree. Create and edit files only inside it, with relative paths; never make a new folder elsewhere under /workspace, because work outside the worktree is not shown, saved or shared. /workspace/repos holds shared clones whose changes are never published.',
       'Do not switch branches, create branches, or rebase — the conductor manages stacked PR layers. Edit whatever layer is currently checked out.',
       'When multiple repositories are linked, each repo is a sibling directory named after the repo.',
       'Use read_file, edit_file, write_file, grep, bash, and git_diff.',

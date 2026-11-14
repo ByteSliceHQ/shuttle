@@ -144,7 +144,7 @@ export function buildConductorInput(input: ConductorPromptInput): string {
       ? `\n\nLinked repositories (edit only these session worktrees; Shuttle publishes PRs from them):\n${input.repos
           .map((repo) => `- ${repo.fullName}: ${worktreeRepoPath(input.runId, repo.name)}`)
           .join('\n')}`
-      : `\n\nRepo: ${input.repoUrl ?? 'local demo workspace'}\nNo repositories are linked, so this session cannot open pull requests.`
+      : `\n\nRepo: ${input.repoUrl ?? 'local demo workspace'}\nNo repositories are linked, so this session cannot open pull requests. All work goes in the session worktree, ${worktreeRepoPath(input.runId, 'demo')}: name that path in each task. Files written anywhere else are not shown to the people in the session, not saved, and not shared.`
 
   const restartBlock =
     conductor.status === 'down'

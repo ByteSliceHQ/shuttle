@@ -69,6 +69,7 @@ interface VendorConversation {
  */
 export const SANDBOX_INSTRUCTIONS = [
   'You are working inside Shuttle, in a Linux sandbox container. Your working directory is the worktree for this session.',
+  'Create and edit files only inside that directory. Work anywhere else in the sandbox is not shown to the people in the session, not saved, and not shared with teammates.',
   'Any process you start is stopped when your turn ends, unless you detach it. To run a dev server or anything else that must keep running, start it detached and return immediately:',
   '  setsid nohup <command> > /tmp/<name>.log 2>&1 < /dev/null &',
   'Then confirm it is listening (for example with curl) and read its log if it is not. Never leave a server running in the foreground.',

@@ -50,6 +50,7 @@ import {
   sandboxNameForSession,
   type SandboxBinding,
 } from './session/bind-sandbox'
+import { SANDBOX_HOME_KEY } from './session/handoff'
 import { DEFAULT_TEAM, readPinnedTeam, writeStoredTeam, type Team } from './team'
 import { readSessionAccess, writeSessionAccess, type SessionAccess } from './tenancy/access'
 import { authorizeLoomsRoute, authorizeRun, runIdOfPath } from './tenancy/gate'
@@ -114,14 +115,22 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
     return writeSessionAccess(this.ctx.storage, access)
   }
 
-  /** The sandbox this session bound, or null when it has not bound one yet. */
+  /**
+   * The sandbox that holds this session's files, or null when it has not bound one yet. That is
+   * where it last worked. Before it has worked anywhere, it is where its next turn will run.
+   */
   async getSandboxName(): Promise<string | null> {
     const runId = this.ctx.id.name ?? ''
     const binding = await readSandboxBinding(this.ctx.storage, runId)
 
-    return binding
-      ? sandboxNameForSession(this.env, this.ctx.storage, runId, binding.sandboxName)
-      : null
+    if (!binding) {
+      return null
+    }
+
+    return (
+      (await this.ctx.storage.get<string>(SANDBOX_HOME_KEY)) ??
+      sandboxNameForSession(this.env, this.ctx.storage, runId, binding.sandboxName)
+    )
   }
 
   /** The repositories this session works in. Empty before it binds a sandbox, or with none linked. */

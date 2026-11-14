@@ -4,7 +4,12 @@ import { defineTool } from '@swirls/looms/agent'
 
 import type { ShuttleEnv } from '../env'
 import { sandboxStub } from '../env'
-import type { LinkedSandboxRepo } from '../sandbox/workspace'
+import {
+  insideSessionWorktree,
+  sessionWorkDir,
+  worktreeRoot,
+  type LinkedSandboxRepo,
+} from '../sandbox/workspace'
 import type { SandboxBinding } from '../session/bind-sandbox'
 import { readSandboxBinding, sandboxNameForSession } from '../session/bind-sandbox'
 import { prepareSessionSandbox } from '../session/handoff'
@@ -65,12 +70,21 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
     // Sets the sandbox up, and first moves the session into it if it was working elsewhere.
     await prepareSessionSandbox(env, storage, runId, binding)
 
-    const primary = binding.repos[0]?.name ?? 'demo'
     return {
-      cwd: `/workspace/.wt/${runId}/${primary}`,
+      cwd: sessionWorkDir(runId, binding.repos),
       repos: binding.repos as LinkedSandboxRepo[],
     }
   }
+
+  /** What a tool answers when asked to write somewhere the session's work does not live. */
+  const outside = (path: string, cwd: string) =>
+    insideSessionWorktree(runId, path, cwd)
+      ? null
+      : {
+          path,
+          ok: false,
+          error: `${path} is outside this session's worktree. Files written there are not shown, saved or shared. Write inside ${worktreeRoot(runId)} instead; a relative path starts in ${cwd}.`,
+        }
 
   const onAbort = async (): Promise<void> => {
     const binding = await resolveBinding()
@@ -111,6 +125,12 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
     }),
     handler: async ({ path, content }, ctx) => {
       const { cwd } = await prepare()
+      const refused = outside(path, cwd)
+
+      if (refused) {
+        return refused
+      }
+
       const binding = await resolveBinding()
 
       await withAbort(
@@ -133,6 +153,12 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
     }),
     handler: async ({ path, old_text, new_text }, ctx) => {
       const { cwd } = await prepare()
+      const refused = outside(path, cwd)
+
+      if (refused) {
+        return refused
+      }
+
       const binding = await resolveBinding()
 
       const result = await withAbort(
@@ -195,14 +221,22 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
     description: 'Show the current git diff in the worker worktree',
     input: z.object({}),
     handler: async (_input, ctx) => {
-      const { cwd } = await prepare()
+      const { cwd, repos } = await prepare()
       const binding = await resolveBinding()
+      const sandbox = sandboxStub(env, binding.sandboxName)
 
-      const result = await withAbort(
-        ctx.signal,
-        () => sandboxStub(env, binding.sandboxName).gitDiff(cwd),
-        onAbort,
-      )
+      // With several repositories the starting directory holds them rather than being one.
+      if (repos.length > 1) {
+        const all = await withAbort(
+          ctx.signal,
+          () => sandbox.exec('for repo in */; do (cd "$repo" && git diff); done', { cwd }),
+          onAbort,
+        )
+
+        return { diff: all.stdout }
+      }
+
+      const result = await withAbort(ctx.signal, () => sandbox.gitDiff(cwd), onAbort)
 
       return { diff: result.diff }
     },

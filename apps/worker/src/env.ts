@@ -17,6 +17,7 @@ import type {
   StackStatus,
   WorktreeResult,
 } from './sandbox/workspace'
+import type { SummaryRepo, WorkspaceSummary } from './sandbox/workspace-summary'
 
 export interface ShuttleEnv {
   /**
@@ -122,6 +123,14 @@ export interface SessionSandboxStub {
     options?: ExecOptions,
   ): Promise<{ stdout: string; stderr: string; exitCode: number }>
   gitDiff(cwd?: string): Promise<{ diff: string }>
+  workspaceSummary(runId: string, repos: readonly SummaryRepo[]): Promise<WorkspaceSummary>
+  fileDiff(runId: string, repo: SummaryRepo, path: string): Promise<{ diff: string }>
+  baseFile(runId: string, repo: SummaryRepo, path: string): Promise<{ content: string | null }>
+  adoptStray(
+    runId: string,
+    repoName: string,
+    stray: string,
+  ): Promise<{ ok: boolean; error?: string }>
   kill(execId?: string): Promise<{ ok: true }>
   getMode(): Promise<{ mode: 'memory' | 'container' }>
   isAwake(): Promise<{ awake: boolean }>

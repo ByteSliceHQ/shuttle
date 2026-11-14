@@ -138,3 +138,30 @@ export function worktreeRoot(runId: string): string {
 export function worktreeRepoPath(runId: string, repoName: string): string {
   return `${worktreeRoot(runId)}/${repoName}`
 }
+
+/**
+ * Where a session's agents start: inside its repository when it works in one, and at the root of
+ * its worktree when it works in several, so every repository is a directory beside the others.
+ */
+export function sessionWorkDir(runId: string, repos: readonly { readonly name: string }[]): string {
+  return repos.length > 1 ? worktreeRoot(runId) : worktreeRepoPath(runId, repos[0]?.name ?? 'demo')
+}
+
+/**
+ * Whether `path`, resolved against `cwd`, is inside the session's worktree. Anything written
+ * elsewhere is not shown with the session's files, not saved, and not carried to a teammate's
+ * sandbox.
+ */
+export function insideSessionWorktree(runId: string, path: string, cwd?: string): boolean {
+  const parts: string[] = []
+
+  for (const part of resolvePath(path, cwd).split('/')) {
+    if (part === '..') {
+      parts.pop()
+    } else if (part && part !== '.') {
+      parts.push(part)
+    }
+  }
+
+  return `/${parts.join('/')}/`.startsWith(`${worktreeRoot(runId)}/`)
+}

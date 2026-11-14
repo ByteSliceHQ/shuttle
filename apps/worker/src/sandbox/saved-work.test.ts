@@ -7,8 +7,11 @@ import {
   findSavedWork,
   latestSave,
   listSavedFiles,
+  readSavedBaseFile,
   readSavedFile,
   savedDiffs,
+  savedFileDiff,
+  savedRepoSummary,
   type SavedWorkClient,
 } from './saved-work'
 
@@ -30,7 +33,7 @@ const SCRATCH = scratchRepoName(ORG, RUN)
 const notFound = () => Object.assign(Object.create(NotFoundError.prototype), { message: '404' })
 
 /** Code Storage holding `files` (path to text) on the session's branch in each named repository. */
-function storage(repos: Record<string, Record<string, string>>): SavedWorkClient {
+function storage(repos: Record<string, Record<string, string>>, withBase = true): SavedWorkClient {
   const filesOf = (repoName: string) => {
     const files = repos[repoName]
 
@@ -44,8 +47,13 @@ function storage(repos: Record<string, Record<string, string>>): SavedWorkClient
   return {
     repos: {
       branches: {
-        get: async ({ repo_name: repoName }) => {
+        get: async ({ repo_name: repoName, name }) => {
           filesOf(repoName)
+
+          // Only saves made since the base commit was recorded carry it.
+          if (name.includes('/x/') && !withBase) {
+            throw notFound()
+          }
 
           return { branch: { head_sha: `sha-${repoName}` } }
         },
@@ -72,10 +80,16 @@ function storage(repos: Record<string, Record<string, string>>): SavedWorkClient
         },
       },
       diff: {
-        get: async ({ repo_name: repoName }) => ({
-          files: Object.keys(filesOf(repoName)).map((path) => ({
-            raw: `diff --git a/${path} b/${path}`,
-          })),
+        get: async ({ repo_name: repoName, path: only, base_ref: base }) => ({
+          files: Object.keys(filesOf(repoName))
+            .filter((path) => !only || only.includes(path))
+            .map((path) => ({
+              path,
+              // Against the session's starting point everything here is new; against its last
+              // commit it is an edit.
+              state: base ? 'A' : 'M',
+              raw: `diff --git a/${path} b/${path}`,
+            })),
         }),
       },
     },
@@ -91,6 +105,7 @@ describe('findSavedWork', () => {
         name: 'glue',
         repoName: MIRROR,
         ref: `sessions/${RUN}/w/glue`,
+        baseRef: `sessions/${RUN}/x/glue`,
         sha: `sha-${MIRROR}`,
         savedAt: Date.parse('2026-11-14T02:00:00Z'),
       },
@@ -140,5 +155,50 @@ describe('reading a save', () => {
         diff: 'diff --git a/src/app.ts b/src/app.ts\ndiff --git a/README.md b/README.md\n',
       },
     ])
+  })
+
+  test("a repository's summary lists its files and what the session changed", async () => {
+    const [repo] = await saved
+
+    expect(repo && (await savedRepoSummary(client, repo))).toEqual({
+      name: 'glue',
+      files: ['src/app.ts', 'README.md'],
+      changes: [
+        { path: 'src/app.ts', status: 'A' },
+        { path: 'README.md', status: 'A' },
+      ],
+    })
+  })
+
+  test("one file's changes are read by its path under the worktree", async () => {
+    expect(await savedFileDiff(client, await saved, 'glue/README.md')).toBe(
+      'diff --git a/README.md b/README.md\n',
+    )
+
+    expect(await savedFileDiff(client, await saved, 'other/README.md')).toBe('')
+  })
+
+  test('a file can be read as it was when the session started', async () => {
+    expect(await readSavedBaseFile(client, await saved, 'glue/README.md')).toEqual({
+      content: '# glue\n',
+    })
+
+    // Not there at the start: a new file.
+    expect(await readSavedBaseFile(client, await saved, 'glue/new.ts')).toEqual({ content: null })
+  })
+
+  test('a save made before the base commit was recorded shows what was uncommitted', async () => {
+    // It also uploaded installed dependencies, which are left out when it is read back.
+    const older = storage({ [MIRROR]: { 'a.ts': 'a', 'node_modules/dep/index.js': 'x' } }, false)
+    const [repo] = await findSavedWork(older, ORG, RUN, [glue])
+
+    expect(repo?.baseRef).toBeNull()
+    expect(repo && (await readSavedBaseFile(older, [repo], 'glue/a.ts'))).toBeNull()
+
+    expect(repo && (await savedRepoSummary(older, repo))).toEqual({
+      name: 'glue',
+      files: ['a.ts'],
+      changes: [{ path: 'a.ts', status: 'M' }],
+    })
   })
 })
