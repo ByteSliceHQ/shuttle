@@ -1,5 +1,5 @@
 import { LayoutPanelTop } from 'lucide-react'
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { EventStream } from '@/components/event-stream'
 import { EmptyState } from '@/components/ui/panel'
@@ -9,11 +9,10 @@ import { useSessionTabs } from '@/lib/use-session-tabs'
 import type { ArtifactTab } from '@/lib/workspace'
 
 import { BrowserViewer } from './browser-viewer'
-import { ChangesViewer } from './changes-viewer'
-import { FilesViewer } from './files-viewer'
 import { ReviewViewer } from './review-viewer'
 import { TabStrip } from './tab-strip'
 import { TerminalViewer } from './terminal-viewer'
+import { WorkspaceViewer } from './workspace-viewer'
 
 export function ArtifactPane({
   runId,
@@ -26,7 +25,6 @@ export function ArtifactPane({
   onClearThread,
   selectedSeq,
   onSelectSeq,
-  identities,
   focusEventsToken,
 }: {
   runId: string
@@ -39,7 +37,6 @@ export function ArtifactPane({
   onClearThread?: () => void
   selectedSeq?: number
   onSelectSeq: (seq: number | undefined) => void
-  identities: ReadonlyMap<string, { label: string }>
   /** Bumped when conversation asks to inspect — focuses Events. */
   focusEventsToken?: number
 }) {
@@ -77,6 +74,34 @@ export function ArtifactPane({
     void openTab({ kind: 'events' })
   }, [focusEventsToken, openTab])
 
+  // Go to file, on the shortcut editors use for it. It brings the Files tab forward and opens
+  // its search, from anywhere on the page.
+  const [searchToken, setSearchToken] = useState(0)
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const mac = /mac|iphone|ipad/i.test(navigator.userAgent)
+      const chord = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
+
+      if (!chord || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'p') {
+        return
+      }
+
+      // In a terminal Ctrl+P belongs to the shell: it recalls the previous command.
+      if (!mac && event.target instanceof Element && event.target.closest('.xterm')) {
+        return
+      }
+
+      event.preventDefault()
+      void openTab({ kind: 'files' })
+      setSearchToken(Date.now())
+    }
+
+    window.addEventListener('keydown', onKeyDown, true)
+
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [openTab])
+
   return (
     <div className="bg-sidebar flex h-full min-h-0 flex-col">
       <TabStrip
@@ -90,7 +115,7 @@ export function ArtifactPane({
 
       {orderedTabs.length === 0 ? (
         <EmptyState icon={<LayoutPanelTop />} title="No open tabs">
-          Use + to open Events, Files, Changes, Terminal, or Browser.
+          Use + to open Events, Workspace, Terminal, or Browser.
         </EmptyState>
       ) : (
         <div className="relative min-h-0 flex-1">
@@ -119,8 +144,8 @@ export function ArtifactPane({
                   onClearThread={onClearThread}
                   selectedSeq={selectedSeq}
                   onSelectSeq={onSelectSeq}
-                  identities={identities}
                   refreshEpoch={refreshEpoch}
+                  searchToken={searchToken}
                   onRetarget={(title, target) => void retargetTab(tab.tabId, title, target)}
                 />
               </div>
@@ -144,8 +169,8 @@ function ArtifactViewer({
   onClearThread,
   selectedSeq,
   onSelectSeq,
-  identities,
   refreshEpoch,
+  searchToken,
   onRetarget,
 }: {
   tab: ArtifactTab
@@ -159,8 +184,8 @@ function ArtifactViewer({
   onClearThread?: () => void
   selectedSeq?: number
   onSelectSeq: (seq: number | undefined) => void
-  identities: ReadonlyMap<string, { label: string }>
   refreshEpoch: number
+  searchToken: number
   onRetarget: (title: string, target: string) => void
 }) {
   switch (tab.kind) {
@@ -178,22 +203,21 @@ function ArtifactViewer({
           toolbar
         />
       )
+    // One tab shows the workspace. Tabs saved under its earlier names open it too: a Changes
+    // tab on what changed, a single-file tab on that file.
     case 'files':
-    // Tabs for single files are no longer opened; one saved earlier shows as the Files tab on
-    // that file.
+    case 'changes':
     case 'file':
       return (
-        <FilesViewer
+        <WorkspaceViewer
           key={runId}
           runId={runId}
-          folderId={folderId}
-          identities={identities}
           refreshEpoch={refreshEpoch}
+          searchToken={searchToken}
+          initialFilter={tab.kind === 'changes' ? 'changed' : undefined}
           initialPath={tab.kind === 'file' ? worktreePath(runId, tab.target) : undefined}
         />
       )
-    case 'changes':
-      return <ChangesViewer runId={runId} folderId={folderId} refreshEpoch={refreshEpoch} />
     case 'terminal':
       return <TerminalViewer runId={runId} folderId={folderId} cwd={tab.target} />
     case 'browser':

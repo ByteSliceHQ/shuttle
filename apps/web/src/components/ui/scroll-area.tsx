@@ -10,12 +10,18 @@ function ScrollArea({
   viewportClassName,
   onViewportScroll,
   horizontal = false,
+  vertical = true,
+  barClassName,
   ...props
 }: ComponentProps<typeof ScrollAreaPrimitive.Root> & {
   viewportRef?: Ref<HTMLDivElement>
   viewportClassName?: string
   onViewportScroll?: UIEventHandler<HTMLDivElement>
   horizontal?: boolean
+  /** False for a strip that only scrolls sideways. */
+  vertical?: boolean
+  /** Extra classes for the scrollbars, for example a thinner bar under a row of tabs. */
+  barClassName?: string
 }) {
   return (
     <ScrollAreaPrimitive.Root
@@ -37,8 +43,8 @@ function ScrollArea({
       >
         {children}
       </ScrollAreaPrimitive.Viewport>
-      <ScrollBar />
-      {horizontal ? <ScrollBar orientation="horizontal" /> : null}
+      {vertical ? <ScrollBar className={barClassName} /> : null}
+      {horizontal ? <ScrollBar orientation="horizontal" className={barClassName} /> : null}
       <ScrollAreaPrimitive.Corner />
     </ScrollAreaPrimitive.Root>
   )

@@ -215,7 +215,7 @@ export function tabTitleForKind(kind: ArtifactTabKind, target?: string): string 
     case 'events':
       return 'Events'
     case 'files':
-      return 'Files'
+      return 'Workspace'
     case 'file':
       return target?.split('/').pop() || 'File'
     case 'changes':

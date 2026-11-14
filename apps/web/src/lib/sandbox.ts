@@ -37,6 +37,34 @@ export interface SandboxDiffResponse extends SandboxSource {
   readonly diffs: SandboxDiffEntry[]
 }
 
+/** How a file differs from where the session started: added, modified or deleted. */
+export type ChangeStatus = 'A' | 'M' | 'D'
+
+/** One repository in a session's workspace. */
+export interface WorkspaceRepo {
+  /** Its directory in the workspace. */
+  readonly name: string
+  /** Its name on GitHub. Null for the scratch repository of a folder with none linked. */
+  readonly fullName: string | null
+  /** The branch its changes are measured from. */
+  readonly defaultBranch: string
+  /** Every file, relative to the repository. */
+  readonly files: readonly string[]
+  readonly changes: readonly { readonly path: string; readonly status: ChangeStatus }[]
+}
+
+/** A session's workspace: its repositories, what changed in each, and where it was read from. */
+export interface WorkspaceResponse extends SandboxSource {
+  /** Whether agents are working in the session right now. People edit between turns. */
+  readonly working?: boolean
+  /** Whose sandbox holds the workspace, where each person has one. Null otherwise. */
+  readonly holderId?: string | null
+  readonly repos: readonly WorkspaceRepo[]
+  /** Things written under /workspace but outside the session's workspace. */
+  readonly strays: readonly { readonly path: string; readonly files: number }[]
+  readonly error?: string
+}
+
 export interface SandboxIdentity {
   readonly runId: string
   readonly folderId?: string
@@ -95,6 +123,89 @@ export async function fetchSandboxDiff(identity: SandboxIdentity): Promise<Sandb
   }
 
   return (await response.json()) as SandboxDiffResponse
+}
+
+export async function fetchWorkspace(runId: string): Promise<WorkspaceResponse> {
+  const response = await fetch(`${sandboxBase(runId)}/workspace`)
+  const body = (await response.json()) as WorkspaceResponse
+
+  if (!response.ok || body.error) {
+    throw new Error(body.error ?? `Failed to load the workspace: ${response.status}`)
+  }
+
+  return body
+}
+
+/** One file's changes since the session started. `path` is `<repository>/<path>`. */
+export async function fetchFileDiff(runId: string, path: string): Promise<string> {
+  const response = await fetch(`${sandboxBase(runId)}/diff?${new URLSearchParams({ path })}`)
+
+  if (!response.ok) {
+    throw new Error(`Failed to load changes: ${response.status}`)
+  }
+
+  return ((await response.json()) as { diff: string }).diff
+}
+
+/**
+ * One file as it was when the session started. `content` is null when it did not exist then.
+ * The whole answer is null when that is not known, which is the case for older saved copies.
+ */
+export async function fetchBaseFile(
+  runId: string,
+  path: string,
+): Promise<{ content: string | null } | null> {
+  const response = await fetch(
+    `${sandboxBase(runId)}/file?${new URLSearchParams({ path, version: 'base' })}`,
+  )
+
+  if (response.status === 404) {
+    return null
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to read the file: ${response.status}`)
+  }
+
+  return { content: ((await response.json()) as { content: string | null }).content }
+}
+
+/**
+ * Saves an edit to a file in the workspace. `expected` is the text the edit started from; the
+ * save is refused if the file has changed since, and while agents are working.
+ */
+export async function saveFile(
+  runId: string,
+  path: string,
+  content: string,
+  expected: string,
+): Promise<void> {
+  const response = await fetch(`${sandboxBase(runId)}/write`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path, content, expected }),
+  })
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null
+
+    throw new Error(body?.error ?? `Could not save: ${response.status}`)
+  }
+}
+
+/** Moves something an agent wrote outside the workspace into it. */
+export async function adoptStray(runId: string, path: string): Promise<void> {
+  const response = await fetch(`${sandboxBase(runId)}/adopt`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null
+
+    throw new Error(body?.error ?? `Could not move it: ${response.status}`)
+  }
 }
 
 export function sandboxTerminalUrl(

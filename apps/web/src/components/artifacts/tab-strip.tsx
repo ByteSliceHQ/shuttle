@@ -17,6 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/cn'
 import type { ArtifactTab, ArtifactTabKind } from '@/lib/workspace'
 
@@ -68,7 +69,13 @@ export function TabStrip({
 
   return (
     <div className="flex h-11 shrink-0 items-center gap-0.5 border-b px-1.5">
-      <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+      <ScrollArea
+        horizontal
+        vertical={false}
+        barClassName="h-1.5"
+        className="min-w-0 flex-1"
+        viewportClassName="[&>div]:flex! [&>div]:h-11 [&>div]:w-max [&>div]:items-center [&>div]:gap-0.5"
+      >
         {tabs.map((tab) => {
           const active = tab.tabId === activeTabId
           const closable = tab.kind !== 'events'
@@ -103,7 +110,7 @@ export function TabStrip({
                   onClose(tab.tabId)
                 }
               }}
-              title={tab.title}
+              title={tabLabel(tab)}
               className={cn(
                 'group relative inline-flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] transition-[color,background-color,opacity] duration-100 ease-out',
                 active
@@ -114,13 +121,13 @@ export function TabStrip({
             >
               <span className="text-muted-foreground [&_svg]:size-3.5">{KIND_ICON[tab.kind]}</span>
               <span className="min-w-0 truncate" dir="auto">
-                {tab.title}
+                {tabLabel(tab)}
               </span>
               {closable ? (
                 <span
                   role="button"
                   tabIndex={-1}
-                  aria-label={`Close ${tab.title}`}
+                  aria-label={`Close ${tabLabel(tab)}`}
                   onClick={(event) => {
                     event.stopPropagation()
                     onClose(tab.tabId)
@@ -136,7 +143,7 @@ export function TabStrip({
             </button>
           )
         })}
-      </div>
+      </ScrollArea>
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -145,13 +152,7 @@ export function TabStrip({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <LauncherItem kind="files" label="Files" icon={<Files />} onOpen={onOpen} />
-          <LauncherItem
-            kind="changes"
-            label="Changes"
-            icon={<GitCompareArrows />}
-            onOpen={onOpen}
-          />
+          <LauncherItem kind="files" label="Workspace" icon={<Files />} onOpen={onOpen} />
           <LauncherItem
             kind="terminal"
             label="Terminal"
@@ -165,6 +166,11 @@ export function TabStrip({
       </DropdownMenu>
     </div>
   )
+}
+
+/** A tab's name. The workspace tab was once called Files, and tabs saved then still say so. */
+function tabLabel(tab: ArtifactTab): string {
+  return tab.kind === 'files' ? 'Workspace' : tab.title
 }
 
 function LauncherItem({
