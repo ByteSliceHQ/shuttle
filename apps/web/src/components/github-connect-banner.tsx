@@ -6,6 +6,7 @@ import { cn } from '@/lib/cn'
 
 type GithubConnectResult =
   | 'connected'
+  | 'already_connected'
   | 'missing_installation'
   | 'invalid_state'
   | 'not_found'
@@ -14,6 +15,7 @@ type GithubConnectResult =
 function parseGithubConnectResult(value: string | null): GithubConnectResult | null {
   switch (value) {
     case 'connected':
+    case 'already_connected':
     case 'missing_installation':
     case 'invalid_state':
     case 'not_found':
@@ -28,6 +30,8 @@ function messageFor(result: GithubConnectResult): string {
   switch (result) {
     case 'connected':
       return 'GitHub connected. You can link repos to folders from the sidebar.'
+    case 'already_connected':
+      return 'That GitHub installation is already connected to another Shuttle organization.'
     case 'missing_installation':
       return 'GitHub did not return an installation. Try Connect GitHub again.'
     case 'invalid_state':

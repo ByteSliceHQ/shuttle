@@ -2,6 +2,13 @@ import { ensurePullsQuietly, ensureWorkspaceQuietly } from '../bootstrap'
 import { pullsRunId, workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { getInstallation, listInstallationRepos, signState, verifyState } from '../github/app'
+import {
+  exchangeGithubCode,
+  githubAuthorizeUrl,
+  githubOAuthConfigured,
+  linkInstallations,
+  listAccessibleInstallations,
+} from '../github/user-link'
 import { normalizeWebhook, verifyWebhookSignature } from '../github/webhooks'
 import { loomsStub } from '../looms-stub'
 import { ingestWebhook } from '../pulls/signals'
@@ -11,10 +18,12 @@ import { isOrgId } from '../tenancy/run-id'
 import { connectGithub } from '../workspace/module'
 
 /**
- * Routes GitHub itself calls. They carry no sign-in: a webhook is checked by its signature, and
- * the setup redirect by the signed state that names the organization that started it.
+ * Routes GitHub itself calls or sends the browser back to. They carry no sign-in: a webhook is
+ * checked by its signature, and the setup and callback redirects by the signed state that names
+ * the organization that started them.
  */
 const INSTALL_STATE = 'install:'
+const LINK_STATE = 'link:'
 
 export async function handleGithubPublicRoutes(
   request: Request,
@@ -24,6 +33,10 @@ export async function handleGithubPublicRoutes(
 
   if (request.method === 'GET' && url.pathname === '/github/setup') {
     return finishSetup(url, env)
+  }
+
+  if (request.method === 'GET' && url.pathname === '/github/callback') {
+    return finishLink(url, env)
   }
 
   if (request.method === 'POST' && url.pathname === '/github/webhooks') {
@@ -166,32 +179,137 @@ async function handleWebhook(request: Request, env: ShuttleEnv): Promise<Respons
   return Response.json({ ok: true })
 }
 
-async function startInstall(env: ShuttleEnv, orgId: string): Promise<Response> {
+/** How long a person has to get through GitHub and back. */
+const LINK_STATE_TTL_MS = 15 * 60 * 1000
+
+/** The GitHub page that installs the App, which comes back to `/github/setup`. */
+async function installUrl(env: ShuttleEnv, orgId: string): Promise<string | null> {
   const slug = env.GITHUB_APP_SLUG
 
   if (!slug) {
-    return Response.json({ error: 'GITHUB_APP_SLUG is not configured' }, { status: 503 })
+    return null
   }
 
-  const nonce = crypto.randomUUID()
-  const state = await signState(env, `${INSTALL_STATE}${orgId}:${nonce}:${Date.now()}`)
+  const state = await signState(
+    env,
+    `${INSTALL_STATE}${orgId}:${crypto.randomUUID()}:${Date.now()}`,
+  )
+
   const target = new URL(`https://github.com/apps/${slug}/installations/new`)
+
   target.searchParams.set('state', state)
 
-  return Response.redirect(target.toString(), 302)
+  return target.toString()
 }
 
+/** The GitHub page that identifies the person, which comes back to `/github/callback`. */
+async function authorizeUrl(env: ShuttleEnv, orgId: string): Promise<string> {
+  return githubAuthorizeUrl(
+    env,
+    await signState(env, `${LINK_STATE}${orgId}:${crypto.randomUUID()}:${Date.now()}`),
+  )
+}
+
+/**
+ * Starts connecting GitHub. With the App's OAuth client configured the person first identifies
+ * themselves, so installations they already have can be linked; without it, the only way in is
+ * a fresh install.
+ */
+async function startInstall(env: ShuttleEnv, orgId: string): Promise<Response> {
+  if (githubOAuthConfigured(env)) {
+    return Response.redirect(await authorizeUrl(env, orgId), 302)
+  }
+
+  const target = await installUrl(env, orgId)
+
+  return target
+    ? Response.redirect(target, 302)
+    : Response.json({ error: 'GITHUB_APP_SLUG is not configured' }, { status: 503 })
+}
+
+/**
+ * GitHub sends the person back here once they have identified themselves. Every installation of
+ * the App they can access, and that no other organization has, is linked to theirs.
+ */
+async function finishLink(url: URL, env: ShuttleEnv): Promise<Response> {
+  const webUrl = env.SHUTTLE_WEB_URL ?? 'http://127.0.0.1:5180'
+  const verified = await verifyState(env, url.searchParams.get('state') ?? '')
+  const [kind, orgId, , issuedAt] = verified?.split(':') ?? []
+  const code = url.searchParams.get('code')
+
+  if (
+    `${kind}:` !== LINK_STATE ||
+    !isOrgId(orgId) ||
+    !env.AUTH_DB ||
+    !(Date.now() - Number(issuedAt) < LINK_STATE_TTL_MS)
+  ) {
+    return Response.redirect(`${webUrl}/?github=invalid_state`, 302)
+  }
+
+  // No code means the person declined on GitHub.
+  if (!code) {
+    return Response.redirect(`${webUrl}/?github=error`, 302)
+  }
+
+  try {
+    const userToken = await exchangeGithubCode(env, code)
+
+    const outcome = await linkInstallations(
+      env.AUTH_DB,
+      orgId,
+      await listAccessibleInstallations(env, userToken),
+    )
+
+    if (outcome.kind === 'none') {
+      // Nothing to link yet: send them to install the App, which comes back through setup.
+      return Response.redirect((await installUrl(env, orgId)) ?? `${webUrl}/?github=error`, 302)
+    }
+
+    if (outcome.kind === 'taken') {
+      return Response.redirect(`${webUrl}/?github=already_connected`, 302)
+    }
+
+    await ensureWorkspaceQuietly(env, orgId)
+
+    await loomsStub(env.LOOMS_RUN, workspaceRunId(env, orgId)).signal(
+      outcome.installations.map((installation) =>
+        connectGithub({ installationId: installation.id, account: installation.account }),
+      ),
+    )
+
+    return Response.redirect(`${webUrl}/?github=connected`, 302)
+  } catch (error) {
+    console.error('github link failed', error)
+
+    return Response.redirect(`${webUrl}/?github=error`, 302)
+  }
+}
+
+/**
+ * GitHub sends the person here after installing the App, or after changing an installation.
+ *
+ * With the OAuth client configured, the installation id in the URL is not trusted: the person is
+ * sent on to identify themselves, and only installations GitHub says they can access are linked.
+ * A change to an existing installation arrives with no state at all, and is sent to start over
+ * from the web app, where the person is signed in.
+ */
 async function finishSetup(url: URL, env: ShuttleEnv): Promise<Response> {
   const webUrl = env.SHUTTLE_WEB_URL ?? 'http://127.0.0.1:5180'
   const installationId = Number(url.searchParams.get('installation_id'))
   const state = url.searchParams.get('state') ?? ''
+  const verified = await verifyState(env, state)
+  const orgId = verified?.startsWith(INSTALL_STATE) ? verified.split(':')[1] : undefined
+
+  if (githubOAuthConfigured(env)) {
+    return Response.redirect(
+      isOrgId(orgId) ? await authorizeUrl(env, orgId) : `${webUrl}/github/install`,
+      302,
+    )
+  }
 
   if (!Number.isFinite(installationId) || installationId <= 0) {
     return Response.redirect(`${webUrl}/?github=missing_installation`, 302)
   }
-
-  const verified = await verifyState(env, state)
-  const orgId = verified?.startsWith(INSTALL_STATE) ? verified.split(':')[1] : undefined
 
   if (!isOrgId(orgId) || !env.AUTH_DB) {
     return Response.redirect(`${webUrl}/?github=invalid_state`, 302)
