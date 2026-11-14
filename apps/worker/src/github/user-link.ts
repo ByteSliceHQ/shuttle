@@ -1,5 +1,5 @@
 import type { ShuttleEnv } from '../env'
-import { bindInstallation } from '../tenancy/installations'
+import { connectInstallation } from '../tenancy/installations'
 import type { GithubAccount } from './client'
 
 /**
@@ -24,10 +24,8 @@ export interface AccessibleInstallation {
 }
 
 export type LinkOutcome =
-  /** At least one installation now belongs to this organization. */
+  /** These installations are now connected to this organization. */
   | { readonly kind: 'linked'; readonly installations: readonly AccessibleInstallation[] }
-  /** The person can reach installations, but other Shuttle organizations already have them. */
-  | { readonly kind: 'taken' }
   /** The App is not installed anywhere the person can reach. */
   | { readonly kind: 'none' }
 
@@ -151,8 +149,8 @@ export async function listAccessibleInstallations(
 }
 
 /**
- * Gives `orgId` every installation in `accessible` that no other organization has. An
- * installation belongs to the first organization that links it.
+ * Connects `orgId` to every installation in `accessible`, which GitHub has said the person can
+ * access. Other organizations connected to the same installations keep them.
  */
 export async function linkInstallations(
   db: D1Database,
@@ -163,13 +161,9 @@ export async function linkInstallations(
     return { kind: 'none' }
   }
 
-  const linked: AccessibleInstallation[] = []
-
   for (const installation of accessible) {
-    if ((await bindInstallation(db, installation.id, orgId)) === orgId) {
-      linked.push(installation)
-    }
+    await connectInstallation(db, installation.id, orgId)
   }
 
-  return linked.length > 0 ? { kind: 'linked', installations: linked } : { kind: 'taken' }
+  return { kind: 'linked', installations: accessible }
 }

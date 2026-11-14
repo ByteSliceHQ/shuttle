@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { orgOfInstallation } from '../tenancy/installations'
+import { orgsOfInstallation } from '../tenancy/installations'
 import { migratedD1 } from '../testing/fake-d1'
 import {
   exchangeGithubCode,
@@ -116,23 +116,22 @@ describe('linkInstallations', () => {
       installations: [acme, other],
     })
 
-    expect(await orgOfInstallation(db, 1)).toBe('orgA')
+    expect(await orgsOfInstallation(db, 1)).toEqual(['orgA'])
     // Linking again is harmless.
     expect((await linkInstallations(db, 'orgA', [acme])).kind).toBe('linked')
   })
 
-  test('an installation another organization has stays with it', async () => {
+  test('an installation another organization has is linked to this one too', async () => {
     const db = await migratedD1()
     await linkInstallations(db, 'orgA', [acme])
 
-    // The second organization gets only what is still free.
     expect(await linkInstallations(db, 'orgB', [acme, other])).toEqual({
       kind: 'linked',
-      installations: [other],
+      installations: [acme, other],
     })
 
-    expect(await linkInstallations(db, 'orgC', [acme, other])).toEqual({ kind: 'taken' })
-    expect(await orgOfInstallation(db, 1)).toBe('orgA')
+    expect(await orgsOfInstallation(db, 1)).toEqual(['orgA', 'orgB'])
+    expect(await orgsOfInstallation(db, 2)).toEqual(['orgB'])
   })
 
   test('with nothing installed there is nothing to link', async () => {

@@ -12,7 +12,7 @@ import { syncFolderRepos } from '../pulls/folder-sync'
 import type { AutoReviewMode } from '../pulls/scope'
 import { setRepoPolicy } from '../pulls/signals'
 import type { Actor, SessionAccess } from '../tenancy/access'
-import { orgOfInstallation } from '../tenancy/installations'
+import { installationConnected } from '../tenancy/installations'
 import { scopedRunId } from '../tenancy/run-id'
 import {
   linkRepo,
@@ -303,8 +303,8 @@ async function linkFolderRepo(
     return Response.json({ error: 'installationId, owner, and name are required' }, { status: 400 })
   }
 
-  // The App can read every installation. Only one connected to this organization may be used.
-  if (!env.AUTH_DB || (await orgOfInstallation(env.AUTH_DB, installationId)) !== orgId) {
+  // The App can read every installation. Only one this organization connected may be used.
+  if (!env.AUTH_DB || !(await installationConnected(env.AUTH_DB, installationId, orgId))) {
     return Response.json({ error: 'Repository not found on that installation' }, { status: 404 })
   }
 

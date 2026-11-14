@@ -13,7 +13,7 @@ import { normalizeWebhook, verifyWebhookSignature } from '../github/webhooks'
 import { loomsStub } from '../looms-stub'
 import { ingestWebhook } from '../pulls/signals'
 import type { Actor } from '../tenancy/access'
-import { bindInstallation, orgOfInstallation } from '../tenancy/installations'
+import { claimInstallation, orgsOfInstallation } from '../tenancy/installations'
 import { isOrgId } from '../tenancy/run-id'
 import { connectGithub } from '../workspace/module'
 
@@ -88,19 +88,18 @@ async function handleWebhook(request: Request, env: ShuttleEnv): Promise<Respons
     return Response.json({ ok: true, ignored: normalized.reason })
   }
 
-  // Deliver the event to the organization the installation is connected to, and to no other.
-  const orgId = env.AUTH_DB ? await orgOfInstallation(env.AUTH_DB, normalized.installationId) : null
+  // Deliver the event to every organization the installation is connected to, and to no other.
+  const orgIds = env.AUTH_DB ? await orgsOfInstallation(env.AUTH_DB, normalized.installationId) : []
 
-  if (!orgId) {
+  if (orgIds.length === 0) {
     return Response.json({ ok: true, ignored: 'installation is not connected' })
   }
 
-  await ensurePullsQuietly(env, orgId)
-  const stub = loomsStub(env.LOOMS_RUN, pullsRunId(env, orgId))
+  let signals: ReturnType<typeof ingestWebhook>[] = []
 
   switch (normalized.kind) {
     case 'pull.upserted':
-      await stub.signal([
+      signals = [
         ingestWebhook({
           kind: 'pull.upserted',
           deliveryId: normalized.deliveryId,
@@ -124,11 +123,11 @@ async function handleWebhook(request: Request, env: ShuttleEnv): Promise<Respons
           isFork: normalized.isFork,
           stack: normalized.stack,
         }),
-      ])
+      ]
 
       break
     case 'pull.closed':
-      await stub.signal([
+      signals = [
         ingestWebhook({
           kind: 'pull.closed',
           deliveryId: normalized.deliveryId,
@@ -137,11 +136,11 @@ async function handleWebhook(request: Request, env: ShuttleEnv): Promise<Respons
           number: normalized.number,
           updatedAt: normalized.updatedAt,
         }),
-      ])
+      ]
 
       break
     case 'review.submitted':
-      await stub.signal([
+      signals = [
         ingestWebhook({
           kind: 'review.submitted',
           deliveryId: normalized.deliveryId,
@@ -151,11 +150,11 @@ async function handleWebhook(request: Request, env: ShuttleEnv): Promise<Respons
           verdict: normalized.verdict,
           updatedAt: normalized.updatedAt,
         }),
-      ])
+      ]
 
       break
     case 'checks.updated':
-      await stub.signal([
+      signals = [
         ingestWebhook({
           kind: 'checks.updated',
           deliveryId: normalized.deliveryId,
@@ -165,7 +164,7 @@ async function handleWebhook(request: Request, env: ShuttleEnv): Promise<Respons
           checkRollup: normalized.checkRollup,
           updatedAt: normalized.updatedAt,
         }),
-      ])
+      ]
 
       break
 
@@ -174,6 +173,11 @@ async function handleWebhook(request: Request, env: ShuttleEnv): Promise<Respons
       void exhaustive
       break
     }
+  }
+
+  for (const orgId of orgIds) {
+    await ensurePullsQuietly(env, orgId)
+    await loomsStub(env.LOOMS_RUN, pullsRunId(env, orgId)).signal(signals)
   }
 
   return Response.json({ ok: true })
@@ -265,10 +269,6 @@ async function finishLink(url: URL, env: ShuttleEnv): Promise<Response> {
       return Response.redirect((await installUrl(env, orgId)) ?? `${webUrl}/?github=error`, 302)
     }
 
-    if (outcome.kind === 'taken') {
-      return Response.redirect(`${webUrl}/?github=already_connected`, 302)
-    }
-
     await ensureWorkspaceQuietly(env, orgId)
 
     await loomsStub(env.LOOMS_RUN, workspaceRunId(env, orgId)).signal(
@@ -322,8 +322,10 @@ async function finishSetup(url: URL, env: ShuttleEnv): Promise<Response> {
       return Response.redirect(`${webUrl}/?github=not_found`, 302)
     }
 
-    // An installation belongs to the first organization that connects it.
-    if ((await bindInstallation(env.AUTH_DB, installation.id, orgId)) !== orgId) {
+    // Nothing here proves the person can access this installation, so it can only be taken
+    // while no organization has it. With a client id and secret set, linking goes through
+    // GitHub sign-in instead, and an installation can be connected to several organizations.
+    if (!(await claimInstallation(env.AUTH_DB, installation.id, orgId))) {
       return Response.redirect(`${webUrl}/?github=already_connected`, 302)
     }
 
