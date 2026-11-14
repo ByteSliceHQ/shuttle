@@ -1,10 +1,8 @@
-import { Files } from '@cloudflare/sandbox'
-
 import type { ShuttleEnv } from '../env'
-import { getInstallationToken } from '../github/app'
-import { ensureContainerRunning, type DurableContainer } from './container-runtime'
 import { shellQuote, timedBashArgv } from './exec-argv'
+import type { SandboxHost } from './host'
 import { parentDirectory } from './paths'
+import { repoAccess, repoUrls } from './repo-access'
 import { BASE_CONFIG_KEY, LAYER_CONFIG_KEY, PARENT_CONFIG_KEY } from './stack'
 import { StackWorkspaceOps } from './stack-ops'
 import {
@@ -42,59 +40,78 @@ function recordBaseCommand(worktree: string, branch: string): string {
 }
 
 /**
- * Real Linux workspace backed by a Durable Object container + `@cloudflare/sandbox` Files.
+ * Shell that makes an existing checkout at `target` safe to fetch `cloneUrl` into.
+ *
+ * The same repository cloned from somewhere else (GitHub, before its Code Storage mirror existed)
+ * stays where it is and is pointed at the new source: sessions have worktrees in it. A checkout
+ * of some other repository under this name (the seeded demo repo, which has no origin) is moved
+ * to `aside`, so the linked repository is the one sessions work in.
+ */
+export function settleOriginScript(input: {
+  readonly target: string
+  readonly cloneUrl: string
+  /** Every URL this repository may have been cloned from. */
+  readonly sameRepo: readonly string[]
+  readonly aside: string
+}): string {
+  const target = shellQuote(input.target)
+  const cloneUrl = shellQuote(input.cloneUrl)
+  const parent = shellQuote(input.aside.slice(0, input.aside.lastIndexOf('/')))
+
+  return [
+    `origin=$(git -C ${target} config --get remote.origin.url 2>/dev/null || true);`,
+    `if [ -d ${target}/.git ] && [ "$origin" != ${cloneUrl} ]; then`,
+    `case "$origin" in`,
+    `${input.sameRepo.map(shellQuote).join('|')}) git -C ${target} remote set-url origin ${cloneUrl};;`,
+    `*) mkdir -p ${parent} && mv ${target} ${shellQuote(input.aside)}-$(date +%s);;`,
+    `esac;`,
+    `fi`,
+  ].join(' ')
+}
+
+/**
+ * Real Linux workspace on a `SandboxHost`: a Durable Object container or a Daytona sandbox.
  */
 export class ContainerWorkspace implements Workspace {
   /** One sandbox serves every worker in a session, so kills must target a specific exec. */
   private readonly activePids = new Map<string, number>()
 
   constructor(
-    private readonly getContainer: () => DurableContainer | undefined,
+    /** The host to run on, started if it has to be. Asked for on every operation. */
+    private readonly host: () => Promise<SandboxHost>,
     private readonly env: ShuttleEnv,
+    /** The organization this sandbox belongs to, when it belongs to one. */
+    private readonly orgId: string | null = null,
   ) {}
 
-  private async container(): Promise<DurableContainer> {
-    return ensureContainerRunning(this.getContainer())
-  }
-
-  private files(container: DurableContainer): Files {
-    return new Files(container)
-  }
-
   async ensureRepos(repos: readonly LinkedSandboxRepo[]): Promise<{ root: string }> {
-    const container = await this.container()
-    const files = this.files(container)
-    await files.mkdir('/workspace/repos', { recursive: true })
+    const host = await this.host()
+    await host.mkdir('/workspace/repos')
 
     if (repos.length === 0) {
-      await this.seedDemoRepo(container, files)
+      await this.seedDemoRepo(host)
       return { root: '/workspace' }
     }
 
     for (const repo of repos) {
       const target = repoCheckoutPath(repo.name)
-      const token = await getInstallationToken(this.env, repo.installationId)
-      const basic = btoa(`x-access-token:${token}`)
-      const cloneUrl = `https://github.com/${repo.fullName}.git`
+      const { url: cloneUrl, basicAuth: basic } = await repoAccess(this.env, repo, this.orgId)
+      const sameRepo = repoUrls(this.env, repo, this.orgId)
       const cloning = `${target}.cloning`
 
-      const process = await container.exec([
+      const process = await host.exec([
         'bash',
         '-lc',
         [
-          // A checkout of some other repository under this name (the seeded demo repo, say)
-          // is moved aside so the linked repository is the one sessions work in.
-          `if [ -d ${shellQuote(target)}/.git ] && [ "$(git -C ${shellQuote(target)} config --get remote.origin.url)" != ${shellQuote(cloneUrl)} ]; then`,
-          `  mkdir -p /workspace/.replaced && mv ${shellQuote(target)} /workspace/.replaced/${shellQuote(repo.name)}-$(date +%s);`,
-          `fi;`,
+          `${settleOriginScript({ target, cloneUrl, sameRepo, aside: `/workspace/.replaced/${repo.name}` })};`,
           `if [ -d ${shellQuote(target)}/.git ]; then`,
-          `  git -C ${shellQuote(target)} -c http.extraheader=${shellQuote(`AUTHORIZATION: basic ${basic}`)} fetch --depth 1 origin ${shellQuote(repo.defaultBranch)} &&`,
+          `  git -C ${shellQuote(target)} -c http.extraheader=${shellQuote(`Authorization: Basic ${basic}`)} fetch --depth 1 origin ${shellQuote(repo.defaultBranch)} &&`,
           `  git -C ${shellQuote(target)} checkout -B ${shellQuote(repo.defaultBranch)} FETCH_HEAD;`,
           `else`,
           // Clone beside the target and rename when done, so a `.git` directory at the target
           // always means a finished clone with a real HEAD.
           `  mkdir -p /workspace/repos && rm -rf ${shellQuote(cloning)} &&`,
-          `  git -c http.extraheader=${shellQuote(`AUTHORIZATION: basic ${basic}`)} clone --depth 1 --branch ${shellQuote(repo.defaultBranch)} ${shellQuote(cloneUrl)} ${shellQuote(cloning)} &&`,
+          `  git -c http.extraheader=${shellQuote(`Authorization: Basic ${basic}`)} clone --depth 1 --branch ${shellQuote(repo.defaultBranch)} ${shellQuote(cloneUrl)} ${shellQuote(cloning)} &&`,
           `  rm -rf ${shellQuote(target)} && mv ${shellQuote(cloning)} ${shellQuote(target)};`,
           `fi`,
         ].join(' '),
@@ -107,19 +124,15 @@ export class ContainerWorkspace implements Workspace {
   }
 
   async ensureWorktree(runId: string): Promise<WorktreeResult> {
-    const container = await this.container()
+    const host = await this.host()
     const root = worktreeRoot(runId)
 
-    await this.execWithTimeout(
-      `mkdir -p ${shellQuote(root)}`,
-      { timeoutMs: GREP_TIMEOUT_MS },
-      container,
-    )
+    await this.execWithTimeout(`mkdir -p ${shellQuote(root)}`, { timeoutMs: GREP_TIMEOUT_MS }, host)
 
     const listed = await this.execWithTimeout(
       'ls -1 /workspace/repos 2>/dev/null || true',
       { timeoutMs: GREP_TIMEOUT_MS },
-      container,
+      host,
     )
 
     const names = listed.stdout
@@ -155,7 +168,7 @@ export class ContainerWorkspace implements Workspace {
           `fi`,
         ].join(' '),
         { timeoutMs: GREP_TIMEOUT_MS },
-        container,
+        host,
       )
 
       if (created.exitCode !== 0) {
@@ -292,9 +305,8 @@ export class ContainerWorkspace implements Workspace {
     repo: LinkedSandboxRepo,
     ref: CheckoutRefInput,
   ): Promise<{ root: string }> {
-    const container = await this.container()
-    const token = await getInstallationToken(this.env, repo.installationId)
-    const basic = btoa(`x-access-token:${token}`)
+    const host = await this.host()
+    const { url: cloneUrl, basicAuth: basic } = await repoAccess(this.env, repo, this.orgId)
     const source = repoCheckoutPath(repo.name)
     const target = worktreeRepoPath(runId, repo.name)
     const branch = ref.branch ?? `shuttle/${runId}/${repo.name}`
@@ -303,9 +315,9 @@ export class ContainerWorkspace implements Workspace {
       [
         `mkdir -p /workspace/repos /workspace/.wt/${shellQuote(runId)}`,
         `if [ ! -d ${shellQuote(source)}/.git ]; then`,
-        `  git -c http.extraheader=${shellQuote(`AUTHORIZATION: basic ${basic}`)} clone --depth 1 ${shellQuote(`https://github.com/${repo.fullName}.git`)} ${shellQuote(source)};`,
+        `  git -c http.extraheader=${shellQuote(`Authorization: Basic ${basic}`)} clone --depth 1 ${shellQuote(cloneUrl)} ${shellQuote(source)};`,
         `fi`,
-        `git -C ${shellQuote(source)} -c http.extraheader=${shellQuote(`AUTHORIZATION: basic ${basic}`)} fetch --depth 1 origin ${shellQuote(ref.sha)}`,
+        `git -C ${shellQuote(source)} -c http.extraheader=${shellQuote(`Authorization: Basic ${basic}`)} fetch --depth 1 origin ${shellQuote(ref.sha)}`,
         `if [ -d ${shellQuote(target)} ]; then`,
         `  git -C ${shellQuote(source)} worktree remove --force ${shellQuote(target)} || rm -rf ${shellQuote(target)};`,
         `fi`,
@@ -313,38 +325,33 @@ export class ContainerWorkspace implements Workspace {
         recordBaseCommand(target, branch),
       ].join(' && '),
       { timeoutMs: DEFAULT_EXEC_TIMEOUT_MS },
-      container,
+      host,
     )
 
     return { root: target }
   }
 
   async readFile(path: string, cwd?: string): Promise<string> {
-    const container = await this.container()
-    const response = await this.files(container).readFile(path, cwd ? { cwd } : undefined)
-    return await response.text()
+    return (await this.host()).readFile(resolvePath(path, cwd))
   }
 
   async writeFile(path: string, content: string, cwd?: string): Promise<void> {
-    const container = await this.container()
-    const files = this.files(container)
+    const host = await this.host()
     const resolved = resolvePath(path, cwd)
     const parent = parentDirectory(resolved)
 
     // Match memory-workspace behavior: creating a file implies creating parents.
     if (parent) {
-      await files.mkdir(parent, { recursive: true })
+      await host.mkdir(parent)
     }
 
-    await files.writeFile(resolved, content)
+    await host.writeFile(resolved, content)
   }
 
   async editFile(path: string, oldText: string, newText: string, cwd?: string): Promise<number> {
-    const container = await this.container()
-    const files = this.files(container)
+    const host = await this.host()
     const resolved = resolvePath(path, cwd)
-    const response = await files.readFile(resolved)
-    const current = await response.text()
+    const current = await host.readFile(resolved)
 
     if (!current.includes(oldText)) {
       throw new Error(`edit_file: old_text not found in ${resolved}`)
@@ -354,10 +361,10 @@ export class ContainerWorkspace implements Workspace {
     const parent = parentDirectory(resolved)
 
     if (parent) {
-      await files.mkdir(parent, { recursive: true })
+      await host.mkdir(parent)
     }
 
-    await files.writeFile(resolved, current.split(oldText).join(newText))
+    await host.writeFile(resolved, current.split(oldText).join(newText))
     return replacements
   }
 
@@ -396,8 +403,7 @@ export class ContainerWorkspace implements Workspace {
   }
 
   async exec(command: string, options?: ExecOptions): Promise<ExecResult> {
-    const container = await this.container()
-    return this.execWithTimeout(command, options, container)
+    return this.execWithTimeout(command, options, await this.host())
   }
 
   async gitDiff(cwd?: string): Promise<string> {
@@ -412,46 +418,55 @@ export class ContainerWorkspace implements Workspace {
       return
     }
 
-    const container = await this.container()
-    await container.exec(['kill', '-TERM', String(pid)]).then((process) => process.output())
+    const host = await this.host()
+    await host.exec(['kill', '-TERM', String(pid)]).then((process) => process.output())
   }
 
-  private async seedDemoRepo(container: DurableContainer, files: Files): Promise<void> {
+  private async seedDemoRepo(host: SandboxHost): Promise<void> {
     // Only an empty sandbox gets the demo repo. Once any repository is checked out here,
     // seeding again would write over files in a linked repository that is also named "demo".
     const existing = await this.execWithTimeout(
       'ls -A /workspace/repos 2>/dev/null | head -1',
       { timeoutMs: GREP_TIMEOUT_MS },
-      container,
+      host,
     )
 
     if (existing.stdout.trim()) {
       return
     }
 
-    await files.mkdir('/workspace/repos/demo', { recursive: true })
-    await files.writeFile('/workspace/repos/demo/README.md', '# Shuttle workspace\n')
+    await host.mkdir('/workspace/repos/demo')
+    await host.writeFile('/workspace/repos/demo/README.md', '# Shuttle workspace\n')
 
-    await this.execWithTimeout(
+    // One command per line: joining these with `&&` puts one straight after `then`, which the
+    // shell rejects, and the demo directory is then left without a repository.
+    const seeded = await this.execWithTimeout(
       [
+        'set -e',
         'cd /workspace/repos/demo',
         'if [ ! -d .git ]; then',
-        '  git init',
+        '  git init -q -b main',
         '  git config user.email shuttle@local',
         '  git config user.name Shuttle',
         '  git add README.md',
-        '  git commit -m "Initial commit"',
+        '  git commit -q -m "Initial commit"',
         'fi',
-      ].join(' && '),
+      ].join('\n'),
       { timeoutMs: GREP_TIMEOUT_MS },
-      container,
+      host,
     )
+
+    if (seeded.exitCode !== 0) {
+      throw new Error(
+        `Could not seed the demo repository: ${seeded.stderr.trim() || `exit ${seeded.exitCode}`}`,
+      )
+    }
   }
 
   private async execWithTimeout(
     command: string,
     options: ExecOptions | undefined,
-    container: DurableContainer,
+    host: SandboxHost,
   ): Promise<ExecResult> {
     const timeoutMs = Math.min(
       Math.max(1, options?.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS),
@@ -461,11 +476,12 @@ export class ContainerWorkspace implements Workspace {
     const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000))
     const execId = options?.execId ?? crypto.randomUUID()
 
-    const process = await container.exec(timedBashArgv(command, timeoutSeconds), {
-      cwd: options?.cwd,
-    })
+    const process = await host.exec(
+      timedBashArgv(command, timeoutSeconds),
+      options?.cwd ? { cwd: options.cwd } : {},
+    )
 
-    const pid = typeof process.pid === 'number' ? process.pid : undefined
+    const { pid } = process
 
     if (pid !== undefined) {
       this.activePids.set(execId, pid)
@@ -474,7 +490,7 @@ export class ContainerWorkspace implements Workspace {
     const raceKill = new Promise<ExecResult>((resolve) => {
       const timer = setTimeout(() => {
         if (pid !== undefined) {
-          void container.exec(['kill', '-TERM', String(pid)]).then((proc) => proc.output())
+          void host.exec(['kill', '-TERM', String(pid)]).then((proc) => proc.output())
         }
 
         resolve({
@@ -492,8 +508,8 @@ export class ContainerWorkspace implements Workspace {
 
           resolve({
             stdout: truncateOutput(new TextDecoder().decode(output.stdout)),
-            stderr: truncateOutput(new TextDecoder().decode(output.stderr ?? new Uint8Array())),
-            exitCode: output.exitCode ?? 0,
+            stderr: truncateOutput(new TextDecoder().decode(output.stderr)),
+            exitCode: output.exitCode,
           })
         },
         (error: unknown) => {

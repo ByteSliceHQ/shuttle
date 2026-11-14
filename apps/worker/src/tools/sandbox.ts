@@ -6,7 +6,8 @@ import type { ShuttleEnv } from '../env'
 import { sandboxStub } from '../env'
 import type { LinkedSandboxRepo } from '../sandbox/workspace'
 import type { SandboxBinding } from '../session/bind-sandbox'
-import { readSandboxBinding } from '../session/bind-sandbox'
+import { readSandboxBinding, sandboxNameForSession } from '../session/bind-sandbox'
+import { prepareSessionSandbox } from '../session/handoff'
 
 async function withAbort<T>(
   signal: AbortSignal | undefined,
@@ -37,7 +38,6 @@ async function withAbort<T>(
 
 export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: DurableObjectStorage) {
   let bindingPromise: Promise<SandboxBinding> | null = null
-  const prepared = new Set<string>()
 
   async function resolveBinding(): Promise<SandboxBinding> {
     bindingPromise ??= (async () => {
@@ -50,19 +50,20 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
       return { sandboxName: runId, repos: [] as LinkedSandboxRepo[] }
     })()
 
-    return bindingPromise
+    const bound = await bindingPromise
+
+    // Asked each time: the person the session works for, and so its sandbox, can change.
+    return {
+      ...bound,
+      sandboxName: await sandboxNameForSession(env, storage, runId, bound.sandboxName),
+    }
   }
 
   async function prepare(): Promise<{ cwd: string; repos: LinkedSandboxRepo[] }> {
     const binding = await resolveBinding()
-    const sandbox = sandboxStub(env, binding.sandboxName)
-    const key = binding.sandboxName
 
-    if (!prepared.has(key)) {
-      await sandbox.ensureRepos(binding.repos as LinkedSandboxRepo[])
-      await sandbox.ensureWorktree(runId)
-      prepared.add(key)
-    }
+    // Sets the sandbox up, and first moves the session into it if it was working elsewhere.
+    await prepareSessionSandbox(env, storage, runId, binding)
 
     const primary = binding.repos[0]?.name ?? 'demo'
     return {

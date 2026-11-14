@@ -4,6 +4,8 @@ import { CredentialsKeyMissingError } from '../credentials/store'
 import { sandboxStub, type ShuttleEnv } from '../env'
 import { isVendorHarness, parseHarness, type VendorHarnessId } from '../harness'
 import { loomsStub } from '../looms-stub'
+import { shellQuote } from '../sandbox/exec-argv'
+import { sandboxesArePersonal, userSandboxName } from '../sandbox/names'
 import { parseTeam } from '../team'
 import type { Actor } from '../tenancy/access'
 import { CONNECTABLE_HARNESSES, vendorHarnessInfo } from '../vendor/harnesses'
@@ -32,11 +34,48 @@ import {
  */
 
 /** Sign-ins run in a sandbox of the person's own, apart from any folder's workspace. */
-function connectionsSandbox(actor: Actor): string {
-  return `connections:${actor.userId}`
+function connectionsSandbox(env: ShuttleEnv, actor: Actor): string {
+  // Where each person has a sandbox of their own, they sign in there, where their sessions run.
+  return sandboxesArePersonal(env)
+    ? userSandboxName(actor.orgId, actor.userId)
+    : `connections:${actor.userId}`
 }
 
 const LOGIN_ID = /^[A-Za-z0-9_-]{1,80}$/
+
+/** Why a sign-in process that stopped without a word did, in terms someone can act on. */
+export function explainDeadRun(label: string, log: string): string {
+  if (log.includes('Cannot find module') && log.includes('shuttle-bridge')) {
+    return (
+      `${label} sign-in could not start: this sandbox has no agent bridge. It was created from an ` +
+      'image without one. Delete the sandbox in Daytona so it is recreated from the agent image ' +
+      '(DAYTONA_SNAPSHOT), then try again.'
+    )
+  }
+
+  const lastLine = log
+    .trim()
+    .split('\n')
+    .findLast((line) => line.trim() !== '')
+
+  return lastLine
+    ? `${label} sign-in stopped before it started: ${lastLine.trim().slice(0, 300)}`
+    : `${label} sign-in stopped before it started, and left no explanation.`
+}
+
+/** A command that succeeds when every sign-in file exists and is not empty. Reads none of them. */
+export function signInFilesPresent(homeRelativePaths: readonly string[]): string {
+  return homeRelativePaths.length === 0
+    ? 'false'
+    : homeRelativePaths.map((path) => `test -s "$HOME"/${shellQuote(path)}`).join(' && ')
+}
+
+/** A command that deletes the sign-in files. */
+export function removeSignInFiles(homeRelativePaths: readonly string[]): string {
+  return homeRelativePaths.length === 0
+    ? 'true'
+    : `rm -f ${homeRelativePaths.map((path) => `"$HOME"/${shellQuote(path)}`).join(' ')}`
+}
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status })
@@ -76,7 +115,7 @@ export async function handleConnectionRoutes(
 async function route(request: Request, env: ShuttleEnv, url: URL, actor: Actor): Promise<Response> {
   const { userId } = actor
   const credentials = loomsStub(env.LOOMS_RUN, workspaceRunId(env, actor.orgId))
-  const sandbox = sandboxStub(env, connectionsSandbox(actor))
+  const sandbox = sandboxStub(env, connectionsSandbox(env, actor))
   const parts = url.pathname.split('/').filter(Boolean).slice(2).map(decodeURIComponent)
 
   if (parts.length === 0) {
@@ -141,6 +180,13 @@ async function route(request: Request, env: ShuttleEnv, url: URL, actor: Actor):
       return json({ error: 'Method not allowed' }, 405)
     }
 
+    // Where the sign-in lives in the person's sandbox, disconnecting deletes it there.
+    if (sandboxesArePersonal(env)) {
+      await sandbox
+        .exec(removeSignInFiles(vendorHarnessInfo(harness).credentialFiles))
+        .catch(() => {})
+    }
+
     return json({ removed: await credentials.removeCredential(userId, harness) })
   }
 
@@ -183,6 +229,7 @@ async function route(request: Request, env: ShuttleEnv, url: URL, actor: Actor):
       sandbox,
       credentials,
       userId,
+      keepInSandbox: sandboxesArePersonal(env),
     })
   }
 
@@ -250,6 +297,8 @@ async function followLogin(
     sandbox: ReturnType<typeof sandboxStub>
     credentials: ReturnType<typeof loomsStub>
     userId: string
+    /** True where the sandbox is the person's own and the sign-in stays on its disk. */
+    keepInSandbox: boolean
   },
 ): Promise<Response> {
   const page = await deps.sandbox.readAgentEvents(
@@ -262,18 +311,55 @@ async function followLogin(
     | undefined
 
   if (!end?.success) {
+    // A sign-in that has said nothing may never say anything: the process behind it can die
+    // before it starts, and then waiting would last forever.
+    if (!end && page.events.length === 0) {
+      const { state } = await deps.sandbox.agentRunState(loginId)
+
+      if (state === 'exited' || state === 'missing') {
+        const { log } = await deps.sandbox.readAgentLog(loginId).catch(() => ({ log: '' }))
+
+        return json({
+          ...page,
+          done: true,
+          connected: false,
+          error: explainDeadRun(vendorHarnessInfo(harness).label, log),
+        })
+      }
+    }
+
     return json({ ...page, connected: false })
+  }
+
+  const info = vendorHarnessInfo(harness)
+
+  if (deps.keepInSandbox) {
+    // The sandbox is this person's own and keeps the sign-in on its disk. Shuttle only checks
+    // that it is there, without reading it, and records that the agent is connected.
+    const present = await deps.sandbox.exec(signInFilesPresent(info.credentialFiles))
+
+    if (present.exitCode !== 0) {
+      return json({
+        ...page,
+        connected: false,
+        error: `${info.label} reported success but left no sign-in in the sandbox.`,
+      })
+    }
+
+    await deps.credentials.putCredential(deps.userId, harness, {})
+
+    return json({ ...page, connected: true })
   }
 
   // The CLI is signed in inside this container only. Store its sign-in files so sessions, which
   // run in other containers, can use them.
-  const { files } = await deps.sandbox.collectAgentFiles(vendorHarnessInfo(harness).credentialFiles)
+  const { files } = await deps.sandbox.collectAgentFiles(info.credentialFiles)
 
   if (Object.keys(files).length === 0) {
     return json({
       ...page,
       connected: false,
-      error: `${vendorHarnessInfo(harness).label} reported success but left no sign-in files to store.`,
+      error: `${info.label} reported success but left no sign-in files to store.`,
     })
   }
 

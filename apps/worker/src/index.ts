@@ -42,12 +42,18 @@ import { handleGithubPublicRoutes, handleGithubRoutes } from './routes/github'
 import { handleSandboxRoutes } from './routes/sandbox'
 import { handleShuttleRoutes } from './routes/sessions'
 import { handleWorkspaceRoutes } from './routes/workspace'
+import { sandboxesArePersonal } from './sandbox/names'
 import { parsePreviewHost } from './sandbox/preview-host'
 import { SessionSandbox } from './sandbox/session-sandbox'
-import { readSandboxBinding } from './session/bind-sandbox'
+import {
+  readSandboxBinding,
+  sandboxNameForSession,
+  type SandboxBinding,
+} from './session/bind-sandbox'
 import { DEFAULT_TEAM, readPinnedTeam, writeStoredTeam, type Team } from './team'
 import { readSessionAccess, writeSessionAccess, type SessionAccess } from './tenancy/access'
 import { authorizeLoomsRoute, authorizeRun, runIdOfPath } from './tenancy/gate'
+import { runOfPreviewKey } from './tenancy/previews'
 import { orgOfRun } from './tenancy/run-id'
 import { CONNECTABLE_HARNESSES } from './vendor/harnesses'
 import {
@@ -110,9 +116,17 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
 
   /** The sandbox this session bound, or null when it has not bound one yet. */
   async getSandboxName(): Promise<string | null> {
-    const binding = await readSandboxBinding(this.ctx.storage, this.ctx.id.name ?? '')
+    const runId = this.ctx.id.name ?? ''
+    const binding = await readSandboxBinding(this.ctx.storage, runId)
 
-    return binding?.sandboxName ?? null
+    return binding
+      ? sandboxNameForSession(this.env, this.ctx.storage, runId, binding.sandboxName)
+      : null
+  }
+
+  /** The repositories this session works in. Empty before it binds a sandbox, or with none linked. */
+  async getSessionRepos(): Promise<SandboxBinding['repos']> {
+    return (await readSandboxBinding(this.ctx.storage, this.ctx.id.name ?? ''))?.repos ?? []
   }
 
   /** Which agent runs this session: Shuttle's own loop or a vendor agent in the sandbox. */
@@ -341,7 +355,7 @@ async function route(
     (await handleConnectionRoutes(request, env, actor)) ??
     (await handleWorkspaceRoutes(request, env, actor, ctx)) ??
     (await handleGithubRoutes(request, env, actor)) ??
-    (await handleSandboxRoutes(request, env)) ??
+    (await handleSandboxRoutes(request, env, actor)) ??
     (await handleShuttleRoutes(request, env, actor))
 
   if (handled) {
@@ -373,8 +387,21 @@ async function handlePreviewHost(request: Request, env: ShuttleEnv): Promise<Res
     return null
   }
 
-  // Hostname label is a sanitized folder id (alphanumeric + hyphen).
-  const sandboxName = sandboxNameFor(parsed.folderId)
-  const stub = sandboxStub(env, sandboxName)
-  return stub.fetch(request)
+  // The label is a session's preview key, which leads to the sandbox the session is working in
+  // right now, whoever's that is.
+  const runId = env.AUTH_DB ? await runOfPreviewKey(env.AUTH_DB, parsed.folderId) : null
+
+  if (runId) {
+    const sandboxName = (await loomsStub(env.LOOMS_RUN, runId).getSandboxName()) ?? runId
+
+    return sandboxStub(env, sandboxName).fetch(request)
+  }
+
+  // Where each person has their own sandbox there is no folder sandbox to fall back to.
+  if (sandboxesArePersonal(env)) {
+    return new Response('Preview not found', { status: 404 })
+  }
+
+  // Older links carry a sanitized folder id (alphanumeric + hyphen).
+  return sandboxStub(env, sandboxNameFor(parsed.folderId)).fetch(request)
 }

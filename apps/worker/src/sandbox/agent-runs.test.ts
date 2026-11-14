@@ -8,6 +8,7 @@ import {
   agentRunState,
   collectAgentFiles,
   readAgentEvents,
+  readAgentLog,
   startAgentRun,
   stopAgentRun,
   type AgentRunContainer,
@@ -228,5 +229,24 @@ describe('agent runs', () => {
     )
 
     expect(existsSync(join(options.root ?? '', '..', 'etc', 'request.json'))).toBe(false)
+  })
+
+  test('a bridge that dies on the way up is seen as gone, with the reason in its log', async () => {
+    const { container, options } = localContainer('ok')
+    const broken = { ...options, bridge: '/nowhere/shuttle-bridge/main.ts' }
+
+    await startAgentRun(container, { runKey: 'turn_dead', mode: 'turn', request }, broken)
+
+    // It never writes its own pid, which used to read as "still starting" for ever.
+    let state = await agentRunState(container, 'turn_dead', broken)
+
+    for (let i = 0; i < 50 && state !== 'exited'; i++) {
+      await Bun.sleep(20)
+      state = await agentRunState(container, 'turn_dead', broken)
+    }
+
+    expect(state).toBe('exited')
+    expect(await readAgentLog(container, 'turn_dead', broken)).toContain('shuttle-bridge')
+    expect((await readAgentEvents(container, 'turn_dead', 0, broken)).events).toEqual([])
   })
 })

@@ -2,7 +2,10 @@ import { Schema } from 'effect'
 
 import type { ShuttleEnv } from '../env'
 import { sandboxStub } from '../env'
+import { sandboxesArePersonal, userSandboxName } from '../sandbox/names'
+import { orgOfRun } from '../tenancy/run-id'
 import { shuttleModule } from './scope'
+import { readSponsor } from './sponsor'
 
 const LinkedRepoSchema = Schema.Struct({
   installationId: Schema.Finite,
@@ -95,4 +98,27 @@ export async function readSandboxBinding(
   }
 
   return null
+}
+
+/**
+ * The sandbox a session's work runs in right now.
+ *
+ * On Daytona each person has a sandbox of their own, and a session runs in the one that belongs
+ * to whoever it is working for (see `sponsor.ts`), so that person's sign-ins are the only ones
+ * near the work. Elsewhere a session runs in the sandbox it was bound to: its folder's.
+ */
+export async function sandboxNameForSession(
+  env: Pick<ShuttleEnv, 'SHUTTLE_WORKSPACE_MODE'>,
+  storage: DurableObjectStorage | undefined,
+  runId: string,
+  boundName: string,
+): Promise<string> {
+  if (!sandboxesArePersonal(env) || !storage) {
+    return boundName
+  }
+
+  const orgId = orgOfRun(runId)
+  const sponsorId = await readSponsor(storage)
+
+  return orgId && sponsorId ? userSandboxName(orgId, sponsorId) : boundName
 }

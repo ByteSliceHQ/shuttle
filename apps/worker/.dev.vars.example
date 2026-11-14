@@ -36,10 +36,29 @@ SHUTTLE_CREDENTIALS_KEY=
 
 # Signs sign-in sessions. Auto-filled by `bun run dev` when empty. Changing it signs everyone out.
 BETTER_AUTH_SECRET=
-# Optional "Sign in with GitHub" (a GitHub OAuth app, or the GitHub App's client id and secret).
-# The callback URL is <SHUTTLE_WEB_URL>/api/auth/callback/github. Email and password always work.
+# The GitHub App's client id and secret. With them, Connect GitHub identifies the person and
+# links the installations they can access, including ones that already exist; without them only
+# a fresh install can be linked. They also enable "Sign in with GitHub".
+# Add both of these as callback URLs on the App:
+#   <SHUTTLE_WEB_URL>/github/callback            (connecting GitHub)
+#   <SHUTTLE_WEB_URL>/api/auth/callback/github   (signing in with GitHub)
 # GITHUB_CLIENT_ID=
 # GITHUB_CLIENT_SECRET=
+
+# Per-user sandboxes run on Daytona (https://app.daytona.io, Dashboard > Keys).
+DAYTONA_API_KEY=
+# Optional; default to Daytona's cloud and your account's default region.
+# DAYTONA_API_URL=https://app.daytona.io/api
+# DAYTONA_TARGET=us
+# The image with the agent CLIs and the bridge. Build it with
+#   bun --env-file=.dev.vars scripts/daytona-snapshot.ts shuttle-agents
+# DAYTONA_SNAPSHOT=shuttle-agents
+
+# Repositories are served to sandboxes by Code Storage (https://code.storage). Create a key on
+# the organization's Keys page; it shows the organization name and the private key once.
+# Paste the PEM on one line with \n for line breaks, or as a quoted multi-line value.
+PIERRE_ORG=
+PIERRE_PRIVATE_KEY=
 
 # Set to `off` to skip the Cloudflare quick tunnel (inbox Sync still works).
 # SHUTTLE_TUNNEL=off

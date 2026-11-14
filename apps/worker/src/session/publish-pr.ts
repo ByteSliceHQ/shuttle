@@ -7,7 +7,8 @@ import { loomsStub } from '../looms-stub'
 import { recordPublished } from '../pulls/signals'
 import type { LinkedSandboxRepo } from '../sandbox/workspace'
 import { orgOfRun } from '../tenancy/run-id'
-import { readSandboxBinding } from './bind-sandbox'
+import { readSandboxBinding, sandboxNameForSession } from './bind-sandbox'
+import { prepareSessionSandbox } from './handoff'
 import { githubMirror, mirrorRepoStack, type MirroredStack } from './mirror-stack'
 import { shuttleModule } from './scope'
 import { writeSessionStacks } from './session-stacks'
@@ -66,7 +67,10 @@ export function createPublishPullRequestEffect(env: ShuttleEnv, storage?: Durabl
         return publishFailed(input.approvalId, 'Sandbox is not bound for this session')
       }
 
-      const sandbox = sandboxStub(env, binding.sandboxName)
+      const sandbox = sandboxStub(
+        env,
+        await sandboxNameForSession(env, storage, ctx.runId, binding.sandboxName),
+      )
 
       const selected = input.repo
         ? binding.repos.filter((repo) => repo.name === input.repo || repo.fullName === input.repo)
@@ -81,8 +85,7 @@ export function createPublishPullRequestEffect(env: ShuttleEnv, storage?: Durabl
       }
 
       try {
-        await sandbox.ensureRepos(binding.repos)
-        await sandbox.ensureWorktree(ctx.runId)
+        await prepareSessionSandbox(env, storage, ctx.runId, binding)
 
         const github = githubMirror(env)
         const priorStacks: SessionStacks = { ...input.stacks }

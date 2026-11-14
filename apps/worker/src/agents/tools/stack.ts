@@ -4,9 +4,9 @@ import { defineTool } from '@swirls/looms/agent'
 import { asJson } from '@swirls/looms/core'
 
 import type { ShuttleEnv } from '../../env'
-import { sandboxStub } from '../../env'
 import type { StackStatus } from '../../sandbox/workspace'
 import { readSandboxBinding, type SandboxBinding } from '../../session/bind-sandbox'
+import { prepareSessionSandbox } from '../../session/handoff'
 import { readSessionStacks } from '../../session/session-stacks'
 import { stackKey, type SessionStacks } from '../../session/stack-state'
 
@@ -76,9 +76,7 @@ export function createStackLayerTool(
         repos: [],
       }
 
-      const sandbox = sandboxStub(env, binding.sandboxName)
-      await sandbox.ensureRepos(binding.repos)
-      await sandbox.ensureWorktree(runId)
+      const sandbox = await prepareSessionSandbox(env, storage, runId, binding)
 
       const repo =
         binding.repos.find((entry) => entry.name === repoArg || entry.fullName === repoArg) ??

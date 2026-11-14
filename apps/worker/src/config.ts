@@ -25,7 +25,9 @@ import {
   type ReasoningEffort,
 } from './llm'
 import { loomsStub } from './looms-stub'
-import { readSandboxBinding } from './session/bind-sandbox'
+import { sandboxesArePersonal } from './sandbox/names'
+import { readSandboxBinding, sandboxNameForSession } from './session/bind-sandbox'
+import { prepareSessionSandbox } from './session/handoff'
 import { resolveSponsor } from './session/sponsor'
 import { onTeam, readPinnedTeam, writeStoredTeam, type Team } from './team'
 import { orgOfRun, personalRunId, scopedRunId } from './tenancy/run-id'
@@ -142,7 +144,10 @@ export function resolveLlm(
         }
       }
 
-      const sandbox = sandboxStub(env, binding.sandboxName)
+      const sandbox = sandboxStub(
+        env,
+        await sandboxNameForSession(env, storage, runId, binding.sandboxName),
+      )
 
       if ((await sandbox.getMode()).mode !== 'container') {
         return {
@@ -154,8 +159,8 @@ export function resolveLlm(
         }
       }
 
-      await sandbox.ensureRepos([...binding.repos])
-      await sandbox.ensureWorktree(runId)
+      // Sets the sandbox up, and first moves the session into it if it was working elsewhere.
+      await prepareSessionSandbox(env, storage, runId, binding)
 
       const credentials = loomsStub(env.LOOMS_RUN, workspaceRunId(env, orgOfRun(runId)))
 
@@ -179,6 +184,7 @@ export function resolveLlm(
           // The turn runs on the sign-in of the person it is working for, and on no one else's.
           // A session Shuttle started itself, which nobody has spoken in, has no one's.
           ...(sponsorId ? { billedTo: sponsorId } : {}),
+          signInStaysInSandbox: sandboxesArePersonal(env),
           credentials: {
             get: async (id) => (sponsorId ? credentials.getCredential(sponsorId, id) : null),
             put: async (id, payload) => {

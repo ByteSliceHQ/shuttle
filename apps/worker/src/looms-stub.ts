@@ -3,6 +3,7 @@ import type { EventInput, JsonValue, RunState, RunStatusSnapshot } from '@swirls
 import type { CredentialPayload, CredentialSummary } from './credentials/store'
 import type { ShuttleEnv } from './env'
 import type { HarnessId, VendorHarnessId } from './harness'
+import type { LinkedSandboxRepo } from './sandbox/workspace'
 import type { Team } from './team'
 import type { SessionAccess } from './tenancy/access'
 import type {
@@ -55,6 +56,7 @@ export interface LoomsRunStub {
   getAccess(): Promise<SessionAccess | null>
   setAccess(access: unknown): Promise<SessionAccess>
   getSandboxName(): Promise<string | null>
+  getSessionRepos(): Promise<readonly LinkedSandboxRepo[]>
   getSessionActivitySnapshot(): Promise<{ activity: SessionActivity; tail: number } | null>
 }
 

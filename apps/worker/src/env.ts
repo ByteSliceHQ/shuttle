@@ -4,6 +4,7 @@ import type { EventFirehose } from './firehose/durable-object'
 import type { LoomsRunStub } from './looms-stub'
 import type { AgentEventsPage, AgentRunInput, AgentRunState } from './sandbox/agent-runs'
 import type { SessionSandbox } from './sandbox/session-sandbox'
+import type { SessionSnapshot } from './sandbox/session-sync'
 import type {
   ChangesetResult,
   CheckoutRefInput,
@@ -39,7 +40,16 @@ export interface ShuttleEnv {
   readonly TYPESAFE_AI_API_KEY?: string
   /** Optional Jev model id; defaults to `jev-latest`. */
   readonly JEV_MODEL?: string
+  /** `memory` (default), `container` (Cloudflare) or `daytona`. */
   readonly SHUTTLE_WORKSPACE_MODE?: string
+  readonly DAYTONA_API_KEY?: string
+  readonly DAYTONA_API_URL?: string
+  readonly DAYTONA_TARGET?: string
+  /** Daytona snapshot built from `apps/worker/Dockerfile`: the agent CLIs and the bridge. */
+  readonly DAYTONA_SNAPSHOT?: string
+  /** Code Storage organization name and signing key. */
+  readonly PIERRE_ORG?: string
+  readonly PIERRE_PRIVATE_KEY?: string
   readonly SHUTTLE_PLAYBOOK_RUN_ID?: string
   readonly SHUTTLE_WORKSPACE_RUN_ID?: string
   readonly SHUTTLE_WEB_URL?: string
@@ -63,6 +73,15 @@ export interface ShuttleEnv {
 export interface SessionSandboxStub {
   ensureRepos(repos: readonly LinkedSandboxRepo[]): Promise<{ root: string }>
   ensureWorktree(runId: string): Promise<WorktreeResult>
+  snapshotSession(
+    runId: string,
+    repo: LinkedSandboxRepo,
+  ): Promise<{ snapshot: SessionSnapshot | null }>
+  restoreSession(
+    runId: string,
+    repo: LinkedSandboxRepo,
+    snapshot: SessionSnapshot,
+  ): Promise<{ ok: true }>
   ensureRepo(repoUrl: string | null): Promise<{ root: string }>
   changeset(runId: string, repoName: string, baseBranch?: string): Promise<ChangesetResult>
   layerChangeset(
@@ -105,9 +124,11 @@ export interface SessionSandboxStub {
   gitDiff(cwd?: string): Promise<{ diff: string }>
   kill(execId?: string): Promise<{ ok: true }>
   getMode(): Promise<{ mode: 'memory' | 'container' }>
+  isAwake(): Promise<{ awake: boolean }>
   startAgentRun(input: AgentRunInput): Promise<{ started: boolean }>
   readAgentEvents(runKey: string, offset: number): Promise<AgentEventsPage>
   agentRunState(runKey: string): Promise<{ state: AgentRunState }>
+  readAgentLog(runKey: string): Promise<{ log: string }>
   stopAgentRun(runKey: string): Promise<{ ok: true }>
   sendAgentInput(runKey: string, text: string): Promise<{ ok: true }>
   collectAgentFiles(paths: readonly string[]): Promise<{ files: Record<string, string> }>

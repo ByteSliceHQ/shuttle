@@ -1,4 +1,10 @@
 import { getAuth } from '../auth/auth'
+import {
+  codeStorageClient,
+  codeStorageConfigured,
+  deleteScratchRepo,
+  scratchRepoName,
+} from '../codestorage/client'
 import { playbookRunId, workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { isVendorHarness, parseHarness } from '../harness'
@@ -236,6 +242,16 @@ async function sessionListing(
 
   if (action === 'archive') {
     await signalListings(env, actor.orgId, access, [archiveSession({ runId })])
+
+    // An archived session is finished with. If it had a repository of its own on Code Storage,
+    // only there to carry it between sandboxes, that goes too.
+    if (codeStorageConfigured(env)) {
+      await deleteScratchRepo(codeStorageClient(env), scratchRepoName(actor.orgId, runId)).catch(
+        (cause: unknown) => {
+          console.warn('could not delete the scratch repository', cause)
+        },
+      )
+    }
 
     return Response.json({ runId, archived: true })
   }

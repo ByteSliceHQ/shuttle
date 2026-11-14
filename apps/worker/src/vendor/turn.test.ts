@@ -88,6 +88,11 @@ function deps(
   }
 }
 
+/** A credential lookup that answers `payload` and never saves anything. */
+function connected(payload: CredentialPayload | null): VendorTurnDeps['credentials'] {
+  return { get: async () => payload, put: async () => {} }
+}
+
 function args(overrides: Partial<LlmCompleteArgs> = {}): LlmCompleteArgs {
   return {
     instructions: 'You are the conductor.',
@@ -470,5 +475,72 @@ describe('runVendorTurn', () => {
 
     await runVendorTurn(refreshed, args())
     expect(refreshed.saved).toEqual([{ files: { '.codex/auth.json': 'bmV3' } }])
+  })
+})
+
+/** The vendor conversation a run asked its agent to continue, if it asked for one. */
+function continuedConversation(run: ReturnType<typeof fakeSandbox>): string | undefined {
+  return run.started[0]?.mode === 'turn' ? run.started[0].request.vendorThreadId : undefined
+}
+
+describe("runVendorTurn in a person's own sandbox", () => {
+  const done: BridgeEventBody[][] = [
+    [{ type: 'thread', vendorThreadId: 'thr_1' }],
+    [
+      { type: 'message', text: 'Done.' },
+      { type: 'turn_done', status: 'completed', text: 'Done.' },
+    ],
+  ]
+
+  test('the sign-in is neither placed before the turn nor read back after it', async () => {
+    let collected = 0
+    const { sandbox, started } = fakeSandbox(done, { '.codex/auth.json': 'cmVmcmVzaGVk' })
+
+    const turn = deps(
+      {
+        ...sandbox,
+        collectAgentFiles: async (paths) => {
+          collected += 1
+          return sandbox.collectAgentFiles(paths)
+        },
+      },
+      // Connected is recorded with no secret in it.
+      { signInStaysInSandbox: true, billedTo: 'alice', credentials: connected({}) },
+    )
+
+    await runVendorTurn(turn, args())
+
+    expect(started).toHaveLength(1)
+    expect(started[0]?.files).toBeUndefined()
+    expect(collected).toBe(0)
+    expect(turn.saved).toEqual([])
+  })
+
+  test('work for someone who has not connected the agent stops and says so', async () => {
+    const { sandbox, started } = fakeSandbox(done)
+
+    const result = await runVendorTurn(
+      deps(sandbox, { signInStaysInSandbox: true, billedTo: 'bob', credentials: connected(null) }),
+      args(),
+    )
+
+    expect(started).toEqual([])
+    expect(result.message.content).toContain('not connected')
+  })
+
+  test('each person continues their own vendor conversation', async () => {
+    const storage = memoryStorage()
+    const forAlice = fakeSandbox(done)
+    const forBob = fakeSandbox(done)
+    const again = fakeSandbox(done)
+    const own = { signInStaysInSandbox: true, credentials: connected({}), storage }
+
+    await runVendorTurn(deps(forAlice.sandbox, { ...own, billedTo: 'alice' }), args())
+    await runVendorTurn(deps(forBob.sandbox, { ...own, billedTo: 'bob' }), args())
+    await runVendorTurn(deps(again.sandbox, { ...own, billedTo: 'alice' }), args())
+
+    // Bob's sandbox has no record of the conversation Alice's agent started.
+    expect(continuedConversation(forBob)).toBeUndefined()
+    expect(continuedConversation(again)).toBe('thr_1')
   })
 })

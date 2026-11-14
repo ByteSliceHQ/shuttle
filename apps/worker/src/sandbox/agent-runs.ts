@@ -67,6 +67,9 @@ const DEFAULTS = {
   runtime: ['node'],
 } as const
 
+/** Holds the pid the launcher saw for the bridge, before the bridge writes its own. */
+const LAUNCH_PID_FILE = 'launch.pid'
+
 const RUN_KEY = /^[A-Za-z0-9_-]{1,120}$/
 const MAX_READ_BYTES = 1024 * 1024
 
@@ -131,6 +134,9 @@ export async function startAgentRun(
     `cat > "$dir/${BRIDGE_REQUEST_FILE}.tmp"`,
     `mv "$dir/${BRIDGE_REQUEST_FILE}.tmp" "$dir/${BRIDGE_REQUEST_FILE}"`,
     `nohup "$@" >> "$dir/${BRIDGE_LOG_FILE}" 2>&1 < /dev/null &`,
+    // The bridge records its own pid once it is up. Until then this is how a bridge that died
+    // on the way up (a missing entry point, say) is told from one that is still starting.
+    `echo $! > "$dir/${LAUNCH_PID_FILE}"`,
     'echo started',
   ].join('\n')
 
@@ -182,14 +188,37 @@ export async function agentRunState(
 ): Promise<AgentRunState> {
   const script = [
     `[ -e "$1/${BRIDGE_REQUEST_FILE}" ] || { echo missing; exit 0; }`,
-    `[ -e "$1/${BRIDGE_PID_FILE}" ] || { echo starting; exit 0; }`,
-    `if kill -0 "$(cat "$1/${BRIDGE_PID_FILE}")" 2>/dev/null; then echo running; else echo exited; fi`,
+    `if [ -e "$1/${BRIDGE_PID_FILE}" ]; then`,
+    `  if kill -0 "$(cat "$1/${BRIDGE_PID_FILE}")" 2>/dev/null; then echo running; else echo exited; fi`,
+    `elif [ -e "$1/${LAUNCH_PID_FILE}" ] && ! kill -0 "$(cat "$1/${LAUNCH_PID_FILE}")" 2>/dev/null; then`,
+    // It was launched and is gone without ever reporting in.
+    '  echo exited',
+    'else',
+    '  echo starting',
+    'fi',
   ].join('\n')
 
   const result = await run(container, ['bash', '-c', script, 'bash', runDir(runKey, options)])
   const state = new TextDecoder().decode(result.stdout).trim()
 
   return state === 'running' || state === 'starting' || state === 'missing' ? state : 'exited'
+}
+
+/** The end of what the bridge process printed, for saying why a run that died did. */
+export async function readAgentLog(
+  container: AgentRunContainer,
+  runKey: string,
+  options: AgentRunOptions = {},
+): Promise<string> {
+  const read = await run(container, [
+    'bash',
+    '-c',
+    `tail -c 4000 "$1/${BRIDGE_LOG_FILE}" 2>/dev/null || true`,
+    'bash',
+    runDir(runKey, options),
+  ])
+
+  return new TextDecoder().decode(read.stdout)
 }
 
 /** Asks a run to stop. The bridge interrupts the agent and still writes its terminal event. */

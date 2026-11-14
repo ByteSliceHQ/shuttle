@@ -40,6 +40,12 @@ export interface VendorTurnDeps {
   readonly choice?: VendorModelChoice
   /** The person whose sign-in `credentials` holds, shown on the turn. */
   readonly billedTo?: string
+  /**
+   * True where the sandbox is the person's own and keeps their sign-in on its disk. Shuttle then
+   * neither places sign-in files before a turn nor reads them back after it: `credentials` only
+   * says whether the person has connected the agent.
+   */
+  readonly signInStaysInSandbox?: boolean
   readonly sleep?: (ms: number) => Promise<void>
   readonly newRunKey?: () => string
 }
@@ -141,9 +147,13 @@ export async function runVendorTurn(
 
   // Each Looms agent keeps its own vendor conversation: the conductor's work must not share a
   // context with, say, the narrator answering a side question.
+  // A vendor conversation lives in the home directory of the person who ran it. In a session
+  // that moves between people's sandboxes, each person's turns continue their own.
+  const whose = deps.signInStaysInSandbox && deps.billedTo ? `:for:${deps.billedTo}` : ''
+
   let conversationKey = deps.member
-    ? `shuttle:vendor:${harness}:member`
-    : `shuttle:vendor:${harness}:${await shortHash(args.instructions)}`
+    ? `shuttle:vendor:${harness}${whose}:member`
+    : `shuttle:vendor:${harness}${whose}:${await shortHash(args.instructions)}`
 
   let conversation = (await storage.get<VendorConversation>(conversationKey)) ?? {}
   const owner = deps.member?.threadId
@@ -159,7 +169,7 @@ export async function runVendorTurn(
         ? { vendorThreadId: conversation.vendorThreadId }
         : {}
     } else {
-      conversationKey = `shuttle:vendor:${harness}:thread:${owner}`
+      conversationKey = `shuttle:vendor:${harness}${whose}:thread:${owner}`
       conversation = (await storage.get<VendorConversation>(conversationKey)) ?? {}
     }
   }
@@ -170,6 +180,18 @@ export async function runVendorTurn(
   }
 
   const stored = await deps.credentials.get(harness)
+
+  // The work never falls back to someone else's sign-in. The person it is for has to connect.
+  if (deps.signInStaysInSandbox && !stored && !conversation.pending) {
+    return {
+      message: {
+        role: 'assistant',
+        content: `${info.label} is not connected for the person this work is for. They can connect it on the Connections page, then send the message again.`,
+      },
+      usage: { input: 0, output: 0 },
+    }
+  }
+
   let pending = conversation.pending
 
   if (!pending) {
@@ -195,7 +217,7 @@ export async function runVendorTurn(
         ...(conversation.vendorThreadId ? { vendorThreadId: conversation.vendorThreadId } : {}),
       },
       ...(stored?.env ? { env: stored.env } : {}),
-      ...(stored?.files ? { files: stored.files } : {}),
+      ...(stored?.files && !deps.signInStaysInSandbox ? { files: stored.files } : {}),
     })
   }
 
@@ -374,7 +396,7 @@ export async function runVendorTurn(
 
   // Agents refresh their sign-in while they work. Keep the newest copy, or the next container
   // would start from a stale one.
-  if (info.credentialFiles.length > 0) {
+  if (info.credentialFiles.length > 0 && !deps.signInStaysInSandbox) {
     try {
       const { files } = await sandbox.collectAgentFiles(info.credentialFiles)
 

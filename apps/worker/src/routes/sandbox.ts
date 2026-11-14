@@ -1,6 +1,20 @@
+import { codeStorageClient, codeStorageConfigured } from '../codestorage/client'
 import type { ShuttleEnv } from '../env'
 import { sandboxStub } from '../env'
 import { loomsStub } from '../looms-stub'
+import { sandboxesArePersonal, userOfSandbox, userSandboxName } from '../sandbox/names'
+import {
+  findSavedWork,
+  latestSave,
+  listSavedFiles,
+  readSavedFile,
+  savedDiffs,
+  type SavedRepo,
+  type SavedWorkClient,
+} from '../sandbox/saved-work'
+import type { Actor } from '../tenancy/access'
+import { previewKeyFor } from '../tenancy/previews'
+import { orgOfRun } from '../tenancy/run-id'
 
 const MAX_FILE_BYTES = 512_000
 
@@ -8,10 +22,13 @@ const MAX_FILE_BYTES = 512_000
 export async function handleSandboxRoutes(
   request: Request,
   env: ShuttleEnv,
+  actor: Actor,
 ): Promise<Response | null> {
   const url = new URL(request.url)
 
-  const match = url.pathname.match(/^\/sessions\/([^/]+)\/sandbox\/(files|file|diff|terminal)$/)
+  const match = url.pathname.match(
+    /^\/sessions\/([^/]+)\/sandbox\/(files|file|diff|terminal|preview|place)$/,
+  )
 
   if (!match) {
     return null
@@ -24,42 +41,192 @@ export async function handleSandboxRoutes(
     return Response.json({ error: 'Invalid sandbox path' }, { status: 400 })
   }
 
-  const sandboxName = await resolveSandboxName(env, runId)
-  const stub = sandboxStub(env, sandboxName)
+  if (action === 'preview') {
+    if (request.method !== 'GET') {
+      return Response.json({ error: 'Method not allowed' }, { status: 405 })
+    }
+
+    if (!env.AUTH_DB) {
+      return Response.json({ error: 'Previews are unavailable' }, { status: 503 })
+    }
+
+    // The label for this session's preview hostname; see `tenancy/previews.ts`.
+    return Response.json({ label: await previewKeyFor(env.AUTH_DB, runId) })
+  }
+
+  const personal = sandboxesArePersonal(env)
+
+  // A terminal is a shell with its owner's sign-ins in reach, so where sandboxes are personal it
+  // opens in the viewer's own, never in the one the session happens to be working in.
+  const own = personal ? userSandboxName(actor.orgId, actor.userId) : null
+
+  if (action === 'terminal') {
+    const target = new URL(request.url)
+
+    // Starts in the session's files when this sandbox has them; the sandbox falls back if not.
+    if (!target.searchParams.get('cwd')) {
+      target.searchParams.set('cwd', `/workspace/.wt/${runId}`)
+    }
+
+    return forwardTerminal(
+      new Request(target, request),
+      sandboxStub(env, own ?? (await resolveSandboxName(env, runId))),
+      env,
+    )
+  }
+
+  if (action === 'place') {
+    if (request.method !== 'GET') {
+      return Response.json({ error: 'Method not allowed' }, { status: 405 })
+    }
+
+    // Whose sandbox holds the session's files, so a terminal can say when that is not the
+    // viewer's. Null where sandboxes are shared, or before the session has worked anywhere.
+    const home = personal ? await loomsStub(env.LOOMS_RUN, runId).getSandboxName() : null
+    const holderId = home ? userOfSandbox(home) : null
+
+    return Response.json({ personal, holderId, here: !personal || home === own })
+  }
+
+  if (request.method !== 'GET') {
+    return Response.json({ error: 'Method not allowed' }, { status: 405 })
+  }
+
+  const stub = sandboxStub(env, await resolveSandboxName(env, runId))
+
+  // Looking never wakes a sandbox. While the one that holds the session is asleep, the tabs
+  // show the session's work as it was last saved.
+  const asleep =
+    sandboxesArePersonal(env) && !(await stub.isAwake().catch(() => ({ awake: true }))).awake
+
+  if (asleep) {
+    return savedView(env, runId, action, url.searchParams.get('path'))
+  }
 
   switch (action) {
-    case 'files': {
-      if (request.method !== 'GET') {
-        return Response.json({ error: 'Method not allowed' }, { status: 405 })
-      }
-
+    case 'files':
       return listFiles(stub, runId)
-    }
-
-    case 'file': {
-      if (request.method !== 'GET') {
-        return Response.json({ error: 'Method not allowed' }, { status: 405 })
-      }
-
+    case 'file':
       return readFile(stub, runId, url.searchParams.get('path'))
-    }
-
-    case 'diff': {
-      if (request.method !== 'GET') {
-        return Response.json({ error: 'Method not allowed' }, { status: 405 })
-      }
-
+    case 'diff':
       return listDiffs(stub, runId)
-    }
-
-    case 'terminal':
-      return forwardTerminal(request, stub, env)
 
     default: {
       const exhaustive: never = action as never
 
       return exhaustive
     }
+  }
+}
+
+/** Answers `files`, `file` or `diff` from what the session last saved to Code Storage. */
+async function savedView(
+  env: ShuttleEnv,
+  runId: string,
+  action: string,
+  pathParam: string | null,
+): Promise<Response> {
+  const sessionRoot = `/workspace/.wt/${runId}`
+  const orgId = orgOfRun(runId)
+  let client: SavedWorkClient | null = null
+  let saved: SavedRepo[] = []
+
+  try {
+    if (orgId && codeStorageConfigured(env)) {
+      // The SDK's lists are also promises of their first page; only the iteration is used here.
+      client = codeStorageClient(env) as unknown as SavedWorkClient
+
+      saved = await findSavedWork(
+        client,
+        orgId,
+        runId,
+        await loomsStub(env.LOOMS_RUN, runId).getSessionRepos(),
+      )
+    }
+
+    // `asleep` with nothing saved: there is nothing to show until someone asks for work.
+    const from = { source: saved.length > 0 ? 'saved' : 'asleep', savedAt: latestSave(saved) }
+
+    if (!client || saved.length === 0) {
+      return action === 'file'
+        ? Response.json(
+            { error: 'The sandbox is asleep and this file was not saved' },
+            { status: 404 },
+          )
+        : Response.json({ root: sessionRoot, files: [], diffs: [], mode: 'container', ...from })
+    }
+
+    if (action === 'files') {
+      const files = (await listSavedFiles(client, saved)).map((path) => ({ path, kind: 'file' }))
+
+      return Response.json({ root: sessionRoot, files, mode: 'container', ...from })
+    }
+
+    if (action === 'diff') {
+      const diffs = (await savedDiffs(client, saved)).map(({ name, diff }) => ({
+        cwd: `${sessionRoot}/${name}`,
+        name,
+        diff,
+      }))
+
+      return Response.json({ diffs, ...from })
+    }
+
+    const relative = worktreePath(sessionRoot, pathParam)
+
+    if (relative === null) {
+      return Response.json(
+        { error: 'path is required and must be in the session worktree' },
+        { status: 400 },
+      )
+    }
+
+    const content = await readSavedFile(client, saved, relative)
+
+    if (content === null) {
+      return Response.json(
+        { path: `${sessionRoot}/${relative}`, error: 'No such file' },
+        { status: 404 },
+      )
+    }
+
+    return Response.json({ ...fileBody(`${sessionRoot}/${relative}`, content), ...from })
+  } catch (cause) {
+    return Response.json(
+      {
+        root: sessionRoot,
+        files: [],
+        diffs: [],
+        error: cause instanceof Error ? cause.message : String(cause),
+      },
+      { status: 500 },
+    )
+  }
+}
+
+/** `path` relative to the session's worktree, or null when it is missing or points outside it. */
+function worktreePath(sessionRoot: string, path: string | null): string | null {
+  if (!path) {
+    return null
+  }
+
+  const relative = path.startsWith('/')
+    ? path.startsWith(`${sessionRoot}/`)
+      ? path.slice(sessionRoot.length + 1)
+      : null
+    : path.replace(/^\.\//, '')
+
+  return relative && !relative.split('/').includes('..') ? relative : null
+}
+
+function fileBody(path: string, content: string) {
+  const truncated = content.length > MAX_FILE_BYTES
+
+  return {
+    path,
+    content: truncated ? content.slice(0, MAX_FILE_BYTES) : content,
+    binary: looksBinary(content.slice(0, 4096)),
+    truncated,
   }
 }
 
@@ -87,11 +254,7 @@ async function listFiles(stub: ReturnType<typeof sandboxStub>, runId: string): P
 
     const entries = relative.map((path) => ({ path, kind: 'file' as const }))
 
-    return Response.json({
-      root: sessionRoot,
-      files: entries,
-      mode: mode.mode,
-    })
+    return Response.json({ root: sessionRoot, files: entries, mode: mode.mode, source: 'sandbox' })
   } catch (cause) {
     return Response.json(
       {
@@ -130,15 +293,7 @@ async function readFile(
       return Response.json({ path: absolute, error: result.error }, { status: 404 })
     }
 
-    const binary = looksBinary(result.content.slice(0, 4096))
-    const truncated = result.content.length > MAX_FILE_BYTES
-
-    return Response.json({
-      path: absolute,
-      content: truncated ? result.content.slice(0, MAX_FILE_BYTES) : result.content,
-      binary,
-      truncated,
-    })
+    return Response.json({ ...fileBody(absolute, result.content), source: 'sandbox' })
   } catch (cause) {
     return Response.json(
       { error: cause instanceof Error ? cause.message : String(cause) },
@@ -174,7 +329,7 @@ async function listDiffs(stub: ReturnType<typeof sandboxStub>, runId: string): P
       }
     }
 
-    return Response.json({ diffs })
+    return Response.json({ diffs, source: 'sandbox' })
   } catch (cause) {
     return Response.json(
       { diffs: [], error: cause instanceof Error ? cause.message : String(cause) },

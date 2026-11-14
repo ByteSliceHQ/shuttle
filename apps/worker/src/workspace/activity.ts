@@ -6,6 +6,8 @@ import type { ShuttleEnv } from '../env'
 import { runKindFor } from '../firehose/run-kind'
 import { jsonObject } from '../json'
 import { loomsStub } from '../looms-stub'
+import { readSandboxBinding } from '../session/bind-sandbox'
+import { saveSessionWork } from '../session/handoff'
 import { readSessionAccess } from '../tenancy/access'
 import { listingRunIds } from '../tenancy/listings'
 import { orgOfRun } from '../tenancy/run-id'
@@ -194,6 +196,16 @@ export function createWorkspaceActivityProjector(
         ...checkpoint,
         reported: { activity, at: reportAt },
       })
+
+      // The session just stopped working: save what it did. Not awaited, so a slow or failing
+      // save never holds up the session's own events.
+      if (activityChanged && activity !== 'working' && storage) {
+        void readSandboxBinding(storage, runId)
+          .then((binding) => saveSessionWork(env, storage, runId, binding?.repos ?? []))
+          .catch((cause: unknown) => {
+            console.warn("could not save the session's work", cause)
+          })
+      }
     },
   }
 }
