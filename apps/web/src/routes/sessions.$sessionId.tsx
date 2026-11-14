@@ -17,7 +17,7 @@ import {
   Users,
   X,
 } from 'lucide-react'
-import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import { AgentTree } from '@/components/agent-tree'
 import { ArtifactPane } from '@/components/artifacts/artifact-pane'
@@ -221,6 +221,37 @@ function SessionWorkspace({
     },
     [revealArtifacts, sessionTabs, openTab, setActiveTabId],
   )
+
+  // A review session is about its review, so that tab is open when the session first is. Once
+  // per session and browser: closing the tab afterwards keeps it closed.
+  const reviewing = Boolean(
+    reviewedPullForSession(useProjection(useRunStore(usePullsRunId()), pullInbox), runId),
+  )
+
+  const reviewTabOffered = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!reviewing || reviewTabOffered.current === runId) {
+      return
+    }
+
+    reviewTabOffered.current = runId
+
+    const key = `shuttle:review-tab-opened:${runId}`
+
+    try {
+      if (window.localStorage.getItem(key)) {
+        return
+      }
+
+      window.localStorage.setItem(key, '1')
+    } catch {
+      // Storage is unavailable; opening the tab once per visit is the best that can be done.
+    }
+
+    // The pane shows itself once it has a tab, unless it was deliberately hidden.
+    void openTab({ kind: 'review' })
+  }, [reviewing, runId, openTab])
 
   const [paletteOpen, setPaletteOpen] = useState(false)
 

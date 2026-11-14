@@ -191,6 +191,13 @@ export const shuttleCatalog = defineEventCatalog('shuttle', {
       Schema.Literal('comment'),
     ]),
     commentCount: Schema.Finite,
+    /** Comments whose line GitHub would not accept, sent in the review's body instead. */
+    unanchoredCount: Schema.optional(Schema.Finite),
+  }),
+  /** GitHub refused the review, or it could not be sent. Nothing was posted. */
+  'review.submit_failed': Schema.Struct({
+    approvalId: Schema.String,
+    error: Schema.String,
   }),
   'turn.thinking_delta': Schema.Struct({
     turn: Schema.Finite,

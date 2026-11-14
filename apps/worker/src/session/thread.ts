@@ -401,15 +401,16 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
               ...state,
               pendingReviewSubmit: {
                 approvalId,
-                fullName: Predicate.isString(payload.fullName)
-                  ? payload.fullName
-                  : (state.pull?.fullName ?? ''),
-                number: Predicate.isNumber(payload.number)
-                  ? payload.number
-                  : (state.pull?.number ?? 0),
-                commitId: Predicate.isString(payload.commitId)
-                  ? payload.commitId
-                  : (state.pull?.headSha ?? ''),
+                // The session knows which pull request it reviews; what the gate carries is only
+                // a fallback for a session that was not started on one.
+                fullName:
+                  state.pull?.fullName ||
+                  (Predicate.isString(payload.fullName) ? payload.fullName : ''),
+                number:
+                  state.pull?.number || (Predicate.isNumber(payload.number) ? payload.number : 0),
+                commitId:
+                  (Predicate.isString(payload.commitId) ? payload.commitId : '') ||
+                  (state.pull?.headSha ?? ''),
                 summary: Predicate.isString(payload.summary) ? payload.summary : 'Shuttle review',
                 verdict,
                 comments,
@@ -433,6 +434,10 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         }
 
         case 'shuttle.review.submitted': {
+          return { ...state, pendingReviewSubmit: null }
+        }
+
+        case 'shuttle.review.submit_failed': {
           return { ...state, pendingReviewSubmit: null }
         }
 
@@ -989,6 +994,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
               'shuttle.pr.published',
               'shuttle.pr.publish_failed',
               'shuttle.review.submitted',
+              'shuttle.review.submit_failed',
               'approval.decided',
               'agent.spawn.requested',
               'runtime.thread.completed',

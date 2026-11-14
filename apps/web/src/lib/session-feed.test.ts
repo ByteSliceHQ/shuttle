@@ -492,3 +492,59 @@ describe('thinking fold', () => {
     })
   })
 })
+
+describe('review in the session feed', () => {
+  const asked = event(
+    'approval.requested',
+    {
+      approvalId: 'pr_review_1',
+      title: 'Submit pull request review?',
+      schema: {
+        type: 'object',
+        properties: {
+          summary: { type: 'string', default: 'Two bugs in the storage handler.' },
+          verdict: { type: 'string', default: 'request_changes' },
+        },
+      },
+    },
+    'thr_reviewer',
+  )
+
+  test("the reviewer's summary and verdict are what the form starts from", () => {
+    const feed = fold([asked])
+
+    expect(feed.pendingReviewApprovalId).toBe('pr_review_1')
+
+    expect(feed.reviewProposal).toEqual({
+      summary: 'Two bugs in the storage handler.',
+      verdict: 'request_changes',
+    })
+  })
+
+  test('a review GitHub refused says so, and one that went through says what was sent', () => {
+    const failed = fold([
+      asked,
+      event('shuttle.review.submit_failed', { approvalId: 'pr_review_1', error: 'GitHub said no' }),
+    ])
+
+    expect(failed.reviewOutcome).toEqual({ status: 'failed', error: 'GitHub said no' })
+
+    const sent = fold([
+      asked,
+      event('shuttle.review.submitted', {
+        fullName: 'acme/glue',
+        number: 8,
+        verdict: 'request_changes',
+        commentCount: 3,
+        unanchoredCount: 1,
+      }),
+    ])
+
+    expect(sent.reviewOutcome).toEqual({
+      status: 'submitted',
+      verdict: 'request_changes',
+      commentCount: 3,
+      unanchoredCount: 1,
+    })
+  })
+})

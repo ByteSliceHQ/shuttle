@@ -24,8 +24,14 @@ export function ReviewViewer({ runId }: { runId: string }) {
   const feed = useProjection(store, sessionFeed)
   const [diffText, setDiffText] = useState<string | null>(null)
   const [diffError, setDiffError] = useState<string | null>(null)
-  const [summary, setSummary] = useState('Shuttle review')
-  const [verdict, setVerdict] = useState<Verdict>('comment')
+  // Until someone edits them, the summary and verdict are the ones the reviewer proposed.
+  const [summaryEdit, setSummaryEdit] = useState<string | null>(null)
+  const [verdictEdit, setVerdictEdit] = useState<Verdict | null>(null)
+  const summary = summaryEdit ?? feed.reviewProposal?.summary ?? ''
+  const verdict = verdictEdit ?? feed.reviewProposal?.verdict ?? 'comment'
+  const setSummary = setSummaryEdit
+  const setVerdict = setVerdictEdit
+  const outcome = feed.reviewOutcome
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -115,7 +121,7 @@ export function ReviewViewer({ runId }: { runId: string }) {
         actionId: 'submit',
         outcome: 'approve',
         payload: {
-          summary,
+          summary: summary.trim() || 'Shuttle review',
           verdict,
           comments: comments
             .filter((comment) => comment.enabled)
@@ -123,12 +129,13 @@ export function ReviewViewer({ runId }: { runId: string }) {
               path: comment.path,
               line: comment.line,
               side: comment.side,
-              body: comment.editedBody.trim() || comment.body,
+              body: withSuggestion(comment.editedBody.trim() || comment.body, comment.suggestion),
             })),
         },
       })
     } catch (cause) {
       setError(errorMessage(cause))
+    } finally {
       setPending(false)
     }
   }
@@ -154,7 +161,7 @@ export function ReviewViewer({ runId }: { runId: string }) {
         <Textarea
           value={summary}
           onChange={(event) => setSummary(event.target.value)}
-          placeholder="Review summary"
+          placeholder="Summary of the review"
           className="min-h-16 resize-none text-[12.5px]"
           disabled={pending || !approvalId}
         />
@@ -182,7 +189,13 @@ export function ReviewViewer({ runId }: { runId: string }) {
           <div className="ml-auto flex items-center gap-2">
             {error ? <span className="text-status-failed text-[11px]">{error}</span> : null}
             {!approvalId ? (
-              <span className="text-muted-foreground text-[11px]">Waiting for submit gate…</span>
+              <span className="text-muted-foreground text-[11px]">
+                {outcome?.status === 'submitted'
+                  ? 'Sent to GitHub'
+                  : outcome?.status === 'failed'
+                    ? 'Not sent'
+                    : 'The reviewer is still drafting…'}
+              </span>
             ) : (
               <Button
                 type="button"
@@ -202,6 +215,24 @@ export function ReviewViewer({ runId }: { runId: string }) {
           </div>
         </div>
       </div>
+
+      {outcome?.status === 'failed' ? (
+        <p
+          role="alert"
+          className="text-status-failed shrink-0 border-b px-3 py-2 text-[12px] leading-snug wrap-anywhere"
+        >
+          GitHub did not take the review, so nothing was posted. {outcome.error} Ask the reviewer to
+          submit again once this is sorted out.
+        </p>
+      ) : outcome?.status === 'submitted' ? (
+        <p className="text-muted-foreground shrink-0 border-b px-3 py-2 text-[12px] leading-snug">
+          Review sent to GitHub with {outcome.commentCount} inline comment
+          {outcome.commentCount === 1 ? '' : 's'}.
+          {outcome.unanchoredCount > 0
+            ? ` ${outcome.unanchoredCount} more could not be placed on a line of the diff and went in the review's summary.`
+            : ''}
+        </p>
+      ) : null}
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col gap-4 p-3">
@@ -272,6 +303,11 @@ export function ReviewViewer({ runId }: { runId: string }) {
   )
 }
 
+/** A comment's text as GitHub shows it, with a proposed replacement as a suggestion block. */
+function withSuggestion(body: string, suggestion: string | undefined): string {
+  return suggestion ? `${body}\n\n\`\`\`suggestion\n${suggestion}\n\`\`\`` : body
+}
+
 function CommentEditor({
   comment,
   onChange,
@@ -309,6 +345,14 @@ function CommentEditor({
         disabled={!comment.enabled}
         className="min-h-14 resize-none text-[12px]"
       />
+      {comment.suggestion ? (
+        <div className="mt-1.5">
+          <p className="text-muted-foreground mb-1 text-[10px] font-medium">Suggested change</p>
+          <pre className="bg-status-completed/10 overflow-x-auto rounded-sm px-2 py-1.5 font-mono text-[11px] leading-[18px] whitespace-pre">
+            {comment.suggestion}
+          </pre>
+        </div>
+      ) : null}
     </div>
   )
 }

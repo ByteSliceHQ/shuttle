@@ -583,7 +583,9 @@ export async function submitPullReview(
   )
 
   if (!response.ok) {
-    throw new Error(`Failed to submit review: ${response.status}`)
+    const detail = (await response.text().catch(() => '')).slice(0, 500)
+
+    throw new Error(`GitHub refused the review (${response.status})${detail ? `: ${detail}` : ''}`)
   }
 
   const body = (await response.json()) as { id: number }

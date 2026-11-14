@@ -150,6 +150,14 @@ export interface PullStackPosition {
   readonly layer: number
 }
 
+export type ReviewVerdict = 'approve' | 'request_changes' | 'comment'
+
+function reviewVerdict(value: JsonValue | undefined): ReviewVerdict | undefined {
+  return value === 'approve' || value === 'request_changes' || value === 'comment'
+    ? value
+    : undefined
+}
+
 export interface DraftReviewComment {
   readonly commentId: string
   readonly path: string
@@ -183,6 +191,18 @@ export interface SessionFeed {
   readonly draftReviewComments: readonly DraftReviewComment[]
   /** Open submit-review approval, if any. */
   readonly pendingReviewApprovalId?: string
+  /** The summary and verdict the reviewer proposed when it asked to submit. */
+  readonly reviewProposal?: { readonly summary?: string; readonly verdict?: ReviewVerdict }
+  /** What became of the last review that was sent to GitHub. */
+  readonly reviewOutcome?:
+    | {
+        readonly status: 'submitted'
+        readonly verdict: ReviewVerdict
+        readonly commentCount: number
+        /** Comments GitHub could not place on a line, sent in the review's body instead. */
+        readonly unanchoredCount: number
+      }
+    | { readonly status: 'failed'; readonly error: string }
   /** Threads run by a vendor agent (Codex, Claude Code), keyed by thread id. */
   readonly vendorAgents: Readonly<Record<string, VendorAgent>>
 }
@@ -772,7 +792,40 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
           ...(taken.thought ? { thought: taken.thought } : {}),
         }),
         questionIndex: { ...taken.feed.questionIndex, [approvalId]: taken.feed.items.length },
-        ...(approvalId.startsWith('pr_review_') ? { pendingReviewApprovalId: approvalId } : {}),
+        ...(approvalId.startsWith('pr_review_')
+          ? {
+              pendingReviewApprovalId: approvalId,
+              reviewOutcome: undefined,
+              reviewProposal: {
+                ...(jsonText(defaults.summary) ? { summary: jsonText(defaults.summary) } : {}),
+                ...(reviewVerdict(defaults.verdict)
+                  ? { verdict: reviewVerdict(defaults.verdict) }
+                  : {}),
+              },
+            }
+          : {}),
+      }
+    }
+
+    case 'shuttle.review.submitted': {
+      return {
+        ...feed,
+        reviewOutcome: {
+          status: 'submitted',
+          verdict: reviewVerdict(payload.verdict) ?? 'comment',
+          commentCount: jsonNumber(payload.commentCount) ?? 0,
+          unanchoredCount: jsonNumber(payload.unanchoredCount) ?? 0,
+        },
+      }
+    }
+
+    case 'shuttle.review.submit_failed': {
+      return {
+        ...feed,
+        reviewOutcome: {
+          status: 'failed',
+          error: jsonText(payload.error) ?? 'The review could not be sent.',
+        },
       }
     }
 

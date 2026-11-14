@@ -17,11 +17,15 @@ import { StackLadder } from '@/components/pulls/stack-ladder'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { errorMessage } from '@/lib/cn'
-import { pullKey, startPullReview, type PullInboxSummary, type PullStack } from '@/lib/pulls'
+import {
+  authorRunId,
+  pullKey,
+  startPullReview,
+  type PullInboxSummary,
+  type PullStack,
+} from '@/lib/pulls'
 import { compactRelativeTime, fullDateTime } from '@/lib/time'
 import { useNow } from '@/lib/use-now'
-
-type ReviewIntent = 'review' | 'feedback'
 
 export function PullDetailSheet({
   folderId,
@@ -72,30 +76,29 @@ function PullDetail({
 }) {
   const navigate = useNavigate()
   const now = useNow()
-  const [pending, setPending] = useState<ReviewIntent | null>(null)
+  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const review = reviewLabel(pull.reviewDecision)
   const body = pull.body.trim()
 
-  function start(intent: ReviewIntent) {
-    setPending(intent)
-    setError(null)
+  // Feedback is addressed where the pull request was written: only that session has the branch
+  // and can push to it. A pull request Shuttle did not open has no such session.
+  const authoringRunId = authorRunId(pull)
 
-    const title =
-      intent === 'review'
-        ? `Review ${pull.fullName}#${pull.number}`
-        : `Address feedback on ${pull.fullName}#${pull.number}`
+  function startReview() {
+    setPending(true)
+    setError(null)
 
     void startPullReview(folderId, pull.fullName, pull.number, {
       headSha: pull.headSha,
       baseSha: pull.baseSha,
-      title,
+      title: `Review ${pull.fullName}#${pull.number}`,
     })
       .then((result) =>
         navigate({ to: '/sessions/$sessionId', params: { sessionId: result.runId } }),
       )
       .catch((cause: unknown) => setError(errorMessage(cause)))
-      .finally(() => setPending(null))
+      .finally(() => setPending(false))
   }
 
   return (
@@ -215,19 +218,12 @@ function PullDetail({
             </a>
           </Button>
           <div className="ml-auto flex items-center gap-2">
-            {pull.reviewDecision === 'changes_requested' ? (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={pending !== null}
-                onClick={() => start('feedback')}
-              >
-                {pending === 'feedback' ? (
-                  <LoaderCircle className="animate-spin" />
-                ) : (
+            {pull.reviewDecision === 'changes_requested' && authoringRunId ? (
+              <Button variant="outline" size="sm" asChild>
+                <Link to="/sessions/$sessionId" params={{ sessionId: authoringRunId }}>
                   <MessageSquareReply />
-                )}
-                Address feedback
+                  Address feedback
+                </Link>
               </Button>
             ) : null}
             {pull.reviewingRunId ? (
@@ -238,17 +234,8 @@ function PullDetail({
                 </Link>
               </Button>
             ) : (
-              <Button
-                variant="brand"
-                size="sm"
-                disabled={pending !== null}
-                onClick={() => start('review')}
-              >
-                {pending === 'review' ? (
-                  <LoaderCircle className="animate-spin" />
-                ) : (
-                  <GitPullRequest />
-                )}
+              <Button variant="brand" size="sm" disabled={pending} onClick={startReview}>
+                {pending ? <LoaderCircle className="animate-spin" /> : <GitPullRequest />}
                 Review with Shuttle
               </Button>
             )}

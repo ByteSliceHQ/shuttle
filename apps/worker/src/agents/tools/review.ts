@@ -9,33 +9,50 @@ import { getPullRequest, listPullFiles, listReviewThreads } from '../../github/p
 import { readSandboxBinding } from '../../session/bind-sandbox'
 import { shuttleModule } from '../../session/scope'
 
-/** Lines covered by a unified diff patch (RIGHT side = new file). */
-export function linesCoveredByPatch(patch: string | undefined): Set<number> {
+/**
+ * Lines a comment can be anchored to in a unified diff patch: on the RIGHT, lines of the new
+ * file (added or context); on the LEFT, lines of the old file (removed or context).
+ */
+export function linesCoveredByPatch(
+  patch: string | undefined,
+  side: 'LEFT' | 'RIGHT' = 'RIGHT',
+): Set<number> {
   const lines = new Set<number>()
 
   if (!patch) {
     return lines
   }
 
+  let oldLine = 0
   let newLine = 0
 
   for (const line of patch.split('\n')) {
     if (line.startsWith('@@')) {
-      const match = line.match(/\+(\d+)(?:,(\d+))?/)
+      const match = line.match(/-(\d+)(?:,\d+)? \+(\d+)(?:,\d+)?/)
 
-      if (match?.[1]) {
-        newLine = Number(match[1])
+      if (match?.[1] && match[2]) {
+        oldLine = Number(match[1])
+        newLine = Number(match[2])
       }
 
       continue
     }
 
     if (line.startsWith('-')) {
-      continue
-    }
+      if (side === 'LEFT') {
+        lines.add(oldLine)
+      }
 
-    if (line.startsWith('+') || line.startsWith(' ')) {
-      lines.add(newLine)
+      oldLine += 1
+    } else if (line.startsWith('+')) {
+      if (side === 'RIGHT') {
+        lines.add(newLine)
+      }
+
+      newLine += 1
+    } else if (line.startsWith(' ')) {
+      lines.add(side === 'LEFT' ? oldLine : newLine)
+      oldLine += 1
       newLine += 1
     }
   }
@@ -43,18 +60,102 @@ export function linesCoveredByPatch(patch: string | undefined): Set<number> {
   return lines
 }
 
-export function createReviewTools(env: ShuttleEnv, runId: string, storage?: DurableObjectStorage) {
-  const coveredByPath = new Map<string, Set<number>>()
-  let activePull: { fullName: string; number: number; headSha: string } | null = null
+export interface AnchoredComment {
+  readonly path: string
+  readonly line: number
+  readonly side: 'LEFT' | 'RIGHT'
+  readonly body: string
+}
 
-  const drafted: {
-    path: string
-    line: number
-    side: 'LEFT' | 'RIGHT'
-    body: string
-    severity: string
-    commentId: string
-  }[] = []
+/**
+ * Splits `comments` into those GitHub will accept on the lines they name and those it will not:
+ * a file the pull request does not touch, a file with no patch, or a line outside its hunks.
+ * One comment GitHub cannot place makes it refuse the whole review, so those go in the body.
+ */
+export function partitionByAnchor<T extends AnchoredComment>(
+  comments: readonly T[],
+  files: readonly { readonly path: string; readonly patch?: string }[],
+): { anchored: T[]; unanchored: T[] } {
+  const patches = new Map(files.map((file) => [file.path, file.patch]))
+  const anchored: T[] = []
+  const unanchored: T[] = []
+
+  for (const comment of comments) {
+    const covered = linesCoveredByPatch(patches.get(comment.path), comment.side)
+
+    if (covered.has(comment.line)) {
+      anchored.push(comment)
+    } else {
+      unanchored.push(comment)
+    }
+  }
+
+  return { anchored, unanchored }
+}
+
+/** The review body, followed by the comments that could not be placed on a line. */
+export function bodyWithUnanchored(body: string, unanchored: readonly AnchoredComment[]): string {
+  if (unanchored.length === 0) {
+    return body
+  }
+
+  return [
+    body,
+    '',
+    '**Comments on lines outside the diff**',
+    '',
+    ...unanchored.map((comment) => `- \`${comment.path}:${comment.line}\` ${comment.body}`),
+  ].join('\n')
+}
+
+/** A comment's text as GitHub shows it, with a proposed replacement as a suggestion block. */
+export function commentBody(body: string, suggestion: string | undefined): string {
+  return suggestion ? `${body}\n\n\`\`\`suggestion\n${suggestion}\n\`\`\`` : body
+}
+
+/** What the reviewer has drafted so far, kept so it survives the session's process restarting. */
+export const REVIEW_DRAFT_KEY = 'shuttle:review-draft'
+
+interface ReviewDraftState {
+  readonly activePull: { fullName: string; number: number; headSha: string } | null
+  readonly drafted: readonly DraftedComment[]
+}
+
+interface DraftedComment {
+  readonly path: string
+  readonly line: number
+  readonly side: 'LEFT' | 'RIGHT'
+  readonly body: string
+  readonly severity: string
+  readonly commentId: string
+  readonly suggestion?: string
+}
+
+export function createReviewTools(env: ShuttleEnv, runId: string, storage?: DurableObjectStorage) {
+  const patchByPath = new Map<string, string | undefined>()
+  let activePull: ReviewDraftState['activePull'] = null
+  const drafted: DraftedComment[] = []
+
+  // Tool effects cannot wait, so the saved draft is read as soon as the tools exist and
+  // written after each change. Anything drafted before it loads is kept.
+  void storage?.get<ReviewDraftState>(REVIEW_DRAFT_KEY).then((saved) => {
+    if (!saved) {
+      return
+    }
+
+    activePull ??= saved.activePull
+
+    const known = new Set(drafted.map((comment) => comment.commentId))
+
+    drafted.unshift(...saved.drafted.filter((comment) => !known.has(comment.commentId)))
+  })
+
+  const save = () => {
+    void storage?.put(REVIEW_DRAFT_KEY, {
+      activePull,
+      drafted: [...drafted],
+    } satisfies ReviewDraftState)
+  }
 
   async function resolveRepo(fullName: string) {
     const binding = await readSandboxBinding(storage, runId)
@@ -81,10 +182,10 @@ export function createReviewTools(env: ShuttleEnv, runId: string, storage?: Dura
         listReviewThreads(env, repo, input.number),
       ])
 
-      coveredByPath.clear()
+      patchByPath.clear()
 
       for (const file of files) {
-        coveredByPath.set(file.path, linesCoveredByPatch(file.patch))
+        patchByPath.set(file.path, file.patch)
       }
 
       activePull = {
@@ -92,6 +193,8 @@ export function createReviewTools(env: ShuttleEnv, runId: string, storage?: Dura
         number: summary.number,
         headSha: summary.headSha,
       }
+
+      save()
 
       return {
         ok: true,
@@ -140,12 +243,22 @@ export function createReviewTools(env: ShuttleEnv, runId: string, storage?: Dura
 
       const body = isJsonString(obj.body) ? obj.body : ''
       const suggestion = isJsonString(obj.suggestion) ? obj.suggestion : undefined
-      const covered = coveredByPath.get(path)
 
-      if (side === 'RIGHT' && covered && covered.size > 0 && !covered.has(line)) {
-        throw new Error(
-          `Line ${line} is outside the diff hunks for ${path}. Call pr_context and pick a covered line.`,
-        )
+      // Checked when the diff is at hand; the review is checked again before it is sent.
+      if (patchByPath.size > 0) {
+        if (!patchByPath.has(path)) {
+          throw new Error(
+            `${path} is not changed by this pull request. Comment on a file from pr_context.`,
+          )
+        }
+
+        const covered = linesCoveredByPatch(patchByPath.get(path), side)
+
+        if (covered.size > 0 && !covered.has(line)) {
+          throw new Error(
+            `Line ${line} (${side}) is outside the diff hunks for ${path}. Pick a line the diff shows.`,
+          )
+        }
       }
 
       const commentId = crypto.randomUUID()
@@ -157,7 +270,10 @@ export function createReviewTools(env: ShuttleEnv, runId: string, storage?: Dura
         side,
         body,
         severity,
+        ...(suggestion ? { suggestion } : {}),
       })
+
+      save()
 
       return [
         emit(
@@ -206,7 +322,7 @@ export function createReviewTools(env: ShuttleEnv, runId: string, storage?: Dura
               path: comment.path,
               line: comment.line,
               side: comment.side,
-              body: comment.body,
+              body: commentBody(comment.body, comment.suggestion),
             }))
 
       const fullName = activePull?.fullName ?? ''
