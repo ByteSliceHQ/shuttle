@@ -2,10 +2,18 @@ import { z } from 'zod'
 
 import { defineTool } from '@swirls/looms/agent'
 
+import {
+  LSP_CLI_PATH,
+  LSP_DEFAULT_WAIT_MS,
+  toolDiagnostics,
+  type ToolDiagnostics,
+} from '../../bridge/lsp/protocol'
 import type { ShuttleEnv } from '../env'
 import { sandboxStub } from '../env'
+import { shellQuote } from '../sandbox/exec-argv'
 import {
   insideSessionWorktree,
+  resolvePath,
   sessionWorkDir,
   worktreeRoot,
   type LinkedSandboxRepo,
@@ -13,6 +21,9 @@ import {
 import type { SandboxBinding } from '../session/bind-sandbox'
 import { readSandboxBinding, sandboxNameForSession } from '../session/bind-sandbox'
 import { prepareSessionSandbox } from '../session/handoff'
+
+/** Longest a tool waits on `shuttle-lsp`: its own wait, plus starting the daemon and a server. */
+const DIAGNOSTICS_TIMEOUT_MS = LSP_DEFAULT_WAIT_MS + 7000
 
 async function withAbort<T>(
   signal: AbortSignal | undefined,
@@ -91,6 +102,44 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
     await sandboxStub(env, binding.sandboxName).kill()
   }
 
+  /**
+   * What the language server says about a file the agent just changed, so a type error shows up
+   * in the same turn that caused it. Never fails the write it follows: a sandbox with no
+   * language server, or one that is still starting, simply has nothing to add.
+   */
+  async function diagnose(
+    path: string,
+    cwd: string,
+    sandboxName: string,
+    signal: AbortSignal | undefined,
+  ): Promise<ToolDiagnostics> {
+    const sandbox = sandboxStub(env, sandboxName)
+    const execId = crypto.randomUUID()
+    const file = shellQuote(resolvePath(path, cwd))
+
+    try {
+      const result = await withAbort(
+        signal,
+        () =>
+          sandbox.exec(
+            `[ -f ${LSP_CLI_PATH} ] && node ${LSP_CLI_PATH} diagnostics ${file} --wait-ms ${LSP_DEFAULT_WAIT_MS}`,
+            { cwd, timeoutMs: DIAGNOSTICS_TIMEOUT_MS, execId },
+          ),
+        async () => {
+          await sandbox.kill(execId)
+        },
+      )
+
+      return toolDiagnostics(result.stdout)
+    } catch (cause) {
+      if (signal?.aborted) {
+        throw cause
+      }
+
+      return {}
+    }
+  }
+
   const readFile = defineTool({
     name: 'read_file',
     description: 'Read a file from the session sandbox workspace',
@@ -118,7 +167,8 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
 
   const writeFile = defineTool({
     name: 'write_file',
-    description: 'Write a file in the worker worktree',
+    description:
+      'Write a file in the worker worktree. The result lists any errors the language server finds in it.',
     input: z.object({
       path: z.string(),
       content: z.string(),
@@ -139,13 +189,14 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
         onAbort,
       )
 
-      return { path, ok: true }
+      return { path, ok: true, ...(await diagnose(path, cwd, binding.sandboxName, ctx.signal)) }
     },
   })
 
   const editFile = defineTool({
     name: 'edit_file',
-    description: 'Replace old_text with new_text in a file (exact match)',
+    description:
+      'Replace old_text with new_text in a file (exact match). The result lists any errors the language server finds in the file afterwards.',
     input: z.object({
       path: z.string(),
       old_text: z.string(),
@@ -167,7 +218,13 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
         onAbort,
       )
 
-      return { path, replacements: result.replacements }
+      return {
+        path,
+        replacements: result.replacements,
+        ...(result.replacements > 0
+          ? await diagnose(path, cwd, binding.sandboxName, ctx.signal)
+          : {}),
+      }
     },
   })
 

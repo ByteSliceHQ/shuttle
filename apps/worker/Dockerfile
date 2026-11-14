@@ -30,7 +30,18 @@ RUN npm install -g --no-fund --no-audit \
 RUN curl -fsS https://cursor.com/install | bash
 ENV PATH="/root/.local/bin:${PATH}"
 
-# shuttle-agent-bridge drives those agents for the Worker. Node runs the TypeScript directly.
+# Language servers for shuttle-lsp, which reports type errors back to agents as they edit.
+# TypeScript 7 is its own server (`tsc --lsp`) and stands in for a project that has not installed
+# one; typescript-language-server wraps tsserver for projects still on TypeScript 6 or older.
+ARG TYPESCRIPT_VERSION=7.0.2
+ARG TYPESCRIPT_LANGUAGE_SERVER_VERSION=6.1.0
+RUN npm install -g --no-fund --no-audit \
+    typescript@${TYPESCRIPT_VERSION} \
+    typescript-language-server@${TYPESCRIPT_LANGUAGE_SERVER_VERSION} \
+  && npm cache clean --force
+
+# shuttle-agent-bridge drives those agents for the Worker, and shuttle-lsp (bridge/lsp) keeps the
+# language servers. Node runs the TypeScript directly.
 COPY bridge /opt/shuttle-bridge
 
 WORKDIR /workspace
