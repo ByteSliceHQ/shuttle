@@ -1,7 +1,13 @@
+import {
+  LSP_CLI_PATH,
+  LSP_DEFAULT_WAIT_MS,
+  type LspDiagnosticsReply,
+} from '../../bridge/lsp/protocol'
 import { codeStorageClient, codeStorageConfigured } from '../codestorage/client'
 import type { ShuttleEnv } from '../env'
 import { sandboxStub } from '../env'
 import { loomsStub } from '../looms-stub'
+import { shellQuote } from '../sandbox/exec-argv'
 import {
   DEMO_REPO,
   isDemoRepo,
@@ -38,7 +44,7 @@ export async function handleSandboxRoutes(
   const url = new URL(request.url)
 
   const match = url.pathname.match(
-    /^\/sessions\/([^/]+)\/sandbox\/(files|file|diff|terminal|preview|place|workspace|adopt|write)$/,
+    /^\/sessions\/([^/]+)\/sandbox\/(files|file|diff|terminal|preview|place|workspace|adopt|write|diagnostics)$/,
   )
 
   if (!match) {
@@ -108,6 +114,10 @@ export async function handleSandboxRoutes(
 
   if (action === 'write') {
     return writeFile(request, env, stub, runId, personal)
+  }
+
+  if (action === 'diagnostics') {
+    return diagnostics(request, env, stub, runId, url.searchParams.get('path'))
   }
 
   if (request.method !== 'GET') {
@@ -195,6 +205,88 @@ async function liveWorkspace(
       { status: 500 },
     )
   }
+}
+
+/**
+ * What the sandbox's language server says about one file, for the editor to draw. `GET` checks
+ * the file as saved; `POST` with `{ content }` checks text someone is typing and has not saved.
+ * `path` is `<repository>/<path>`.
+ *
+ * Always answers 200 with a status: a sandbox that is asleep, has no language server, or has one
+ * that is still starting is not an error to the person looking at a file.
+ */
+async function diagnostics(
+  request: Request,
+  env: ShuttleEnv,
+  stub: ReturnType<typeof sandboxStub>,
+  runId: string,
+  pathParam: string | null,
+): Promise<Response> {
+  if (request.method !== 'GET' && request.method !== 'POST') {
+    return Response.json({ error: 'Method not allowed' }, { status: 405 })
+  }
+
+  const file = await repoFile(env, runId, pathParam)
+
+  if (!file) {
+    return Response.json(
+      { error: 'path must be a file in one of the session repositories' },
+      { status: 400 },
+    )
+  }
+
+  let draft: string | undefined
+
+  if (request.method === 'POST') {
+    const body = (await request.json().catch(() => null)) as { content?: unknown } | null
+
+    if (typeof body?.content !== 'string' || body.content.length > MAX_FILE_BYTES) {
+      return Response.json({ error: 'content must be the text of the file' }, { status: 400 })
+    }
+
+    draft = body.content
+  }
+
+  // Looking never wakes a sandbox.
+  if (sandboxesArePersonal(env) && !(await stub.isAwake().catch(() => ({ awake: true }))).awake) {
+    return Response.json({ status: 'unavailable', reason: 'The sandbox is asleep.' })
+  }
+
+  const absolute = `/workspace/.wt/${runId}/${file.relative}`
+  let command = `[ -f ${LSP_CLI_PATH} ] && node ${LSP_CLI_PATH} diagnostics ${shellQuote(absolute)} --wait-ms ${LSP_DEFAULT_WAIT_MS}`
+
+  try {
+    if (draft !== undefined) {
+      // shuttle-lsp reads the draft from this file once and deletes it.
+      const draftFile = `/tmp/shuttle-lsp-draft-${crypto.randomUUID()}`
+
+      await stub.writeFile(draftFile, draft)
+      command += ` --text-file ${draftFile}`
+    }
+
+    const result = await stub.exec(command, { timeoutMs: LSP_DEFAULT_WAIT_MS + 7000 })
+
+    return Response.json(parseDiagnosticsReply(result.stdout))
+  } catch (cause) {
+    return Response.json({
+      status: 'error',
+      reason: cause instanceof Error ? cause.message : String(cause),
+    } satisfies LspDiagnosticsReply)
+  }
+}
+
+function parseDiagnosticsReply(stdout: string): LspDiagnosticsReply {
+  try {
+    const reply = JSON.parse(stdout.trim()) as LspDiagnosticsReply
+
+    if (typeof reply === 'object' && reply !== null && typeof reply.status === 'string') {
+      return reply
+    }
+  } catch {
+    // Nothing printed: this sandbox's image has no shuttle-lsp.
+  }
+
+  return { status: 'unavailable', reason: 'This sandbox has no language server.' }
 }
 
 /** One file's changes since the session started. `path` is `<repository>/<path>`. */

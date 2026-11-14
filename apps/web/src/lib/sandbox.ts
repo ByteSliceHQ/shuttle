@@ -193,6 +193,63 @@ export async function saveFile(
   }
 }
 
+export type DiagnosticSeverity = 'error' | 'warning' | 'info' | 'hint'
+
+/** One problem the language server found. Positions are 1-based, as an editor shows them. */
+export interface FileDiagnostic {
+  readonly line: number
+  readonly column: number
+  readonly endLine: number
+  /** The column after the problem's last character. */
+  readonly endColumn: number
+  readonly severity: DiagnosticSeverity
+  readonly message: string
+  readonly code?: string
+  readonly source?: string
+}
+
+export type FileDiagnostics =
+  | {
+      readonly status: 'ok'
+      readonly server: string
+      readonly diagnostics: readonly FileDiagnostic[]
+    }
+  /** The server is still starting. Asking again shortly will answer. */
+  | { readonly status: 'pending' }
+  /** No server covers this kind of file, or this sandbox cannot run one. */
+  | { readonly status: 'unsupported' | 'unavailable' | 'error'; readonly reason?: string }
+
+/**
+ * What the sandbox's language server says about a file: as saved, or, given `draft`, as someone
+ * is editing it. `path` is `<repository>/<path>`.
+ */
+export async function fetchDiagnostics(
+  runId: string,
+  path: string,
+  draft?: string,
+  signal?: AbortSignal,
+): Promise<FileDiagnostics> {
+  const response = await fetch(
+    `${sandboxBase(runId)}/diagnostics?path=${encodeURIComponent(path)}`,
+    {
+      signal,
+      ...(draft === undefined
+        ? {}
+        : {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ content: draft }),
+          }),
+    },
+  )
+
+  if (!response.ok) {
+    return { status: 'error', reason: `Could not check the file: ${response.status}` }
+  }
+
+  return (await response.json()) as FileDiagnostics
+}
+
 /** Moves something an agent wrote outside the workspace into it. */
 export async function adoptStray(runId: string, path: string): Promise<void> {
   const response = await fetch(`${sandboxBase(runId)}/adopt`, {

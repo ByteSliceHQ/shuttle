@@ -9,10 +9,14 @@ import { EmptyState } from '@/components/ui/panel'
 import { cn } from '@/lib/cn'
 import {
   fetchBaseFile,
+  fetchDiagnostics,
   fetchFileDiff,
   fetchSandboxFile,
   saveFile,
   type ChangeStatus,
+  type DiagnosticSeverity,
+  type FileDiagnostic,
+  type FileDiagnostics,
 } from '@/lib/sandbox'
 
 /**
@@ -72,6 +76,96 @@ const createEditor: EditorFactory<undefined, undefined> = (type, options, key) =
   return new editorModule.Editor(type, options, key)
 }
 
+/** How long after the last keystroke an edit is sent to the language server. */
+const CHECK_AFTER_TYPING_MS = 350
+
+/** How long to wait before asking a language server that was still starting again. */
+const CHECK_AGAIN_MS = 2000
+
+const SEVERITY_CLASS: Record<DiagnosticSeverity, string> = {
+  error: 'text-destructive',
+  warning: 'text-status-waiting',
+  info: 'text-muted-foreground',
+  hint: 'text-muted-foreground',
+}
+
+/** Problems worth a line of their own under the code. Hints stay out of the way. */
+const SHOWN_INLINE = new Set<DiagnosticSeverity>(['error', 'warning'])
+
+/** `TS2322`, or whatever the server calls the rule. */
+function diagnosticCode(diagnostic: FileDiagnostic): string | null {
+  if (!diagnostic.code) {
+    return null
+  }
+
+  return (diagnostic.source === 'ts' || diagnostic.source === 'typescript') &&
+    /^\d+$/.test(diagnostic.code)
+    ? `TS${diagnostic.code}`
+    : diagnostic.code
+}
+
+/** The editor's squiggles: one per problem, with the message shown on hover. */
+function toMarkers(diagnostics: readonly FileDiagnostic[]): EditModule.Marker[] {
+  return diagnostics.map((diagnostic) => {
+    const code = diagnosticCode(diagnostic)
+
+    return {
+      start: { line: diagnostic.line - 1, character: diagnostic.column - 1 },
+      end: { line: diagnostic.endLine - 1, character: diagnostic.endColumn - 1 },
+      severity: diagnostic.severity,
+      message: code ? `${diagnostic.message} (${code})` : diagnostic.message,
+      ...(diagnostic.source ? { source: diagnostic.source } : {}),
+    }
+  })
+}
+
+/** Problems grouped under the line they start on, for the read-only views. */
+function byLine(diagnostics: readonly FileDiagnostic[]): Map<number, FileDiagnostic[]> {
+  const lines = new Map<number, FileDiagnostic[]>()
+
+  for (const diagnostic of diagnostics) {
+    if (SHOWN_INLINE.has(diagnostic.severity)) {
+      lines.set(diagnostic.line, [...(lines.get(diagnostic.line) ?? []), diagnostic])
+    }
+  }
+
+  return lines
+}
+
+function countLabel(diagnostics: readonly FileDiagnostic[]): string | null {
+  const errors = diagnostics.filter((diagnostic) => diagnostic.severity === 'error').length
+  const warnings = diagnostics.filter((diagnostic) => diagnostic.severity === 'warning').length
+
+  const parts = [
+    errors > 0 ? `${errors} ${errors === 1 ? 'error' : 'errors'}` : null,
+    warnings > 0 ? `${warnings} ${warnings === 1 ? 'warning' : 'warnings'}` : null,
+  ].filter(Boolean)
+
+  return parts.length > 0 ? parts.join(', ') : null
+}
+
+/** The problems on one line, drawn under it. */
+function LineProblems({ problems }: { problems: readonly FileDiagnostic[] }) {
+  return (
+    <div className="bg-muted/40 border-border/60 border-y px-3 py-1 font-sans text-[11px] leading-4">
+      {problems.map((problem) => (
+        <div
+          key={`${problem.column}:${problem.code ?? ''}:${problem.message}`}
+          className="flex items-baseline gap-2"
+        >
+          <span className={cn('shrink-0 font-medium', SEVERITY_CLASS[problem.severity])}>
+            {problem.severity}
+          </span>
+          <span className="text-foreground min-w-0 whitespace-pre-wrap">{problem.message}</span>
+          {diagnosticCode(problem) ? (
+            <span className="text-muted-foreground shrink-0">{diagnosticCode(problem)}</span>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 interface Current {
   readonly content: string
   readonly binary: boolean
@@ -112,6 +206,12 @@ export default function FilePane({
   const [saveError, setSaveError] = useState<string | null>(null)
   const draft = useRef<string | null>(null)
   const decision = useRef<'accept' | 'reject'>('reject')
+  const [checked, setChecked] = useState<FileDiagnostics | null>(null)
+  /** Bumped to check the editor's unsaved text, a moment after typing stops. */
+  const [draftEpoch, setDraftEpoch] = useState(0)
+  /** Bumped to ask a language server that was still starting again. */
+  const [retryEpoch, setRetryEpoch] = useState(0)
+  const editor = useRef<EditModule.Editor<'file', FileDiagnostic[], undefined> | null>(null)
 
   // A deleted file has only its changes to show, an unchanged one only itself, and an edit
   // happens on the whole file.
@@ -189,6 +289,98 @@ export default function FilePane({
   }, [runId, path, refreshEpoch, view])
 
   const content = current && current !== 'missing' ? current.content : null
+  const checkable = content !== null && !(current !== 'missing' && current?.binary)
+
+  // Ask the language server about the file: as saved while reading, as typed while editing.
+  useEffect(() => {
+    if (!checkable) {
+      return
+    }
+
+    const abort = new AbortController()
+    // What this check is of: the saved file as it was loaded, or the edit as of this keystroke.
+    const asked = { runId, path, content, draftEpoch, retryEpoch }
+    const typed = editing ? (draft.current ?? undefined) : undefined
+
+    const timer = setTimeout(
+      () => {
+        fetchDiagnostics(asked.runId, asked.path, typed, abort.signal)
+          .then((result) => {
+            if (abort.signal.aborted) {
+              return
+            }
+
+            if (result.status === 'pending') {
+              setTimeout(
+                () => !abort.signal.aborted && setRetryEpoch((epoch) => epoch + 1),
+                CHECK_AGAIN_MS,
+              )
+
+              return
+            }
+
+            setChecked(result)
+          })
+          .catch(() => {
+            // A check that fails leaves the last answer where it is.
+          })
+      },
+      editing && asked.draftEpoch > 0 ? CHECK_AFTER_TYPING_MS : 0,
+    )
+
+    return () => {
+      clearTimeout(timer)
+      abort.abort()
+    }
+  }, [runId, path, content, checkable, editing, draftEpoch, retryEpoch])
+
+  const diagnostics = useMemo(
+    () => (checkable && checked?.status === 'ok' ? checked.diagnostics : []),
+    [checkable, checked],
+  )
+
+  // While editing, problems are squiggles in the editor, which keeps them in place as text moves.
+  const markers = useRef<EditModule.Marker[]>([])
+
+  useEffect(() => {
+    markers.current = toMarkers(diagnostics)
+
+    if (editing) {
+      editor.current?.setMarkers(markers.current)
+    }
+  }, [editing, diagnostics])
+
+  const editorOptions = useMemo(
+    () => ({
+      onAttach: (attached: EditModule.Editor<'file', FileDiagnostic[], undefined>) => {
+        editor.current = attached
+        // The editor attaches after the problems are known, so it is given them here too.
+        attached.setMarkers(markers.current)
+      },
+    }),
+    [],
+  )
+
+  // While reading, they are lines under the code. The editor owns annotations during an edit.
+  const fileAnnotations = useMemo(
+    () =>
+      editing
+        ? undefined
+        : [...byLine(diagnostics)].map(([lineNumber, metadata]) => ({ lineNumber, metadata })),
+    [editing, diagnostics],
+  )
+
+  const diffAnnotations = useMemo(
+    () =>
+      [...byLine(diagnostics)].map(([lineNumber, metadata]) => ({
+        side: 'additions' as const,
+        lineNumber,
+        metadata,
+      })),
+    [diagnostics],
+  )
+
+  const problemCount = countLabel(diagnostics)
 
   const file = useMemo(
     () => (content === null ? null : { name, contents: content }),
@@ -207,6 +399,8 @@ export default function FilePane({
     (outcome: 'accept' | 'reject') => {
       decision.current = outcome
       draft.current = null
+      editor.current = null
+      setDraftEpoch(0)
       setEditing(false)
       setDirty(false)
       setSaveError(null)
@@ -321,6 +515,11 @@ export default function FilePane({
             {blocked}
           </span>
         ) : null}
+        {problemCount ? (
+          <span className="text-destructive shrink-0" role="status">
+            {problemCount}
+          </span>
+        ) : null}
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {editing ? (
             <>
@@ -383,8 +582,12 @@ export default function FilePane({
               file={file}
               options={FILE_OPTIONS}
               edit={editing}
+              editorOptions={editorOptions}
+              lineAnnotations={fileAnnotations}
+              renderAnnotation={(annotation) => <LineProblems problems={annotation.metadata} />}
               onEditChange={(event) => {
                 draft.current = event.file.contents
+                setDraftEpoch((epoch) => epoch + 1)
 
                 const changed = event.file.contents !== content
 
@@ -405,9 +608,21 @@ export default function FilePane({
             )
           ) : // The component takes a file on each side, or exactly one missing side.
           oldFile && file ? (
-            <MultiFileDiff oldFile={oldFile} newFile={file} options={diffOptions} />
+            <MultiFileDiff
+              oldFile={oldFile}
+              newFile={file}
+              options={diffOptions}
+              lineAnnotations={diffAnnotations}
+              renderAnnotation={(annotation) => <LineProblems problems={annotation.metadata} />}
+            />
           ) : file ? (
-            <MultiFileDiff oldFile={null} newFile={file} options={diffOptions} />
+            <MultiFileDiff
+              oldFile={null}
+              newFile={file}
+              options={diffOptions}
+              lineAnnotations={diffAnnotations}
+              renderAnnotation={(annotation) => <LineProblems problems={annotation.metadata} />}
+            />
           ) : oldFile ? (
             <MultiFileDiff oldFile={oldFile} newFile={null} options={diffOptions} />
           ) : (
