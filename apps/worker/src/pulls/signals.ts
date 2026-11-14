@@ -261,6 +261,26 @@ export const recordPublished = pullsModule.signal({
   ],
 })
 
+/** The event that links a session to a pull request as its reviewer. */
+export function reviewerLinked(input: {
+  readonly fullName: string
+  readonly number: number
+  readonly runId: string
+  readonly threadId?: string
+}) {
+  return pullsModule.input(
+    'pull.linked',
+    {
+      fullName: input.fullName,
+      number: input.number,
+      runId: input.runId,
+      role: 'reviewer' as const,
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+    },
+    { idempotencyKey: `pulls-link:${input.runId}:${input.fullName}#${input.number}:reviewer` },
+  )
+}
+
 export const recordReview = pullsModule.signal({
   description: 'Record that a Shuttle session submitted a pull request review.',
   input: Schema.Struct({
@@ -288,18 +308,22 @@ export const recordReview = pullsModule.signal({
         idempotencyKey: `pulls-review:${input.runId}:${input.fullName}#${input.number}:${input.updatedAt}`,
       },
     ),
-    pullsModule.input(
-      'pull.linked',
-      {
-        fullName: input.fullName,
-        number: input.number,
-        runId: input.runId,
-        role: 'reviewer' as const,
-        ...(input.threadId ? { threadId: input.threadId } : {}),
-      },
-      { idempotencyKey: `pulls-link:${input.runId}:${input.fullName}#${input.number}:reviewer` },
-    ),
+    reviewerLinked(input),
   ],
+})
+
+/**
+ * Links a review session to the pull request it reviews as soon as the session starts, so the
+ * pull request shows who is reviewing it before any review is submitted.
+ */
+export const linkReviewSession = pullsModule.signal({
+  description: 'Link a review session to the pull request it is reviewing.',
+  input: Schema.Struct({
+    fullName: Schema.String,
+    number: Schema.Finite,
+    runId: Schema.String,
+  }),
+  build: (input) => reviewerLinked(input),
 })
 
 export const setRepoPolicy = pullsModule.signal({

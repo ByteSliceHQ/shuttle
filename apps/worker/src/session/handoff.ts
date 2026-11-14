@@ -21,7 +21,7 @@ type HandoffStorage = Pick<DurableObjectStorage, 'get' | 'put'>
 
 type HandoffSandbox = Pick<
   SessionSandboxStub,
-  'ensureRepos' | 'ensureWorktree' | 'snapshotSession' | 'restoreSession'
+  'ensureRepos' | 'ensureWorktree' | 'checkoutRef' | 'snapshotSession' | 'restoreSession'
 >
 
 /** Preparations under way, by session, so concurrent tool calls share one. */
@@ -59,13 +59,41 @@ export async function moveSession(
   return true
 }
 
+/** Checks the head of `pull` out as the session's worktree for its repository. */
+async function checkoutPull(
+  sandbox: HandoffSandbox,
+  runId: string,
+  repos: readonly LinkedSandboxRepo[],
+  pull: NonNullable<SandboxBinding['pull']>,
+): Promise<void> {
+  const repo = repos.find((item) => item.fullName === pull.fullName)
+
+  if (!repo) {
+    throw new Error(
+      `Cannot review ${pull.fullName}#${pull.number}: ${pull.fullName} is not linked to this session.`,
+    )
+  }
+
+  if (!pull.headSha) {
+    throw new Error(
+      `Cannot review ${pull.fullName}#${pull.number}: the session was started without the pull request's head commit.`,
+    )
+  }
+
+  await sandbox.checkoutRef(runId, repo, {
+    sha: pull.headSha,
+    ...(pull.baseSha ? { baseSha: pull.baseSha } : {}),
+  })
+}
+
 async function prepare(
   env: ShuttleEnv,
   storage: HandoffStorage | undefined,
   runId: string,
   name: string,
-  repos: readonly LinkedSandboxRepo[],
+  binding: SandboxBinding,
 ): Promise<string> {
+  const { repos, pull } = binding
   const sandbox = sandboxStub(env, name)
   const home = storage ? await storage.get<string>(SANDBOX_HOME_KEY) : undefined
 
@@ -86,6 +114,13 @@ async function prepare(
 
   if (!moved) {
     await sandbox.ensureRepos([...repos])
+
+    // A review session reads a pull request, so its worktree is that pull request's head and
+    // not the default branch. Done once per sandbox, here, so it lands in the sandbox the
+    // session's tools use; after a move the worktree arrives with the rest of the session.
+    if (pull && home !== name) {
+      await checkoutPull(sandbox, runId, repos, pull)
+    }
   }
 
   // After a move this only fills in repositories the session had not touched yet.
@@ -112,7 +147,7 @@ export async function prepareSessionSandbox(
   let pending = inFlight.get(key)
 
   if (!pending) {
-    pending = prepare(env, storage, runId, name, binding.repos).finally(() => inFlight.delete(key))
+    pending = prepare(env, storage, runId, name, binding).finally(() => inFlight.delete(key))
     inFlight.set(key, pending)
   }
 

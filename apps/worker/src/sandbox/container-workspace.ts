@@ -40,6 +40,41 @@ function recordBaseCommand(worktree: string, branch: string): string {
 }
 
 /**
+ * Shell that makes `target` the session's worktree of the repository cloned at `source`, on
+ * `branch` at the commit `sha`, replacing any worktree already there. `baseSha` is fetched too
+ * when given, so the two can be compared; failing to fetch it is not an error.
+ */
+export function checkoutRefScript(input: {
+  readonly source: string
+  readonly target: string
+  readonly branch: string
+  readonly cloneUrl: string
+  readonly basicAuth: string
+  readonly sha: string
+  readonly baseSha?: string
+}): string {
+  const source = shellQuote(input.source)
+  const target = shellQuote(input.target)
+  const auth = `-c http.extraheader=${shellQuote(`Authorization: Basic ${input.basicAuth}`)}`
+  const fetch = `git -C ${source} ${auth} fetch --depth 1 origin`
+
+  return [
+    `mkdir -p "$(dirname ${source})" "$(dirname ${target})"`,
+    `if [ ! -d ${source}/.git ]; then git ${auth} clone --depth 1 ${shellQuote(input.cloneUrl)} ${source}; fi`,
+    `${fetch} ${shellQuote(input.sha)}`,
+    ...(input.baseSha ? [`{ ${fetch} ${shellQuote(input.baseSha)} || true; }`] : []),
+    `if [ -d ${target} ]; then git -C ${source} worktree remove --force ${target} || rm -rf ${target}; fi`,
+    `git -C ${source} worktree prune`,
+    `git -C ${source} worktree add -B ${shellQuote(input.branch)} ${target} ${shellQuote(input.sha)}`,
+    recordBaseCommand(input.target, input.branch),
+    `parent=$(git -C ${source} symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')`,
+    `{ [ -n "$parent" ] || parent=$(git -C ${source} rev-parse --abbrev-ref HEAD); }`,
+    `git -C ${target} config ${shellQuote(`branch.${input.branch}.${LAYER_CONFIG_KEY}`)} 1`,
+    `git -C ${target} config ${shellQuote(`branch.${input.branch}.${PARENT_CONFIG_KEY}`)} "$parent"`,
+  ].join(' && ')
+}
+
+/**
  * Shell that makes an existing checkout at `target` safe to fetch `cloneUrl` into.
  *
  * The same repository cloned from somewhere else (GitHub, before its Code Storage mirror existed)
@@ -311,22 +346,25 @@ export class ContainerWorkspace implements Workspace {
     const target = worktreeRepoPath(runId, repo.name)
     const branch = ref.branch ?? `shuttle/${runId}/${repo.name}`
 
-    await this.execWithTimeout(
-      [
-        `mkdir -p /workspace/repos /workspace/.wt/${shellQuote(runId)}`,
-        `if [ ! -d ${shellQuote(source)}/.git ]; then`,
-        `  git -c http.extraheader=${shellQuote(`Authorization: Basic ${basic}`)} clone --depth 1 ${shellQuote(cloneUrl)} ${shellQuote(source)};`,
-        `fi`,
-        `git -C ${shellQuote(source)} -c http.extraheader=${shellQuote(`Authorization: Basic ${basic}`)} fetch --depth 1 origin ${shellQuote(ref.sha)}`,
-        `if [ -d ${shellQuote(target)} ]; then`,
-        `  git -C ${shellQuote(source)} worktree remove --force ${shellQuote(target)} || rm -rf ${shellQuote(target)};`,
-        `fi`,
-        `git -C ${shellQuote(source)} worktree add -B ${shellQuote(branch)} ${shellQuote(target)} ${shellQuote(ref.sha)}`,
-        recordBaseCommand(target, branch),
-      ].join(' && '),
+    const checkedOut = await this.execWithTimeout(
+      checkoutRefScript({
+        source,
+        target,
+        branch,
+        cloneUrl,
+        basicAuth: basic,
+        sha: ref.sha,
+        ...(ref.baseSha ? { baseSha: ref.baseSha } : {}),
+      }),
       { timeoutMs: DEFAULT_EXEC_TIMEOUT_MS },
       host,
     )
+
+    if (checkedOut.exitCode !== 0) {
+      throw new Error(
+        `Could not check out ${ref.sha} of ${repo.name}: ${checkedOut.stderr.trim() || `exit ${checkedOut.exitCode}`}`,
+      )
+    }
 
     return { root: target }
   }

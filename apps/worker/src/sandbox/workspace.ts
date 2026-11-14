@@ -65,6 +65,8 @@ export interface ChangesetResult {
 export interface CheckoutRefInput {
   readonly sha: string
   readonly branch?: string
+  /** A commit to fetch alongside `sha` so the two can be compared, such as a pull request's base. */
+  readonly baseSha?: string
 }
 
 export interface ExecOptions {

@@ -1,7 +1,6 @@
 import { Schema } from 'effect'
 
 import type { ShuttleEnv } from '../env'
-import { sandboxStub } from '../env'
 import { sandboxesArePersonal, userSandboxName } from '../sandbox/names'
 import { orgOfRun } from '../tenancy/run-id'
 import { shuttleModule } from './scope'
@@ -35,11 +34,21 @@ export interface SandboxBinding {
     readonly defaultBranch: string
     readonly private: boolean
   }[]
+  /**
+   * The pull request a review session reads. Its head is checked out as the session's worktree
+   * when the session's sandbox is prepared (see `handoff.ts`), in whichever sandbox that is.
+   */
+  readonly pull?: {
+    readonly fullName: string
+    readonly number: number
+    readonly headSha: string
+    readonly baseSha: string
+  }
 }
 
 const memoryBindings = new Map<string, SandboxBinding>()
 
-export function createBindSandboxEffect(env?: ShuttleEnv, storage?: DurableObjectStorage) {
+export function createBindSandboxEffect(storage?: DurableObjectStorage) {
   return shuttleModule.effect({
     type: 'shuttle.bindSandbox',
     placement: 'local',
@@ -52,26 +61,13 @@ export function createBindSandboxEffect(env?: ShuttleEnv, storage?: DurableObjec
       const binding = {
         sandboxName: input.sandboxName,
         repos: input.repos,
+        ...(input.pull ? { pull: input.pull } : {}),
       } satisfies SandboxBinding
 
       if (storage) {
         await storage.put(SANDBOX_BINDING_KEY, binding)
       } else {
         memoryBindings.set(ctx.runId, binding)
-      }
-
-      if (env && input.pull?.headSha) {
-        const repo = input.repos.find((item) => item.fullName === input.pull?.fullName)
-
-        if (repo) {
-          const sandbox = sandboxStub(env, input.sandboxName)
-          await sandbox.ensureRepos([repo])
-
-          await sandbox.checkoutRef(ctx.runId, repo, {
-            sha: input.pull.headSha,
-            branch: `shuttle/review/${ctx.runId}/${repo.name}`,
-          })
-        }
       }
 
       return [

@@ -7,6 +7,7 @@ import { pullInbox } from './projections'
 import { pullsModule } from './scope'
 import {
   ingestWebhook,
+  linkReviewSession,
   recordPublished,
   recordReview,
   requestReview,
@@ -35,6 +36,7 @@ export function pulls(options: PullsModuleOptions) {
       upsertPull,
       recordPublished,
       recordReview,
+      linkReviewSession,
       setRepoPolicy,
       requestReview,
     },
@@ -49,6 +51,7 @@ export {
   upsertPull,
   recordPublished,
   recordReview,
+  linkReviewSession,
   setRepoPolicy,
   requestReview,
   pullInbox,

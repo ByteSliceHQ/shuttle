@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import { pullInbox, withLinkedSession } from './projections'
 import { pullKey } from './scope'
+import { reviewerLinked } from './signals'
 
 describe('pullInbox projection', () => {
   test('upserts pulls and drops stale updates', () => {
@@ -124,5 +125,16 @@ describe('withLinkedSession', () => {
         threadId: 'thread_b',
       }),
     ).toEqual([{ runId: 'run_1', role: 'author', threadId: 'thread_b' }])
+  })
+})
+
+describe('linkReviewSession', () => {
+  test('links the session as a reviewer, once per session and pull request', () => {
+    const input = { fullName: 'acme/glue', number: 8, runId: 'run_review' }
+    const first = reviewerLinked(input)
+
+    expect(first.type).toBe('pulls.pull.linked')
+    expect(first.payload).toEqual({ ...input, role: 'reviewer' })
+    expect(JSON.stringify(reviewerLinked(input))).toBe(JSON.stringify(first))
   })
 })

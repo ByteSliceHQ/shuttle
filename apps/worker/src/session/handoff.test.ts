@@ -27,6 +27,8 @@ const repo = {
   private: true,
 }
 
+const PULL = { fullName: 'acme/glue', number: 8, headSha: 'head123', baseSha: 'base456' }
+
 const snapshotOf = (sandbox: string): SessionSnapshot => ({
   repoName: 'glue',
   head: 'shuttle/x/glue',
@@ -67,6 +69,10 @@ function world(
           calls.push(`${name} ensureWorktree`)
           return { root: '/workspace', repoDirs: [] }
         },
+        checkoutRef: async (_runId: string, target: { name: string }, ref: { sha: string }) => {
+          calls.push(`${name} checkout ${target.name}@${ref.sha}`)
+          return { root: '/workspace' }
+        },
         snapshotSession: async (_runId: string, target: { name: string }) => {
           calls.push(
             target.name === 'glue' ? `${name} snapshot` : `${name} snapshot ${target.name}`,
@@ -82,14 +88,18 @@ function world(
     } as unknown as ShuttleEnv['SANDBOX'],
   })
 
-  const work = async (runId: string, sponsor?: string) => {
+  const work = async (runId: string, sponsor?: string, pull?: typeof PULL) => {
     if (sponsor) {
       values.set(SPONSOR_STORAGE_KEY, sponsor)
     }
 
     calls.length = 0
 
-    await prepareSessionSandbox(env, storage, runId, { sandboxName: 'folder:f1', repos })
+    await prepareSessionSandbox(env, storage, runId, {
+      sandboxName: 'folder:f1',
+      repos,
+      ...(pull ? { pull } : {}),
+    })
 
     return [...calls]
   }
@@ -98,6 +108,40 @@ function world(
 }
 
 describe('prepareSessionSandbox', () => {
+  test("a review session's worktree is the pull request's head, in the sandbox its tools use", async () => {
+    const { work, home } = world('daytona')
+    const run = scopedRunId(ORG, 'session_reviews')
+
+    // Alice's sandbox, not the folder's the session was bound to.
+    expect(await work(run, undefined, PULL)).toEqual([
+      `${ALICE} ensureRepos`,
+      `${ALICE} checkout glue@head123`,
+      `${ALICE} ensureWorktree`,
+    ])
+
+    expect(home()).toBe(ALICE)
+    expect(await work(run, undefined, PULL)).toEqual([])
+
+    // A move carries the worktree along, so the head is not checked out over it again.
+    expect(await work(run, 'bob', PULL)).toEqual([
+      `${ALICE} snapshot`,
+      `${BOB} restore snapshot-from-${ALICE}`,
+      `${BOB} ensureWorktree`,
+    ])
+  })
+
+  test('a review session with no head commit or no linked repository fails loudly', async () => {
+    const { work } = world('daytona')
+
+    await expect(
+      work(scopedRunId(ORG, 'session_no_head'), undefined, { ...PULL, headSha: '' }),
+    ).rejects.toThrow('without the pull request')
+
+    await expect(
+      work(scopedRunId(ORG, 'session_no_repo'), undefined, { ...PULL, fullName: 'acme/other' }),
+    ).rejects.toThrow('not linked')
+  })
+
   test("a session starts in its owner's sandbox and stays put while they work", async () => {
     const { work, home } = world('daytona')
     const run = scopedRunId(ORG, 'session_stays')

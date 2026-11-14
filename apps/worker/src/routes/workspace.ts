@@ -10,7 +10,7 @@ import { getInstallation, listInstallationRepos } from '../github/app'
 import { loomsStub } from '../looms-stub'
 import { syncFolderRepos } from '../pulls/folder-sync'
 import type { AutoReviewMode } from '../pulls/scope'
-import { setRepoPolicy } from '../pulls/signals'
+import { linkReviewSession, setRepoPolicy } from '../pulls/signals'
 import type { Actor, SessionAccess } from '../tenancy/access'
 import { installationConnected } from '../tenancy/installations'
 import { scopedRunId } from '../tenancy/run-id'
@@ -393,6 +393,11 @@ async function startPullReview(
     title?: string
   }
 
+  // The session checks this commit out to read; without it there is nothing to review.
+  if (!body.headSha) {
+    return Response.json({ error: 'headSha is required' }, { status: 400 })
+  }
+
   const runId = scopedRunId(orgId, crypto.randomUUID())
   const stub = loomsStub(env.LOOMS_RUN, personalRunId)
 
@@ -412,11 +417,23 @@ async function startPullReview(
       pull: {
         fullName,
         number,
-        headSha: body.headSha ?? '',
+        headSha: body.headSha,
         baseSha: body.baseSha ?? '',
       },
     }),
   ])
+
+  // Linked now, not when a review is submitted, so the pull request shows its reviewer.
+  // The session is already running, so a failure here must not fail the request.
+  try {
+    await ensurePullsQuietly(env, orgId)
+
+    await loomsStub(env.LOOMS_RUN, pullsRunId(env, orgId)).signal([
+      linkReviewSession({ fullName, number, runId }),
+    ])
+  } catch (cause) {
+    console.error(`Could not link review session ${runId} to ${fullName}#${number}`, cause)
+  }
 
   return Response.json({ runId })
 }

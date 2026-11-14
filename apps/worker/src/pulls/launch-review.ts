@@ -6,6 +6,7 @@ import { loomsStub } from '../looms-stub'
 import { orgOfRun } from '../tenancy/run-id'
 import { requestSession } from '../workspace/signals'
 import { pullsModule } from './scope'
+import { reviewerLinked } from './signals'
 
 export function createLaunchReviewEffect(env: ShuttleEnv) {
   return pullsModule.effect({
@@ -40,7 +41,10 @@ export function createLaunchReviewEffect(env: ShuttleEnv) {
         }),
       ])
 
-      return []
+      // Linked now, not when a review is submitted, so the pull request shows its reviewer.
+      return [
+        reviewerLinked({ fullName: input.fullName, number: input.number, runId: input.runId }),
+      ]
     },
   })
 }

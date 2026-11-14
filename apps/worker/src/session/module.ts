@@ -37,7 +37,7 @@ export function shuttleSession(options: ShuttleSessionOptions) {
       reroute,
     },
     effects: {
-      bindSandbox: createBindSandboxEffect(env, storage),
+      bindSandbox: createBindSandboxEffect(storage),
       preparePrPublishGate: createPreparePrPublishGateEffect(env, storage),
       publishPullRequest: createPublishPullRequestEffect(env, storage),
       submitReview: createSubmitReviewEffect(env, storage),
