@@ -517,7 +517,8 @@ function InlineNarratorReplies({
   }
 
   return (
-    <div className="mt-1 w-full space-y-2 pl-0 sm:pl-2">
+    // No indent: every agent avatar in the conversation sits on the same left edge.
+    <div className="mt-1 w-full space-y-2">
       {settled.map((item) => (
         <AgentBubble
           key={item.id}
