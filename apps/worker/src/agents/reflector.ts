@@ -2,13 +2,15 @@ import { z } from 'zod'
 
 import { defineAgent, defineTool } from '@swirls/looms/agent'
 
+import { playbookRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { loomsStub } from '../looms-stub'
+import { orgOfRun, sessionOfReflection } from '../tenancy/run-id'
 import { createHistoryTools } from '../tools/history'
 
 export function createReflectorAgent(env: ShuttleEnv, runId: string) {
-  // Reflect launches as `reflect_<sessionRunId>`; history belongs to the session.
-  const sessionRunId = runId.startsWith('reflect_') ? runId.slice('reflect_'.length) : runId
+  // History belongs to the session this run reflects on.
+  const sessionRunId = sessionOfReflection(runId)
   const history = createHistoryTools(env, sessionRunId)
 
   const proposeLesson = defineTool({
@@ -28,7 +30,7 @@ export function createReflectorAgent(env: ShuttleEnv, runId: string) {
     }),
     handler: async (input) => {
       const lessonId = `lesson_${crypto.randomUUID()}`
-      const playbookId = input.playbookRunId ?? env.SHUTTLE_PLAYBOOK_RUN_ID ?? 'shuttle-playbook'
+      const playbookId = input.playbookRunId ?? playbookRunId(env, orgOfRun(runId))
       const sourceRunId = input.sourceRunId ?? sessionRunId
       const stub = loomsStub(env.LOOMS_RUN, playbookId)
 

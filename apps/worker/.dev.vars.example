@@ -34,5 +34,12 @@ GITHUB_WEBHOOK_SECRET=
 # when empty. Changing it makes existing connections unreadable.
 SHUTTLE_CREDENTIALS_KEY=
 
+# Signs sign-in sessions. Auto-filled by `bun run dev` when empty. Changing it signs everyone out.
+BETTER_AUTH_SECRET=
+# Optional "Sign in with GitHub" (a GitHub OAuth app, or the GitHub App's client id and secret).
+# The callback URL is <SHUTTLE_WEB_URL>/api/auth/callback/github. Email and password always work.
+# GITHUB_CLIENT_ID=
+# GITHUB_CLIENT_SECRET=
+
 # Set to `off` to skip the Cloudflare quick tunnel (inbox Sync still works).
 # SHUTTLE_TUNNEL=off

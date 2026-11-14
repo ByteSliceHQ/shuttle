@@ -4,6 +4,7 @@ import type { CredentialPayload, CredentialSummary } from './credentials/store'
 import type { ShuttleEnv } from './env'
 import type { HarnessId, VendorHarnessId } from './harness'
 import type { Team } from './team'
+import type { SessionAccess } from './tenancy/access'
 import type {
   VendorCatalogue,
   VendorModel,
@@ -47,10 +48,13 @@ export interface LoomsRunStub {
     models: readonly VendorModel[],
   ): Promise<VendorCatalogue>
   getStreamTail(): Promise<number>
-  getCredential(harness: VendorHarnessId): Promise<CredentialPayload | null>
-  putCredential(harness: VendorHarnessId, payload: CredentialPayload): Promise<void>
-  removeCredential(harness: VendorHarnessId): Promise<boolean>
-  listCredentials(): Promise<CredentialSummary[]>
+  getCredential(userId: string, harness: VendorHarnessId): Promise<CredentialPayload | null>
+  putCredential(userId: string, harness: VendorHarnessId, payload: CredentialPayload): Promise<void>
+  removeCredential(userId: string, harness: VendorHarnessId): Promise<boolean>
+  listCredentials(userId: string): Promise<CredentialSummary[]>
+  getAccess(): Promise<SessionAccess | null>
+  setAccess(access: unknown): Promise<SessionAccess>
+  getSandboxName(): Promise<string | null>
   getSessionActivitySnapshot(): Promise<{ activity: SessionActivity; tail: number } | null>
 }
 

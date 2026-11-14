@@ -5,6 +5,7 @@ import { sandboxStub, type ShuttleEnv } from '../env'
 import { isVendorHarness, parseHarness, type VendorHarnessId } from '../harness'
 import { loomsStub } from '../looms-stub'
 import { parseTeam } from '../team'
+import type { Actor } from '../tenancy/access'
 import { CONNECTABLE_HARNESSES, vendorHarnessInfo } from '../vendor/harnesses'
 import {
   builtInVendorModels,
@@ -30,8 +31,11 @@ import {
  *   PUT    /workspace/connections/default                         harness for new sessions
  */
 
-/** Sign-ins run in their own sandbox, apart from any folder's workspace. */
-const CONNECTIONS_SANDBOX = 'connections'
+/** Sign-ins run in a sandbox of the person's own, apart from any folder's workspace. */
+function connectionsSandbox(actor: Actor): string {
+  return `connections:${actor.userId}`
+}
+
 const LOGIN_ID = /^[A-Za-z0-9_-]{1,80}$/
 
 function json(body: unknown, status = 200): Response {
@@ -41,6 +45,7 @@ function json(body: unknown, status = 200): Response {
 export async function handleConnectionRoutes(
   request: Request,
   env: ShuttleEnv,
+  actor: Actor,
 ): Promise<Response | null> {
   const url = new URL(request.url)
 
@@ -49,7 +54,7 @@ export async function handleConnectionRoutes(
   }
 
   try {
-    return await route(request, env, url)
+    return await route(request, env, url, actor)
   } catch (cause) {
     if (cause instanceof CredentialsKeyMissingError) {
       return json({ error: cause.message }, 503)
@@ -68,9 +73,10 @@ export async function handleConnectionRoutes(
   }
 }
 
-async function route(request: Request, env: ShuttleEnv, url: URL): Promise<Response> {
-  const credentials = loomsStub(env.LOOMS_RUN, workspaceRunId(env))
-  const sandbox = sandboxStub(env, CONNECTIONS_SANDBOX)
+async function route(request: Request, env: ShuttleEnv, url: URL, actor: Actor): Promise<Response> {
+  const { userId } = actor
+  const credentials = loomsStub(env.LOOMS_RUN, workspaceRunId(env, actor.orgId))
+  const sandbox = sandboxStub(env, connectionsSandbox(actor))
   const parts = url.pathname.split('/').filter(Boolean).slice(2).map(decodeURIComponent)
 
   if (parts.length === 0) {
@@ -79,7 +85,7 @@ async function route(request: Request, env: ShuttleEnv, url: URL): Promise<Respo
     }
 
     const connected = new Map(
-      (await credentials.listCredentials()).map((entry) => [entry.harness, entry.updatedAt]),
+      (await credentials.listCredentials(userId)).map((entry) => [entry.harness, entry.updatedAt]),
     )
 
     return json({
@@ -135,7 +141,7 @@ async function route(request: Request, env: ShuttleEnv, url: URL): Promise<Respo
       return json({ error: 'Method not allowed' }, 405)
     }
 
-    return json({ removed: await credentials.removeCredential(harness) })
+    return json({ removed: await credentials.removeCredential(userId, harness) })
   }
 
   if (parts.length === 2 && parts[1] === 'models') {
@@ -176,6 +182,7 @@ async function route(request: Request, env: ShuttleEnv, url: URL): Promise<Respo
     return followLogin(harness, loginId, Number(url.searchParams.get('offset') ?? 0), {
       sandbox,
       credentials,
+      userId,
     })
   }
 
@@ -242,6 +249,7 @@ async function followLogin(
   deps: {
     sandbox: ReturnType<typeof sandboxStub>
     credentials: ReturnType<typeof loomsStub>
+    userId: string
   },
 ): Promise<Response> {
   const page = await deps.sandbox.readAgentEvents(
@@ -269,7 +277,7 @@ async function followLogin(
     })
   }
 
-  await deps.credentials.putCredential(harness, { files })
+  await deps.credentials.putCredential(deps.userId, harness, { files })
 
   return json({ ...page, connected: true })
 }

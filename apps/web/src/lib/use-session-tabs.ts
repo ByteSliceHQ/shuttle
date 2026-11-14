@@ -103,7 +103,7 @@ export function useSessionTabs(sessionRunId: string): SessionTabsController {
       setActiveTabId(tabId)
 
       if (workspace) {
-        await openSessionTab(workspace.runId, {
+        await openSessionTab(workspace.listingRunId(sessionRunId), {
           runId: sessionRunId,
           tabId,
           kind: input.kind,
@@ -136,7 +136,7 @@ export function useSessionTabs(sessionRunId: string): SessionTabsController {
       }
 
       if (workspace) {
-        await closeSessionTab(workspace.runId, { runId: sessionRunId, tabId })
+        await closeSessionTab(workspace.listingRunId(sessionRunId), { runId: sessionRunId, tabId })
       }
     },
     [sessionRunId, workspace],
@@ -147,7 +147,10 @@ export function useSessionTabs(sessionRunId: string): SessionTabsController {
       setPendingRaw((prev) => [...prev, { kind: 'reorder', tabIds }])
 
       if (workspace) {
-        await reorderSessionTabs(workspace.runId, { runId: sessionRunId, tabIds })
+        await reorderSessionTabs(workspace.listingRunId(sessionRunId), {
+          runId: sessionRunId,
+          tabIds,
+        })
       }
     },
     [sessionRunId, workspace],
@@ -158,7 +161,7 @@ export function useSessionTabs(sessionRunId: string): SessionTabsController {
       setPendingRaw((prev) => [...prev, { kind: 'retarget', tabId, title, target }])
 
       if (workspace) {
-        await retargetSessionTab(workspace.runId, {
+        await retargetSessionTab(workspace.listingRunId(sessionRunId), {
           runId: sessionRunId,
           tabId,
           title,

@@ -1,10 +1,15 @@
 import type { ShuttleEnv } from '../env'
 import { firehoseStub } from '../firehose/stub'
+import type { Actor } from '../tenancy/access'
 
-/** Proxy `/firehose/*` onto the singleton EventFirehose Durable Object. */
+/**
+ * Proxy `/firehose/*` onto the organization's EventFirehose Durable Object. Every member can read
+ * it: private sessions never write to it (see `firehose/projector.ts`).
+ */
 export async function handleFirehoseRoutes(
   request: Request,
   env: ShuttleEnv,
+  actor: Actor,
 ): Promise<Response | null> {
   const url = new URL(request.url)
 
@@ -12,5 +17,5 @@ export async function handleFirehoseRoutes(
     return null
   }
 
-  return firehoseStub(env).fetch(request)
+  return firehoseStub(env, actor.orgId).fetch(request)
 }

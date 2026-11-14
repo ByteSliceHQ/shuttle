@@ -3,8 +3,12 @@ import type { Projector } from '@swirls/looms/projectors'
 
 import { workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
+import { runKindFor } from '../firehose/run-kind'
 import { jsonObject } from '../json'
 import { loomsStub } from '../looms-stub'
+import { readSessionAccess } from '../tenancy/access'
+import { listingRunIds } from '../tenancy/listings'
+import { orgOfRun } from '../tenancy/run-id'
 import {
   deriveSessionActivity,
   initialSessionActivityState,
@@ -41,7 +45,7 @@ function eventTimestamp(event: EventEnvelope): number {
 }
 
 /**
- * Push session activity to the singleton workspace run so the sidebar can show
+ * Push session activity to the workspace runs that list the session, so the sidebar can show
  * working / needs_input / error / idle states without D1.
  *
  * Only runs the workspace launched report, so the playbook and legacy sessions never
@@ -52,7 +56,7 @@ export function createWorkspaceActivityProjector(
   runId: string,
   storage?: DurableObjectStorage,
 ): Projector {
-  const workspaceId = workspaceRunId(env)
+  const orgId = orgOfRun(runId)
   let member: boolean | undefined
   let cachedCheckpoint: ActivityCheckpoint | undefined
 
@@ -61,7 +65,14 @@ export function createWorkspaceActivityProjector(
 
     if (started) {
       const { launchedBy } = jsonObject(started.payload)
-      member = readRunLaunchSource(launchedBy)?.runId === workspaceId
+      // An organization's workspace or a person's own may have launched it.
+      const launcher = readRunLaunchSource(launchedBy)?.runId
+
+      member =
+        launcher !== undefined &&
+        orgOfRun(launcher) === orgId &&
+        runKindFor(env, launcher) === 'workspace'
+
       await storage?.put(MEMBER_KEY, member)
       return member
     }
@@ -97,7 +108,7 @@ export function createWorkspaceActivityProjector(
     name: 'workspace-activity',
     version: '4',
     async project(events: ReadonlyArray<EventEnvelope>): Promise<void> {
-      if (runId === workspaceId || events.length === 0) {
+      if (runKindFor(env, runId) !== 'session' || events.length === 0) {
         return
       }
 
@@ -156,7 +167,10 @@ export function createWorkspaceActivityProjector(
         ? checkpoint.lastTransitionSeq || checkpoint.cursor
         : checkpoint.cursor
 
-      const stub = loomsStub(env.LOOMS_RUN, workspaceId)
+      // Read each time: the session may have been shared or made public since the last report.
+      const access = storage ? await readSessionAccess(storage) : null
+
+      const listings = orgId ? listingRunIds(env, orgId, access) : [workspaceRunId(env, null)]
 
       const built = reportActivity({
         runId,
@@ -165,12 +179,16 @@ export function createWorkspaceActivityProjector(
         seq: reportSeq,
       })
 
-      await stub.signal([
-        {
-          ...built,
-          idempotencyKey: `activity:${runId}:${reportSeq}`,
-        },
-      ])
+      await Promise.all(
+        listings.map((workspaceId) =>
+          loomsStub(env.LOOMS_RUN, workspaceId).signal([
+            {
+              ...built,
+              idempotencyKey: `activity:${runId}:${reportSeq}`,
+            },
+          ]),
+        ),
+      )
 
       await saveCheckpoint({
         ...checkpoint,

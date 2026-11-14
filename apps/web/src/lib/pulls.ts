@@ -2,6 +2,7 @@ import { defineProjection } from '@swirls/looms/core'
 
 import type { PublishedPull, PullStackPosition } from './session-feed'
 import type { PullsEvent } from './shuttle-events'
+import { useTenant } from './tenant'
 
 export type AutoReviewMode = 'off' | 'others' | 'all'
 export type ReviewDecision = 'approved' | 'changes_requested' | 'review_required' | 'none'
@@ -670,6 +671,7 @@ export async function startPullReview(
   return (await response.json()) as { runId: string }
 }
 
-export function pullsRunIdFromEnv(): string {
-  return 'shuttle-pulls'
+/** The pulls run of the organization the browser is signed in to. */
+export function usePullsRunId(): string {
+  return useTenant().runs.pulls
 }

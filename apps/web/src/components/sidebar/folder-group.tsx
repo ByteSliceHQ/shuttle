@@ -230,7 +230,7 @@ export function FolderGroup({
                   onCancel={() => setRenamingSessionId(null)}
                   onCommit={(title) => {
                     setRenamingSessionId(null)
-                    void renameWorkspaceSession(runId, session.runId, title)
+                    void renameWorkspaceSession(session.runId, title)
                   }}
                 />
               </div>
@@ -249,9 +249,7 @@ export function FolderGroup({
                 pullCount={pullCounts.get(session.runId)}
                 onRename={() => setRenamingSessionId(session.runId)}
                 onArchive={
-                  session.archived
-                    ? undefined
-                    : () => void archiveWorkspaceSession(runId, session.runId)
+                  session.archived ? undefined : () => void archiveWorkspaceSession(session.runId)
                 }
               />
             )

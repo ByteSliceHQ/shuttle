@@ -115,6 +115,8 @@ export const requestSession = workspaceModule.signal({
     playbookVersion: Schema.Finite,
     playbookRunId: Schema.NullOr(Schema.String),
     definitionName: Schema.optional(Schema.String),
+    ownerId: Schema.optional(Schema.String),
+    repos: Schema.optional(Schema.Array(LinkedRepoSchema)),
     pull: Schema.optional(
       Schema.Struct({
         fullName: Schema.String,
@@ -150,6 +152,41 @@ export const renameSession = workspaceModule.signal({
     title: DisplayNameSchema,
   }),
   build: (input) => workspaceModule.input('session.renamed', input),
+})
+
+export const shareSession = workspaceModule.signal({
+  description: 'Record who else may open a session. Sent by the Worker after it checks them.',
+  input: Schema.Struct({
+    runId: Schema.String,
+    memberIds: Schema.Array(Schema.String),
+  }),
+  build: (input) => workspaceModule.input('session.shared', input),
+})
+
+export const listSession = workspaceModule.signal({
+  description: 'Start listing an existing session in this workspace. Sent by the Worker.',
+  input: Schema.Struct({
+    runId: Schema.String,
+    folderId: Schema.String,
+    goal: Schema.String,
+    title: Schema.String,
+    status: Schema.String,
+    activity: SessionActivitySchema,
+    createdAt: Schema.Finite,
+    updatedAt: Schema.Finite,
+    archived: Schema.Boolean,
+    ownerId: Schema.NullOr(Schema.String),
+    memberIds: Schema.Array(Schema.String),
+  }),
+  build: (input) => workspaceModule.input('session.listed', input),
+})
+
+export const unlistSession = workspaceModule.signal({
+  description: 'Stop listing a session in this workspace. Sent by the Worker.',
+  input: Schema.Struct({
+    runId: Schema.String,
+  }),
+  build: (input) => workspaceModule.input('session.unlisted', input),
 })
 
 export const archiveSession = workspaceModule.signal({

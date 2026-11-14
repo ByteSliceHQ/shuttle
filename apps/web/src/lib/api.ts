@@ -56,38 +56,6 @@ export async function fetchSessions(): Promise<{ sessions: IndexedSession[] }> {
   }
 }
 
-export async function startSession(input: {
-  goal: string
-  repoUrl?: string | null
-}): Promise<{ runId: string }> {
-  const playbook = await fetchPlaybook()
-  const lessons = playbook.playbook.lessons ?? []
-
-  const response = await postJson('/runs/launch', {
-    kind: 'shuttle-session',
-    definitionName: 'coding',
-    input: {
-      goal: input.goal,
-      repoUrl: input.repoUrl ?? null,
-      playbookRunId: playbook.runId,
-      playbookVersion: playbook.playbook.version ?? 0,
-      lessons,
-    },
-    attributes: {
-      sessionId: crypto.randomUUID(),
-      repo: input.repoUrl ?? 'local',
-      playbookVersion: String(playbook.playbook.version ?? 0),
-      kind: 'shuttle-session',
-    },
-  })
-
-  if (!response.ok) {
-    throw new Error(`Failed to start session: ${response.status} ${await response.text()}`)
-  }
-
-  return (await response.json()) as { runId: string }
-}
-
 /** Named Looms signals take their input wrapped as `{ input }`. */
 async function signal(runId: string, name: string, input: object, failure: string) {
   const response = await postJson(`/runs/${runId}/signals/${name}`, { input })
@@ -426,4 +394,47 @@ export async function setSessionVendorModel(
   }
 
   return (await response.json()) as { choices: VendorModelChoices }
+}
+
+export type SessionVisibility = 'private' | 'public'
+
+/**
+ * Who can open a session. A private one opens for its owner and members only; a public one for
+ * everyone in the organization. `canShare` says whether the caller may change any of this.
+ */
+export interface SessionAccess {
+  readonly ownerId: string | null
+  readonly memberIds: readonly string[]
+  readonly visibility: SessionVisibility
+  readonly canShare: boolean
+}
+
+export async function fetchSessionAccess(runId: string): Promise<SessionAccess> {
+  const response = await fetch(`/sessions/${encodeURIComponent(runId)}/access`)
+
+  if (!response.ok) {
+    throw new Error(`Failed to load who can open this session: ${response.status}`)
+  }
+
+  return (await response.json()) as SessionAccess
+}
+
+/** Changes who a session is shared with, its visibility, or both. */
+export async function updateSessionAccess(
+  runId: string,
+  change: { readonly memberIds?: readonly string[]; readonly visibility?: SessionVisibility },
+): Promise<SessionAccess> {
+  const response = await fetch(`/sessions/${encodeURIComponent(runId)}/access`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(change),
+  })
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null
+
+    throw new Error(body?.error ?? `Failed to change who can open the session: ${response.status}`)
+  }
+
+  return (await response.json()) as SessionAccess
 }

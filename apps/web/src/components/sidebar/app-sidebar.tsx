@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useEffectEvent, useMemo, useState } from 'react'
 
+import { AccountMenu } from '@/components/auth/account-menu'
 import { ActivityDot } from '@/components/sidebar/activity-dot'
 import { FixtureToggle } from '@/components/sidebar/fixture-toggle'
 import { FolderGroup } from '@/components/sidebar/folder-group'
@@ -36,7 +37,7 @@ import {
   authoredPullCounts,
   pullInbox,
   pullsForFolder,
-  pullsRunIdFromEnv,
+  usePullsRunId,
 } from '@/lib/pulls'
 import { recentSessions } from '@/lib/recent-sessions'
 import {
@@ -46,6 +47,7 @@ import {
   type SeenSessionsSnapshot,
 } from '@/lib/seen-sessions'
 import { resolveFolderIndicator, resolveSessionIndicator } from '@/lib/session-activity'
+import { useTenant } from '@/lib/tenant'
 import { useMediaQuery } from '@/lib/use-media-query'
 import { useNow } from '@/lib/use-now'
 import {
@@ -221,7 +223,7 @@ function SidebarRail({
   seenSnapshot: SeenSessionsSnapshot
   onExpand: () => void
 }) {
-  const pullsStore = useRunStore(pullsRunIdFromEnv())
+  const pullsStore = useRunStore(usePullsRunId())
   const inbox = useProjection(pullsStore, pullInbox)
 
   const rollup = useMemo(() => {
@@ -408,6 +410,7 @@ function SidebarPanel({
       )}
 
       <GithubFooter installations={workspace ? Object.values(workspace.tree.installations) : []} />
+      <AccountMenu />
     </aside>
   )
 }
@@ -426,9 +429,10 @@ function FolderTree({
   const { runId, tree, liveSessions } = workspace
   const navigate = useNavigate()
   const now = useNow()
-  const pullsStore = useRunStore(pullsRunIdFromEnv())
+  const pullsStore = useRunStore(usePullsRunId())
   const inbox = useProjection(pullsStore, pullInbox)
   const pullCounts = useMemo(() => authoredPullCounts(inbox), [inbox])
+  const orgPrefix = `o-${useTenant().org.id}-`
 
   const [showArchived, setShowArchived] = useState(
     () => localStorage.getItem(SHOW_ARCHIVED_KEY) === '1',
@@ -443,9 +447,10 @@ function FolderTree({
   const unfiled = useMemo(
     () =>
       recentSessions()
-        .filter((session) => !tree.sessions[session.runId])
+        // This browser may have opened sessions in another organization; those are not ours.
+        .filter((session) => session.runId.startsWith(orgPrefix) && !tree.sessions[session.runId])
         .slice(0, UNFILED_LIMIT),
-    [tree.sessions],
+    [tree.sessions, orgPrefix],
   )
 
   const linkFolder = linkFolderId ? tree.folders[linkFolderId] : undefined

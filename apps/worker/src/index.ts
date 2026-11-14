@@ -4,10 +4,15 @@ import {
   routeToDurableObject,
   type LoomsDurableObjectConfig,
 } from '@swirls/looms/cloudflare'
+import { forwardedActorAuth } from '@swirls/looms/runtime'
 
 import { shuttleAttributes } from './attributes'
-import { ensurePlaybookQuietly, ensurePullsQuietly, ensureWorkspaceQuietly } from './bootstrap'
+import { resolveActor } from './auth/actor'
+import { AUTH_BASE_PATH, AuthUnavailableError, getAuth, githubSignInEnabled } from './auth/auth'
 import {
+  personalWorkspaceRunId,
+  playbookRunId,
+  pullsRunId,
   readStoredLlmModel,
   resolveProjectors,
   workspaceRunId,
@@ -15,7 +20,6 @@ import {
 } from './config'
 import {
   createCredentialStore,
-  DEPLOYMENT_OWNER,
   type CredentialPayload,
   type CredentialStore,
   type CredentialSummary,
@@ -34,13 +38,17 @@ import { loomsStub } from './looms-stub'
 import { shuttleModules } from './modules'
 import { handleConnectionRoutes } from './routes/connections'
 import { handleFirehoseRoutes } from './routes/firehose'
-import { handleGithubRoutes } from './routes/github'
+import { handleGithubPublicRoutes, handleGithubRoutes } from './routes/github'
 import { handleSandboxRoutes } from './routes/sandbox'
 import { handleShuttleRoutes } from './routes/sessions'
 import { handleWorkspaceRoutes } from './routes/workspace'
 import { parsePreviewHost } from './sandbox/preview-host'
 import { SessionSandbox } from './sandbox/session-sandbox'
+import { readSandboxBinding } from './session/bind-sandbox'
 import { DEFAULT_TEAM, readPinnedTeam, writeStoredTeam, type Team } from './team'
+import { readSessionAccess, writeSessionAccess, type SessionAccess } from './tenancy/access'
+import { authorizeLoomsRoute, authorizeRun, runIdOfPath } from './tenancy/gate'
+import { orgOfRun } from './tenancy/run-id'
 import { CONNECTABLE_HARNESSES } from './vendor/harnesses'
 import {
   readVendorCatalogue,
@@ -71,6 +79,9 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
       launcher: durableObjectLauncher(env.LOOMS_RUN),
       attributes: shuttleAttributes,
       projectors: resolveProjectors(env, { runId, storage: this.ctx.storage }),
+      // Only the Worker reaches this object, and it has already decided the request. It says who
+      // the request acts as, and that is recorded on the events the request sends.
+      authorize: forwardedActorAuth(),
     }
   }
 
@@ -83,10 +94,31 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
     return { model: await writeStoredLlmModel(this.ctx.storage, model) }
   }
 
+  /** The workspace run of this run's organization, which holds the organization's defaults. */
+  private workspaceRun(): string {
+    return workspaceRunId(this.env, orgOfRun(this.ctx.id.name ?? ''))
+  }
+
+  /** Who may open this session. Null when no one has been recorded, see `tenancy/access.ts`. */
+  async getAccess(): Promise<SessionAccess | null> {
+    return readSessionAccess(this.ctx.storage)
+  }
+
+  async setAccess(access: unknown): Promise<SessionAccess> {
+    return writeSessionAccess(this.ctx.storage, access)
+  }
+
+  /** The sandbox this session bound, or null when it has not bound one yet. */
+  async getSandboxName(): Promise<string | null> {
+    const binding = await readSandboxBinding(this.ctx.storage, this.ctx.id.name ?? '')
+
+    return binding?.sandboxName ?? null
+  }
+
   /** Which agent runs this session: Shuttle's own loop or a vendor agent in the sandbox. */
   async getHarness(): Promise<{ harness: HarnessId }> {
     const pinned = await readPinnedHarness(this.ctx.storage)
-    const workspace = workspaceRunId(this.env)
+    const workspace = this.workspaceRun()
 
     // A session that has not run a turn yet will take the workspace default when it does.
     if (pinned || this.ctx.id.name === workspace) {
@@ -103,7 +135,7 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
   /** Who the conductor may delegate to in this session. The workspace run holds the default. */
   async getTeam(): Promise<{ team: Team }> {
     const pinned = await readPinnedTeam(this.ctx.storage)
-    const workspace = workspaceRunId(this.env)
+    const workspace = this.workspaceRun()
 
     if (pinned || this.ctx.id.name === workspace) {
       return { team: pinned ?? DEFAULT_TEAM }
@@ -154,8 +186,8 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
   }
 
   /**
-   * Stored vendor agent sign-ins. Only the workspace run holds them, so callers reach these
-   * through `credentialsStub`.
+   * Stored vendor agent sign-ins, kept per person. Only the workspace run holds them, so callers
+   * reach these through the workspace run's stub and say whose sign-in they mean.
    */
   private credentialStore(): CredentialStore {
     return createCredentialStore({
@@ -164,20 +196,24 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
     })
   }
 
-  async getCredential(harness: VendorHarnessId): Promise<CredentialPayload | null> {
-    return this.credentialStore().get(DEPLOYMENT_OWNER, harness)
+  async getCredential(userId: string, harness: VendorHarnessId): Promise<CredentialPayload | null> {
+    return this.credentialStore().get(userId, harness)
   }
 
-  async putCredential(harness: VendorHarnessId, payload: CredentialPayload): Promise<void> {
-    await this.credentialStore().put(DEPLOYMENT_OWNER, harness, payload)
+  async putCredential(
+    userId: string,
+    harness: VendorHarnessId,
+    payload: CredentialPayload,
+  ): Promise<void> {
+    await this.credentialStore().put(userId, harness, payload)
   }
 
-  async removeCredential(harness: VendorHarnessId): Promise<boolean> {
-    return this.credentialStore().remove(DEPLOYMENT_OWNER, harness)
+  async removeCredential(userId: string, harness: VendorHarnessId): Promise<boolean> {
+    return this.credentialStore().remove(userId, harness)
   }
 
-  async listCredentials(): Promise<CredentialSummary[]> {
-    return this.credentialStore().list(DEPLOYMENT_OWNER)
+  async listCredentials(userId: string): Promise<CredentialSummary[]> {
+    return this.credentialStore().list(userId)
   }
 
   /** Authoritative log tail for this run. */
@@ -233,64 +269,101 @@ export default {
       return Response.json({ ok: true })
     }
 
-    const firehose = await handleFirehoseRoutes(request, env)
+    try {
+      return await route(request, env, ctx, url)
+    } catch (cause) {
+      if (cause instanceof AuthUnavailableError) {
+        return Response.json({ error: cause.message }, { status: 503 })
+      }
 
-    if (firehose) {
-      return firehose
+      throw cause
     }
-
-    const connections = await handleConnectionRoutes(request, env)
-
-    if (connections) {
-      return connections
-    }
-
-    const workspace = await handleWorkspaceRoutes(request, env, ctx)
-
-    if (workspace) {
-      return workspace
-    }
-
-    const github = await handleGithubRoutes(request, env)
-
-    if (github) {
-      return github
-    }
-
-    const sandbox = await handleSandboxRoutes(request, env)
-
-    if (sandbox) {
-      return sandbox
-    }
-
-    const shuttle = await handleShuttleRoutes(request, env)
-
-    if (shuttle) {
-      return shuttle
-    }
-
-    // Ensure the playbook DO exists lazily when a session is started.
-    if (
-      request.method === 'POST' &&
-      (url.pathname === '/runs' || url.pathname === '/runs/launch')
-    ) {
-      await Promise.all([
-        ensurePlaybookQuietly(env),
-        ensureWorkspaceQuietly(env),
-        ensurePullsQuietly(env),
-      ])
-    }
-
-    const response = await routeToDurableObject(env.LOOMS_RUN, request, {
-      modules: () => {
-        // Definitions listing does not need a session-specific sandbox binding.
-        return shuttleModules(env, 'definitions')
-      },
-    })
-
-    return response ?? new Response('Not Found', { status: 404 })
   },
 } satisfies ExportedHandler<ShuttleEnv>
+
+async function route(
+  request: Request,
+  env: ShuttleEnv,
+  ctx: ExecutionContext,
+  url: URL,
+): Promise<Response> {
+  // Sign-in itself, and the calls GitHub makes, are the only routes that need no sign-in.
+  if (url.pathname.startsWith(AUTH_BASE_PATH)) {
+    return getAuth(env).handler(request)
+  }
+
+  if (request.method === 'GET' && url.pathname === '/auth/providers') {
+    return Response.json({ emailAndPassword: true, github: githubSignInEnabled(env) })
+  }
+
+  const githubPublic = await handleGithubPublicRoutes(request, env)
+
+  if (githubPublic) {
+    return githubPublic
+  }
+
+  const actor = await resolveActor(getAuth(env), request)
+
+  if (!actor) {
+    return Response.json({ error: 'Sign in to continue' }, { status: 401 })
+  }
+
+  if (request.method === 'GET' && url.pathname === '/me') {
+    return Response.json({
+      user: { id: actor.userId, name: actor.name, email: actor.email },
+      org: { id: actor.orgId, role: actor.role },
+      runs: {
+        workspace: workspaceRunId(env, actor.orgId),
+        personal: personalWorkspaceRunId(env, actor.orgId, actor.userId),
+        pulls: pullsRunId(env, actor.orgId),
+        playbook: playbookRunId(env, actor.orgId),
+      },
+    })
+  }
+
+  // A request that names a run is checked against that run before anything else sees it.
+  const runId = runIdOfPath(url.pathname)
+
+  if (runId === null && /^\/(?:runs|sessions)\/./.test(url.pathname)) {
+    return Response.json({ error: 'Not found' }, { status: 404 })
+  }
+
+  if (runId !== null) {
+    const denied = await authorizeRun(env, actor, runId)
+
+    if (denied) {
+      return denied
+    }
+  }
+
+  const handled =
+    (await handleFirehoseRoutes(request, env, actor)) ??
+    (await handleConnectionRoutes(request, env, actor)) ??
+    (await handleWorkspaceRoutes(request, env, actor, ctx)) ??
+    (await handleGithubRoutes(request, env, actor)) ??
+    (await handleSandboxRoutes(request, env)) ??
+    (await handleShuttleRoutes(request, env, actor))
+
+  if (handled) {
+    return handled
+  }
+
+  // What is left is Looms' own API. Looms says which of its routes a request is for; only reads
+  // and the signals a browser may send get through, each recorded as this person's.
+  if (url.pathname.startsWith('/runs') && runId === null) {
+    return Response.json({ error: 'Not found' }, { status: 404 })
+  }
+
+  const response = await routeToDurableObject(env.LOOMS_RUN, request, {
+    modules: () => {
+      // Definitions listing does not need a session-specific sandbox binding.
+      return shuttleModules(env, 'definitions')
+    },
+    authorize: (_request, loomsRoute) => authorizeLoomsRoute(env, actor, loomsRoute),
+  })
+
+  return response ?? new Response('Not Found', { status: 404 })
+}
 
 async function handlePreviewHost(request: Request, env: ShuttleEnv): Promise<Response | null> {
   const url = new URL(request.url)

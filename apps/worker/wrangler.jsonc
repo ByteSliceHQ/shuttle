@@ -44,14 +44,25 @@
       "new_sqlite_classes": ["EventFirehose"],
     },
   ],
-  // Uncomment and create a D1 database for cross-run session lists and history tools:
-  // "d1_databases": [
-  //   {
-  //     "binding": "REPLICA",
-  //     "database_name": "looms-shuttle-replica",
-  //     "database_id": "<create with: wrangler d1 create looms-shuttle-replica>",
-  //   },
-  // ],
+  // Accounts, organizations and sign-in sessions. Local dev creates this database on its own and
+  // `bun run dev` applies the migrations. To deploy, create it with
+  // `wrangler d1 create shuttle-auth`, paste its id here, then run
+  // `wrangler d1 migrations apply AUTH_DB --remote`.
+  "d1_databases": [
+    {
+      "binding": "AUTH_DB",
+      "database_name": "shuttle-auth",
+      "database_id": "68cc444b-be05-4567-870f-507722ea5e4a",
+      "migrations_dir": "migrations",
+    },
+    // Optional: cross-run session lists and history tools. Create it with
+    // `wrangler d1 create looms-shuttle-replica` and uncomment:
+    // {
+    //   "binding": "REPLICA",
+    //   "database_name": "looms-shuttle-replica",
+    //   "database_id": "<id>",
+    // },
+  ],
   // For real Linux sandboxes (Docker required for `wrangler dev`).
   // Enables Terminal (PTY) and Browser (getTcpPort) artifact tabs.
   // durable_object policy uses a named `images` map; start with ctx.container.images.base.

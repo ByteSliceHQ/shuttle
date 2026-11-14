@@ -9,13 +9,20 @@ Cloudflare Worker that hosts Shuttle sessions on Looms Durable Objects.
 
 ## Bring your own Cloudflare
 
-1. Create a D1 database:
+1. Create the D1 database that holds accounts and organizations, paste its id into the
+   `AUTH_DB` entry in `wrangler.jsonc`, and create its tables:
 
    ```bash
-   wrangler d1 create looms-shuttle-replica
+   wrangler d1 create shuttle-auth
+   wrangler d1 migrations apply AUTH_DB --remote
+   wrangler secret put BETTER_AUTH_SECRET   # at least 32 random characters
    ```
 
-2. Uncomment the `d1_databases` block in `wrangler.jsonc` and paste the id.
+   Locally, `bun run dev` does all of this for you.
+
+2. Optionally create a second D1 database for cross-run session lists and history tools
+   (`wrangler d1 create looms-shuttle-replica`), and uncomment the `REPLICA` entry in
+   `wrangler.jsonc` with its id.
 
 3. For real Linux sandboxes (terminal + browser preview ports), install Docker,
    set `SHUTTLE_WORKSPACE_MODE=container` in `.dev.vars`, and enable the

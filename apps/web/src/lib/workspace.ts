@@ -37,6 +37,10 @@ export interface WorkspaceSession {
   readonly archived: boolean
   readonly lastCompletedAt?: number
   readonly unread?: boolean
+  /** The person who started the session. Null or absent when Shuttle started it. */
+  readonly ownerId?: string | null
+  /** People the owner shared the session with. */
+  readonly memberIds?: readonly string[]
 }
 
 export interface GithubInstallation {
@@ -313,7 +317,26 @@ export const workspaceTree = defineProjection<WorkspaceTree, WorkspaceEvent>({
               createdAt: now,
               updatedAt: now,
               archived: false,
+              ownerId: payload.ownerId ?? null,
+              memberIds: [],
             },
+          },
+        }
+      }
+
+      case 'workspace.session.shared': {
+        const payload = event.payload
+        const session = state.sessions[payload.runId]
+
+        if (!session) {
+          return state
+        }
+
+        return {
+          ...state,
+          sessions: {
+            ...state.sessions,
+            [payload.runId]: { ...session, memberIds: payload.memberIds },
           },
         }
       }
@@ -510,11 +533,16 @@ async function postJson(path: string, body: object): Promise<Response> {
   })
 }
 
-export interface WorkspaceSnapshotResponse {
+export interface WorkspaceSnapshot {
   readonly runId: string
   readonly tail?: number
   readonly tree?: WorkspaceTree | null
   readonly tabs?: SessionTabsState | null
+}
+
+/** The organization's workspace, and inside it the caller's own. */
+export interface WorkspaceSnapshotResponse extends WorkspaceSnapshot {
+  readonly personal: WorkspaceSnapshot
 }
 
 export async function fetchWorkspace(): Promise<WorkspaceSnapshotResponse> {
@@ -568,12 +596,22 @@ export async function archiveWorkspaceFolder(runId: string, folderId: string) {
   await signalWorkspace(runId, 'workspace/archiveFolder', { folderId })
 }
 
-export async function renameWorkspaceSession(runId: string, sessionRunId: string, title: string) {
-  await signalWorkspace(runId, 'workspace/renameSession', { runId: sessionRunId, title })
+/** Renames a session wherever it is listed. */
+export async function renameWorkspaceSession(sessionRunId: string, title: string) {
+  const response = await postJson(`/sessions/${encodeURIComponent(sessionRunId)}/rename`, { title })
+
+  if (!response.ok) {
+    throw new Error(`Failed to rename session: ${response.status} ${await response.text()}`)
+  }
 }
 
-export async function archiveWorkspaceSession(runId: string, sessionRunId: string) {
-  await signalWorkspace(runId, 'workspace/archiveSession', { runId: sessionRunId })
+/** Archives a session wherever it is listed. */
+export async function archiveWorkspaceSession(sessionRunId: string) {
+  const response = await postJson(`/sessions/${encodeURIComponent(sessionRunId)}/archive`, {})
+
+  if (!response.ok) {
+    throw new Error(`Failed to archive session: ${response.status} ${await response.text()}`)
+  }
 }
 
 export async function openSessionTab(

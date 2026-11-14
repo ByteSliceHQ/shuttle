@@ -11,6 +11,7 @@ import {
   createFolder,
   disconnectGithub,
   linkRepo,
+  listSession,
   openTab,
   renameFolder,
   renameSession,
@@ -20,7 +21,9 @@ import {
   requestSession,
   retargetTab,
   setFolderAutoReview,
+  shareSession,
   unlinkRepo,
+  unlistSession,
 } from './signals'
 import { createWorkspaceThread } from './thread'
 
@@ -43,9 +46,12 @@ export function workspace() {
       disconnectGithub,
       linkRepo,
       unlinkRepo,
+      listSession,
+      unlistSession,
       requestSession,
       renameSession,
       archiveSession,
+      shareSession,
       reportActivity,
       openTab,
       closeTab,
@@ -64,6 +70,7 @@ export {
   createFolder,
   disconnectGithub,
   linkRepo,
+  listSession,
   openTab,
   renameFolder,
   renameSession,
@@ -74,7 +81,9 @@ export {
   retargetTab,
   sessionTabs,
   setFolderAutoReview,
+  shareSession,
   unlinkRepo,
+  unlistSession,
   workspaceDefinition,
   workspaceTree,
 }

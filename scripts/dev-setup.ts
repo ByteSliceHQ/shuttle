@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 
 import {
   fillEmptyGithubToken,
+  ensureAuthSecretLine,
   ensureCredentialsKeyLine,
   fillEmptySecrets,
   randomHexSecret,
@@ -26,7 +27,7 @@ if (!existsSync(varsPath)) {
   notes.push('created apps/worker/.dev.vars from .dev.vars.example')
 }
 
-let text = ensureCredentialsKeyLine(readFileSync(varsPath, 'utf8'))
+let text = ensureAuthSecretLine(ensureCredentialsKeyLine(readFileSync(varsPath, 'utf8')))
 const { text: withSecrets, filled } = fillEmptySecrets(text, () => randomHexSecret())
 text = withSecrets
 
@@ -44,6 +45,25 @@ if (withGithub.filled) {
 
 if (text !== readFileSync(varsPath, 'utf8')) {
   writeFileSync(varsPath, text)
+}
+
+// Accounts and organizations live in a local D1 database. Applying migrations is idempotent.
+const migrated = Bun.spawnSync(
+  ['bun', 'x', 'wrangler', 'd1', 'migrations', 'apply', 'AUTH_DB', '--local'],
+  {
+    cwd: join(root, 'apps/worker'),
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: { ...process.env, CI: '1' },
+  },
+)
+
+if (migrated.exitCode !== 0) {
+  console.error(
+    `[dev-setup] could not apply auth database migrations:\n${new TextDecoder().decode(migrated.stderr)}`,
+  )
+
+  process.exit(1)
 }
 
 if (notes.length > 0) {

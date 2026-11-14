@@ -1,9 +1,10 @@
 import type { ShuttleEnv } from '../env'
 import { sandboxStub } from '../env'
-import { sandboxNameFor } from '../workspace/thread'
+import { loomsStub } from '../looms-stub'
 
 const MAX_FILE_BYTES = 512_000
 
+/** `index.ts` has already checked that `actor` may open the session the path names. */
 export async function handleSandboxRoutes(
   request: Request,
   env: ShuttleEnv,
@@ -23,7 +24,7 @@ export async function handleSandboxRoutes(
     return Response.json({ error: 'Invalid sandbox path' }, { status: 400 })
   }
 
-  const sandboxName = resolveSandboxName(url, runId)
+  const sandboxName = await resolveSandboxName(env, runId)
   const stub = sandboxStub(env, sandboxName)
 
   switch (action) {
@@ -63,23 +64,12 @@ export async function handleSandboxRoutes(
 }
 
 /**
- * Prefer explicit folderId / sandboxName from the client.
- * Legacy callers without either fall back to run-id DO naming.
+ * The sandbox a session runs in, as the session itself recorded it when it bound one. Nothing in
+ * the request chooses it, so a caller cannot name a sandbox it has no session in. A session that
+ * has not bound a sandbox yet has nothing to show, and gets an empty one named after itself.
  */
-function resolveSandboxName(url: URL, runId: string): string {
-  const sandboxName = url.searchParams.get('sandboxName')?.trim()
-
-  if (sandboxName) {
-    return sandboxName
-  }
-
-  const folderId = url.searchParams.get('folderId')?.trim()
-
-  if (folderId) {
-    return sandboxNameFor(folderId)
-  }
-
-  return runId
+async function resolveSandboxName(env: ShuttleEnv, runId: string): Promise<string> {
+  return (await loomsStub(env.LOOMS_RUN, runId).getSandboxName()) ?? runId
 }
 
 async function listFiles(stub: ReturnType<typeof sandboxStub>, runId: string): Promise<Response> {

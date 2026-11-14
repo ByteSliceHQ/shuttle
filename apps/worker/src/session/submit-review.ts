@@ -5,6 +5,7 @@ import type { ShuttleEnv } from '../env'
 import { submitPullReview, type PullReviewVerdict } from '../github/pulls'
 import { loomsStub } from '../looms-stub'
 import { recordReview } from '../pulls/signals'
+import { orgOfRun } from '../tenancy/run-id'
 import { readSandboxBinding } from './bind-sandbox'
 import { shuttleModule } from './scope'
 
@@ -76,7 +77,7 @@ export function createSubmitReviewEffect(env: ShuttleEnv, storage?: DurableObjec
         comments: input.comments,
       })
 
-      const pullsStub = loomsStub(env.LOOMS_RUN, pullsRunId(env))
+      const pullsStub = loomsStub(env.LOOMS_RUN, pullsRunId(env, orgOfRun(ctx.runId)))
 
       const mappedVerdict =
         verdict === 'approve'

@@ -1,11 +1,5 @@
 import { parseHarness, type VendorHarnessId } from '../harness'
 
-/**
- * Who a credential belongs to. Shuttle is single-tenant today, so every record uses
- * `DEPLOYMENT_OWNER`; a user id takes its place once accounts exist.
- */
-export const DEPLOYMENT_OWNER = 'deployment'
-
 const KEY_PREFIX = 'shuttle:credential:'
 const OWNER_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
 

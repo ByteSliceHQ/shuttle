@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 
+import { orgOfRun } from '../tenancy/run-id'
 import { TabKindSchema, workspaceModule, type ArtifactTab } from './scope'
 import { mutateSessionTabs, type SessionTabSet } from './tab-set'
 
@@ -95,6 +96,8 @@ const SessionSchema = Schema.Struct({
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
   archived: Schema.Boolean,
+  ownerId: Schema.NullOr(Schema.String),
+  memberIds: Schema.Array(Schema.String),
 })
 
 const InstallationSchema = Schema.Struct({
@@ -255,7 +258,10 @@ export const workspaceTree = workspaceModule.projection({
       }
 
       case 'workspace.session.requested': {
-        if (state.sessions[event.payload.runId]) {
+        if (
+          state.sessions[event.payload.runId] ||
+          orgOfRun(event.payload.runId) !== orgOfRun(event.runId)
+        ) {
           return state
         }
 
@@ -275,7 +281,63 @@ export const workspaceTree = workspaceModule.projection({
               createdAt: at,
               updatedAt: at,
               archived: false,
+              ownerId: event.payload.ownerId ?? null,
+              memberIds: [],
             },
+          },
+        }
+      }
+
+      case 'workspace.session.listed': {
+        const { payload } = event
+
+        if (state.sessions[payload.runId] || orgOfRun(payload.runId) !== orgOfRun(event.runId)) {
+          return state
+        }
+
+        return {
+          ...state,
+          sessions: {
+            ...state.sessions,
+            [payload.runId]: {
+              runId: payload.runId,
+              folderId: payload.folderId,
+              title: payload.title,
+              goal: payload.goal,
+              status: payload.status,
+              activity: payload.activity,
+              createdAt: payload.createdAt,
+              updatedAt: payload.updatedAt,
+              archived: payload.archived,
+              ownerId: payload.ownerId,
+              memberIds: payload.memberIds,
+            },
+          },
+        }
+      }
+
+      case 'workspace.session.unlisted': {
+        if (!state.sessions[event.payload.runId]) {
+          return state
+        }
+
+        const { [event.payload.runId]: _removed, ...sessions } = state.sessions
+
+        return { ...state, sessions }
+      }
+
+      case 'workspace.session.shared': {
+        const session = state.sessions[event.payload.runId]
+
+        if (!session) {
+          return state
+        }
+
+        return {
+          ...state,
+          sessions: {
+            ...state.sessions,
+            [event.payload.runId]: { ...session, memberIds: event.payload.memberIds },
           },
         }
       }

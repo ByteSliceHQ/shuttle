@@ -9,6 +9,7 @@ import {
   workspaceTree,
   type SessionTabsState,
   type WorkspaceSession,
+  type WorkspaceSnapshot,
   type WorkspaceTree,
 } from '@/lib/workspace'
 import { FIXTURE_MODES, workspaceFixture, type FixtureMode } from '@/lib/workspace-fixtures'
@@ -20,10 +21,14 @@ export interface LiveSessionStatus {
 }
 
 export interface WorkspaceValue {
+  /** The organization's workspace run, which holds the folders. */
   readonly runId: string
+  /** Both workspaces merged: every folder, and every session this person can see. */
   readonly tree: WorkspaceTree
   readonly tabs: SessionTabsState
   readonly liveSessions: Readonly<Record<string, LiveSessionStatus>>
+  /** The workspace run that lists a session, and so keeps its tabs. */
+  readonly listingRunId: (sessionRunId: string) => string
 }
 
 interface WorkspaceState {
@@ -90,49 +95,68 @@ function mergeLiveSessions(
   return changed ? { ...tree, sessions } : tree
 }
 
+interface WorkspaceSeed {
+  readonly tail: number
+  readonly tree: WorkspaceTree
+  readonly tabs: SessionTabsState
+}
+
+/** One workspace run the page follows: its snapshot, then the live tree and tabs folded from it. */
+function useWorkspaceSource() {
+  const [runId, setRunId] = useState<string | null>(null)
+  const [seed, setSeed] = useState<WorkspaceSeed | null>(null)
+  const [tree, setTree] = useState<WorkspaceTree | null>(null)
+  const [tabs, setTabs] = useState<SessionTabsState>({})
+
+  const load = useCallback((snapshot: WorkspaceSnapshot) => {
+    setRunId(snapshot.runId)
+
+    if (snapshot.tree) {
+      const initialTabs = snapshot.tabs ?? emptySessionTabs
+
+      setSeed({
+        tail: typeof snapshot.tail === 'number' ? snapshot.tail : 0,
+        tree: snapshot.tree,
+        tabs: initialTabs,
+      })
+
+      setTree(snapshot.tree)
+      setTabs(initialTabs)
+    }
+  }, [])
+
+  return { runId, seed, tree, tabs, setTree, setTabs, load }
+}
+
 /**
- * Hydrates from the server's authoritative `/workspace` projection snapshot (which preserves
+ * Follows the two workspaces a person sees and shows them as one: the organization's, with its
+ * folders and public sessions, and their own, with the sessions private to them or shared with
+ * them.
+ *
+ * Each hydrates from the server's authoritative `/workspace` projection snapshot (which preserves
  * server-only fields like `idempotencyKey` and avoids replaying the entire historical log),
  * then folds live delta events strictly past `tail`.
  */
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
-  const [runId, setRunId] = useState<string | null>(null)
-
-  const [seed, setSeed] = useState<{
-    readonly tail: number
-    readonly tree: WorkspaceTree
-    readonly tabs: SessionTabsState
-  } | null>(null)
-
-  const [liveTree, setLiveTree] = useState<WorkspaceTree | null>(null)
-  const [liveTabs, setLiveTabs] = useState<SessionTabsState>({})
+  const shared = useWorkspaceSource()
+  const personal = useWorkspaceSource()
   const [liveSessions, setLiveSessions] = useState<Readonly<Record<string, LiveSessionStatus>>>({})
   const [error, setError] = useState<string | null>(null)
   const [fixture, setFixture] = useState(() => ({ mode: initialFixtureMode(), at: Date.now() }))
   const fixtureMode = fixture.mode
+  const loadShared = shared.load
+  const loadPersonal = personal.load
 
   useEffect(() => {
     void fetchWorkspace()
       .then((result) => {
-        setRunId(result.runId)
-
-        if (result.tree) {
-          const initialTabs = result.tabs ?? emptySessionTabs
-
-          setSeed({
-            tail: typeof result.tail === 'number' ? result.tail : 0,
-            tree: result.tree,
-            tabs: initialTabs,
-          })
-
-          setLiveTree(result.tree)
-          setLiveTabs(initialTabs)
-        }
+        loadShared(result)
+        loadPersonal(result.personal)
       })
       .catch((cause: unknown) =>
         setError(cause instanceof Error ? cause.message : 'Failed to load workspace'),
       )
-  }, [])
+  }, [loadShared, loadPersonal])
 
   const setLiveSessionStatus = useCallback((sessionRunId: string, next: LiveSessionStatus) => {
     setLiveSessions((prev) => {
@@ -154,17 +178,41 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     [fixture],
   )
 
+  const sharedTree = shared.tree
+  const personalTree = personal.tree
+
   const tree = useMemo(() => {
     if (fixtureTree) {
       return fixtureTree
     }
 
-    return liveTree ? mergeLiveSessions(liveTree, liveSessions) : null
-  }, [fixtureTree, liveTree, liveSessions])
+    if (!sharedTree) {
+      return null
+    }
+
+    return mergeLiveSessions(
+      { ...sharedTree, sessions: { ...sharedTree.sessions, ...personalTree?.sessions } },
+      liveSessions,
+    )
+  }, [fixtureTree, sharedTree, personalTree, liveSessions])
+
+  const tabs = useMemo(() => ({ ...shared.tabs, ...personal.tabs }), [shared.tabs, personal.tabs])
+  const sharedRunId = shared.runId
+  const personalRunId = personal.runId
 
   const value = useMemo<WorkspaceState>(
     () => ({
-      workspace: runId && tree ? { runId, tree, tabs: liveTabs, liveSessions } : null,
+      workspace:
+        sharedRunId && tree
+          ? {
+              runId: sharedRunId,
+              tree,
+              tabs,
+              liveSessions,
+              listingRunId: (sessionRunId) =>
+                personalRunId && personalTree?.sessions[sessionRunId] ? personalRunId : sharedRunId,
+            }
+          : null,
       error: tree ? null : error,
       fixtureMode,
       setFixtureMode(mode) {
@@ -173,17 +221,36 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       },
       setLiveSessionStatus,
     }),
-    [runId, tree, liveTabs, liveSessions, error, fixtureMode, setLiveSessionStatus],
+    [
+      sharedRunId,
+      personalRunId,
+      personalTree,
+      tree,
+      tabs,
+      liveSessions,
+      error,
+      fixtureMode,
+      setLiveSessionStatus,
+    ],
   )
 
   return (
     <WorkspaceContext.Provider value={value}>
-      {runId ? (
+      {shared.runId ? (
         <WorkspaceSubscription
-          runId={runId}
-          seed={seed}
-          onTree={setLiveTree}
-          onTabs={setLiveTabs}
+          runId={shared.runId}
+          seed={shared.seed}
+          onTree={shared.setTree}
+          onTabs={shared.setTabs}
+          onStalled={setError}
+        />
+      ) : null}
+      {personal.runId ? (
+        <WorkspaceSubscription
+          runId={personal.runId}
+          seed={personal.seed}
+          onTree={personal.setTree}
+          onTabs={personal.setTabs}
           onStalled={setError}
         />
       ) : null}

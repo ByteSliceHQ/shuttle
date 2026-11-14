@@ -15,7 +15,7 @@ import {
   emptyPullInbox,
   pullInbox,
   pullsForFolder,
-  pullsRunIdFromEnv,
+  usePullsRunId,
   syncFolderPulls,
   type FolderSyncReport,
   type PullInboxState,
@@ -39,7 +39,7 @@ export interface PullInboxData {
 /** Folder PRs from the live pulls run (or a fixture), synced once when the folder opens. */
 export function usePullInbox(folderId: string, repoNames: readonly string[]): PullInboxData {
   const [fixtureMode] = useFixtureMode()
-  const store = useRunStore(pullsRunIdFromEnv())
+  const store = useRunStore(usePullsRunId())
   const liveInbox = useProjection(store, pullInbox)
   const [syncing, setSyncing] = useState(false)
   const [liveReport, setLiveReport] = useState<FolderSyncReport | null>(null)

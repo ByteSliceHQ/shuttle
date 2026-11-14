@@ -6,6 +6,7 @@ import { sandboxStub } from '../env'
 import { loomsStub } from '../looms-stub'
 import { recordPublished } from '../pulls/signals'
 import type { LinkedSandboxRepo } from '../sandbox/workspace'
+import { orgOfRun } from '../tenancy/run-id'
 import { readSandboxBinding } from './bind-sandbox'
 import { githubMirror, mirrorRepoStack, type MirroredStack } from './mirror-stack'
 import { shuttleModule } from './scope'
@@ -124,7 +125,7 @@ export function createPublishPullRequestEffect(env: ShuttleEnv, storage?: Durabl
 
         await writeSessionStacks(storage, ctx.runId, nextStacks)
 
-        const pullsStub = loomsStub(env.LOOMS_RUN, pullsRunId(env))
+        const pullsStub = loomsStub(env.LOOMS_RUN, pullsRunId(env, orgOfRun(ctx.runId)))
 
         for (const pull of mirrored.flatMap(({ result }) => result.layers)) {
           if (pull.outcome === 'unchanged') {

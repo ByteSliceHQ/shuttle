@@ -89,6 +89,13 @@ export const workspaceCatalog = defineEventCatalog('workspace', {
     playbookVersion: Schema.Finite,
     playbookRunId: Schema.NullOr(Schema.String),
     definitionName: Schema.optional(Schema.String),
+    /** The person who started the session. Absent when Shuttle started it. */
+    ownerId: Schema.optional(Schema.String),
+    /**
+     * The repositories the session works on, read from its folder when it was requested. A
+     * personal workspace has no folders of its own to read them from.
+     */
+    repos: Schema.optional(Schema.Array(LinkedRepoSchema)),
     pull: Schema.optional(
       Schema.Struct({
         fullName: Schema.String,
@@ -97,6 +104,32 @@ export const workspaceCatalog = defineEventCatalog('workspace', {
         baseSha: Schema.String,
       }),
     ),
+  }),
+  /**
+   * A session that already exists starts being listed in this workspace: it was shared with this
+   * person, or made public. Carries the session as its previous listing showed it.
+   */
+  'session.listed': Schema.Struct({
+    runId: Schema.String,
+    folderId: Schema.String,
+    goal: Schema.String,
+    title: Schema.String,
+    status: Schema.String,
+    activity: SessionActivitySchema,
+    createdAt: Schema.Finite,
+    updatedAt: Schema.Finite,
+    archived: Schema.Boolean,
+    ownerId: Schema.NullOr(Schema.String),
+    memberIds: Schema.Array(Schema.String),
+  }),
+  /** This workspace stops listing a session: it was unshared, or its visibility changed. */
+  'session.unlisted': Schema.Struct({
+    runId: Schema.String,
+  }),
+  /** The owner changed who else may open the session. `memberIds` is the whole new list. */
+  'session.shared': Schema.Struct({
+    runId: Schema.String,
+    memberIds: Schema.Array(Schema.String),
   }),
   'session.launched': Schema.Struct({
     runId: Schema.String,

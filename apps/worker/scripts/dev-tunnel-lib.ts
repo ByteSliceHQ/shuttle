@@ -4,6 +4,7 @@ const SECRET_KEYS = [
   'GITHUB_WEBHOOK_SECRET',
   'GITHUB_STATE_SECRET',
   'SHUTTLE_CREDENTIALS_KEY',
+  'BETTER_AUTH_SECRET',
 ] as const
 
 export type SecretKey = (typeof SECRET_KEYS)[number]
@@ -43,6 +44,20 @@ export function ensureCredentialsKeyLine(text: string): string {
   const comment = '# Encrypts stored coding agent subscription credentials.'
 
   return `${text.replace(/\n*$/, '')}\n\n${comment}\nSHUTTLE_CREDENTIALS_KEY=\n`
+}
+
+/**
+ * A `.dev.vars` written before sign-in existed has no `BETTER_AUTH_SECRET` line. Add an empty one
+ * so `fillEmptySecrets` can fill it. Without the secret, nobody can sign in.
+ */
+export function ensureAuthSecretLine(text: string): string {
+  if (/^BETTER_AUTH_SECRET=/m.test(text)) {
+    return text
+  }
+
+  const comment = '# Signs sign-in sessions.'
+
+  return `${text.replace(/\n*$/, '')}\n\n${comment}\nBETTER_AUTH_SECRET=\n`
 }
 
 /** Fill empty secret assignments in a `.dev.vars` file; leave set values alone. */

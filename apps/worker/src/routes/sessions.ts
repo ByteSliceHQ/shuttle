@@ -1,19 +1,48 @@
+import { getAuth } from '../auth/auth'
 import { playbookRunId, workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { isVendorHarness, parseHarness } from '../harness'
 import { loomsStub } from '../looms-stub'
 import { parseTeam } from '../team'
+import { canShareSession, isPublicSession, type Actor, type SessionAccess } from '../tenancy/access'
+import { scopedRunId } from '../tenancy/run-id'
 import { vendorHarnessInfo } from '../vendor/harnesses'
 import { parseVendorModelChoice } from '../vendor/models'
+import { moveListings, signalListings } from '../workspace/listings'
+import { archiveSession, renameSession } from '../workspace/module'
 
+/**
+ * Session and playbook routes. `index.ts` has already checked that `actor` may open the session
+ * a `/sessions/<id>/…` path names.
+ */
 export async function handleShuttleRoutes(
   request: Request,
   env: ShuttleEnv,
+  actor: Actor,
 ): Promise<Response | null> {
   const url = new URL(request.url)
+  const { orgId } = actor
 
   if (request.method === 'GET' && url.pathname === '/sessions') {
-    return listSessions(env)
+    return listSessions(env, orgId)
+  }
+
+  const accessMatch = url.pathname.match(/^\/sessions\/([^/]+)\/access$/)
+
+  if (accessMatch) {
+    return sessionAccess(request, env, actor, decodeURIComponent(accessMatch[1] ?? ''))
+  }
+
+  const listingMatch = url.pathname.match(/^\/sessions\/([^/]+)\/(rename|archive)$/)
+
+  if (request.method === 'POST' && listingMatch) {
+    return sessionListing(
+      request,
+      env,
+      actor,
+      decodeURIComponent(listingMatch[1] ?? ''),
+      listingMatch[2] === 'archive' ? 'archive' : 'rename',
+    )
   }
 
   const treeMatch = url.pathname.match(/^\/sessions\/([^/]+)\/tree$/)
@@ -43,7 +72,7 @@ export async function handleShuttleRoutes(
   const vendorModelsMatch = url.pathname.match(/^\/sessions\/([^/]+)\/vendor-models$/)
 
   if (vendorModelsMatch) {
-    return sessionVendorModels(request, env, decodeURIComponent(vendorModelsMatch[1] ?? ''))
+    return sessionVendorModels(request, env, orgId, decodeURIComponent(vendorModelsMatch[1] ?? ''))
   }
 
   const stopMatch = url.pathname.match(/^\/sessions\/([^/]+)\/stop$/)
@@ -53,14 +82,118 @@ export async function handleShuttleRoutes(
   }
 
   if (request.method === 'GET' && url.pathname === '/playbook') {
-    return getPlaybook(env)
+    return getPlaybook(env, orgId)
   }
 
   if (request.method === 'POST' && url.pathname === '/playbook/ensure') {
-    return ensurePlaybook(env)
+    return ensurePlaybook(env, orgId)
   }
 
   return null
+}
+
+/**
+ * Who may open a session.
+ *
+ *   GET /sessions/:id/access                  owner, members, visibility, and whether the caller
+ *                                             may change them
+ *   PUT /sessions/:id/access                  { memberIds?, visibility? }, owner only
+ */
+async function sessionAccess(
+  request: Request,
+  env: ShuttleEnv,
+  actor: Actor,
+  runId: string,
+): Promise<Response> {
+  const session = loomsStub(env.LOOMS_RUN, runId)
+  const access = await session.getAccess()
+
+  const describe = (current: SessionAccess | null) => ({
+    ownerId: current?.ownerId ?? null,
+    memberIds: current?.memberIds ?? [],
+    visibility: isPublicSession(current) ? 'public' : 'private',
+    canShare: canShareSession(current, actor),
+  })
+
+  if (request.method === 'GET') {
+    return Response.json(describe(access))
+  }
+
+  if (request.method !== 'PUT') {
+    return Response.json({ error: 'Method not allowed' }, { status: 405 })
+  }
+
+  if (!access || !canShareSession(access, actor)) {
+    return Response.json({ error: 'Only the session owner can change this' }, { status: 403 })
+  }
+
+  const body = (await request.json().catch(() => null)) as {
+    memberIds?: unknown
+    visibility?: unknown
+  } | null
+
+  const memberIds = body?.memberIds ?? access.memberIds
+  const visibility = body?.visibility ?? access.visibility
+
+  if (!Array.isArray(memberIds) || !memberIds.every((id) => typeof id === 'string')) {
+    return Response.json({ error: 'memberIds must be a list of user ids' }, { status: 400 })
+  }
+
+  if (visibility !== 'private' && visibility !== 'public') {
+    return Response.json({ error: 'visibility must be private or public' }, { status: 400 })
+  }
+
+  // A session can only be shared with people in its organization.
+  const { members } = await getAuth(env).api.listMembers({
+    headers: request.headers,
+    query: { organizationId: actor.orgId, limit: 1000 },
+  })
+
+  const inOrg = new Set(members.map((member) => member.userId))
+
+  if (!memberIds.every((id) => inOrg.has(id))) {
+    return Response.json({ error: 'Everyone must be in this organization' }, { status: 400 })
+  }
+
+  const saved = await session.setAccess({ ownerId: access.ownerId, memberIds, visibility })
+
+  // The access record is the one that is enforced; the listings follow it.
+  await moveListings(env, actor.orgId, runId, access, saved)
+
+  return Response.json(describe(saved))
+}
+
+/**
+ * Renames or archives a session wherever it is listed. Anyone who can open the session may.
+ *
+ *   POST /sessions/:id/rename    { title }
+ *   POST /sessions/:id/archive
+ */
+async function sessionListing(
+  request: Request,
+  env: ShuttleEnv,
+  actor: Actor,
+  runId: string,
+  action: 'rename' | 'archive',
+): Promise<Response> {
+  const access = await loomsStub(env.LOOMS_RUN, runId).getAccess()
+
+  if (action === 'archive') {
+    await signalListings(env, actor.orgId, access, [archiveSession({ runId })])
+
+    return Response.json({ runId, archived: true })
+  }
+
+  const body = (await request.json().catch(() => null)) as { title?: unknown } | null
+  const title = typeof body?.title === 'string' ? body.title.trim() : ''
+
+  if (!title || title.length > 120) {
+    return Response.json({ error: 'title must be 1 to 120 characters' }, { status: 400 })
+  }
+
+  await signalListings(env, actor.orgId, access, [renameSession({ runId, title })])
+
+  return Response.json({ runId, title })
 }
 
 async function sessionStop(request: Request, env: ShuttleEnv, runId: string): Promise<Response> {
@@ -193,6 +326,7 @@ async function sessionTeam(request: Request, env: ShuttleEnv, runId: string): Pr
 async function sessionVendorModels(
   request: Request,
   env: ShuttleEnv,
+  orgId: string,
   runId: string,
 ): Promise<Response> {
   if (!runId) {
@@ -200,7 +334,7 @@ async function sessionVendorModels(
   }
 
   const session = loomsStub(env.LOOMS_RUN, runId)
-  const workspace = loomsStub(env.LOOMS_RUN, workspaceRunId(env))
+  const workspace = loomsStub(env.LOOMS_RUN, workspaceRunId(env, orgId))
 
   const current = async () => ({
     // A session's own choice wins. Without one it runs on the most recent choice made anywhere.
@@ -233,7 +367,7 @@ async function sessionVendorModels(
   return Response.json({ error: 'Method not allowed' }, { status: 405 })
 }
 
-async function listSessions(env: ShuttleEnv): Promise<Response> {
+async function listSessions(env: ShuttleEnv, orgId: string): Promise<Response> {
   if (!env.REPLICA) {
     return Response.json({
       sessions: [],
@@ -241,13 +375,19 @@ async function listSessions(env: ShuttleEnv): Promise<Response> {
     })
   }
 
+  // Every run id in an organization starts with the same prefix.
+  const orgPrefix = scopedRunId(orgId, '')
+
   const result = await env.REPLICA.prepare(
     `SELECT run_id, kind, definition_name, status, correlation_id, updated_at, attributes_json
      FROM looms_run_index
-     WHERE kind = 'shuttle-session' OR definition_name = 'coding'
+     WHERE (kind = 'shuttle-session' OR definition_name = 'coding')
+       AND substr(run_id, 1, ?) = ?
      ORDER BY updated_at DESC
      LIMIT 50`,
-  ).all()
+  )
+    .bind(orgPrefix.length, orgPrefix)
+    .all()
 
   return Response.json({ sessions: result.results ?? [] })
 }
@@ -274,8 +414,8 @@ async function sessionTree(env: ShuttleEnv, sessionId: string): Promise<Response
   return Response.json({ sessionId, runs: result.results ?? [] })
 }
 
-async function ensurePlaybook(env: ShuttleEnv): Promise<Response> {
-  const runId = playbookRunId(env)
+async function ensurePlaybook(env: ShuttleEnv, orgId: string): Promise<Response> {
+  const runId = playbookRunId(env, orgId)
   const stub = loomsStub(env.LOOMS_RUN, runId)
 
   try {
@@ -299,8 +439,8 @@ async function ensurePlaybook(env: ShuttleEnv): Promise<Response> {
 
 const emptyPlaybook = { version: 0, lessons: [], proposed: {} }
 
-async function getPlaybook(env: ShuttleEnv): Promise<Response> {
-  const runId = playbookRunId(env)
+async function getPlaybook(env: ShuttleEnv, orgId: string): Promise<Response> {
+  const runId = playbookRunId(env, orgId)
   const stub = loomsStub(env.LOOMS_RUN, runId)
 
   const request = new Request(`https://shuttle.internal/runs/${runId}/projections/activePlaybook`, {

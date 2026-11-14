@@ -27,24 +27,29 @@ async function ensureNamedRun(
   }
 }
 
-export async function ensurePlaybookQuietly(env: ShuttleEnv): Promise<void> {
-  await ensureNamedRun(env, playbookRunId(env), {
+export async function ensurePlaybookQuietly(env: ShuttleEnv, orgId: string | null): Promise<void> {
+  await ensureNamedRun(env, playbookRunId(env, orgId), {
     kind: 'reflect-playbook',
     definitionName: 'playbook',
     input: { title: 'Shuttle playbook' },
   })
 }
 
-export async function ensureWorkspaceQuietly(env: ShuttleEnv): Promise<void> {
-  await ensureNamedRun(env, workspaceRunId(env), {
+/** Starts a workspace run if it has not started: an organization's, or a person's own. */
+export async function ensureNamedWorkspace(env: ShuttleEnv, runId: string): Promise<void> {
+  await ensureNamedRun(env, runId, {
     kind: 'shuttle-workspace',
     definitionName: 'workspace',
     input: { title: 'Shuttle workspace' },
   })
 }
 
-export async function ensurePullsQuietly(env: ShuttleEnv): Promise<void> {
-  await ensureNamedRun(env, pullsRunId(env), {
+export async function ensureWorkspaceQuietly(env: ShuttleEnv, orgId: string | null): Promise<void> {
+  await ensureNamedWorkspace(env, workspaceRunId(env, orgId))
+}
+
+export async function ensurePullsQuietly(env: ShuttleEnv, orgId: string | null): Promise<void> {
+  await ensureNamedRun(env, pullsRunId(env, orgId), {
     kind: 'shuttle-pulls',
     definitionName: 'pulls',
     input: { title: 'Shuttle pulls' },

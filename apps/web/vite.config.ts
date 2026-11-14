@@ -63,6 +63,10 @@ export default defineConfig({
       '/workspace': api,
       '/firehose': { ...api, ws: true },
       '/github': githubApi,
+      // Sign-in. OAuth callbacks are browser navigations, so these never fall back to the SPA.
+      '/api/auth': githubApi,
+      '/auth': api,
+      '/me': api,
     },
   },
 })

@@ -27,6 +27,8 @@ import {
 import { loomsStub } from './looms-stub'
 import { readSandboxBinding } from './session/bind-sandbox'
 import { onTeam, readPinnedTeam, writeStoredTeam, type Team } from './team'
+import { readSessionAccess } from './tenancy/access'
+import { orgOfRun, personalRunId, scopedRunId } from './tenancy/run-id'
 import { vendorHarnessInfo } from './vendor/harnesses'
 import { readVendorModelChoice } from './vendor/models'
 import { runVendorTurn } from './vendor/turn'
@@ -55,14 +57,18 @@ export function defaultLlmModel(env: ShuttleEnv): string {
  * The team for a session. One with no team of its own takes the workspace default on first use
  * and keeps it, like its harness.
  */
-export async function resolveTeam(env: ShuttleEnv, storage: DurableObjectStorage): Promise<Team> {
+export async function resolveTeam(
+  env: ShuttleEnv,
+  storage: DurableObjectStorage,
+  runId: string,
+): Promise<Team> {
   const pinned = await readPinnedTeam(storage)
 
   if (pinned) {
     return pinned
   }
 
-  const preferred = await loomsStub(env.LOOMS_RUN, workspaceRunId(env)).getTeam()
+  const preferred = await loomsStub(env.LOOMS_RUN, workspaceRunId(env, orgOfRun(runId))).getTeam()
 
   // The developer may have set this session's team while the default was being fetched. Their
   // choice wins over the default.
@@ -100,7 +106,10 @@ export function resolveLlm(
       let sessionHarness = await readPinnedHarness(storage)
 
       if (!sessionHarness) {
-        const preferred = await loomsStub(env.LOOMS_RUN, workspaceRunId(env)).getHarness()
+        const preferred = await loomsStub(
+          env.LOOMS_RUN,
+          workspaceRunId(env, orgOfRun(runId)),
+        ).getHarness()
 
         // A harness the developer picked while the default was being fetched wins over it.
         sessionHarness =
@@ -119,7 +128,7 @@ export function resolveLlm(
 
       const label = vendorHarnessInfo(harness).label
 
-      if (memberHarness && !onTeam(await resolveTeam(env, storage), memberHarness)) {
+      if (memberHarness && !onTeam(await resolveTeam(env, storage, runId), memberHarness)) {
         return {
           message: {
             role: 'assistant',
@@ -144,7 +153,8 @@ export function resolveLlm(
       await sandbox.ensureRepos([...binding.repos])
       await sandbox.ensureWorktree(runId)
 
-      const credentials = loomsStub(env.LOOMS_RUN, workspaceRunId(env))
+      const credentials = loomsStub(env.LOOMS_RUN, workspaceRunId(env, orgOfRun(runId)))
+      const ownerId = (await readSessionAccess(storage))?.ownerId ?? null
 
       // Read last, so a model picked while the sandbox was being prepared still applies. A
       // session with no choice of its own uses the most recent one made anywhere.
@@ -163,9 +173,15 @@ export function resolveLlm(
           ...(memberHarness
             ? { member: { threadId: getTurnThread(args.signal) ?? crypto.randomUUID() } }
             : {}),
+          // The turn runs on the sign-in of the person who started the session. A session
+          // Shuttle started itself has no one's sign-in to run on.
           credentials: {
-            get: (id) => credentials.getCredential(id),
-            put: (id, payload) => credentials.putCredential(id, payload),
+            get: async (id) => (ownerId ? credentials.getCredential(ownerId, id) : null),
+            put: async (id, payload) => {
+              if (ownerId) {
+                await credentials.putCredential(ownerId, id, payload)
+              }
+            },
           },
         },
         args,
@@ -305,21 +321,33 @@ export function resolveProjectors(env: ShuttleEnv, context?: ProjectorContext): 
   }
 
   if (context) {
-    projectors.push(createFirehoseProjector(env, context.runId))
+    projectors.push(createFirehoseProjector(env, context.runId, context.storage))
     projectors.push(createWorkspaceActivityProjector(env, context.runId, context.storage))
   }
 
   return projectors
 }
 
-export function playbookRunId(env: ShuttleEnv): string {
-  return env.SHUTTLE_PLAYBOOK_RUN_ID ?? 'shuttle-playbook'
+/**
+ * Each organization has one playbook, one workspace and one pulls run. `orgId` is null only for
+ * a run that belongs to no organization (see `tenancy/run-id.ts`).
+ */
+export function playbookRunId(env: ShuttleEnv, orgId: string | null): string {
+  return scopedRunId(orgId, env.SHUTTLE_PLAYBOOK_RUN_ID ?? 'shuttle-playbook')
 }
 
-export function workspaceRunId(env: ShuttleEnv): string {
-  return env.SHUTTLE_WORKSPACE_RUN_ID ?? 'shuttle-workspace'
+export function workspaceRunId(env: ShuttleEnv, orgId: string | null): string {
+  return scopedRunId(orgId, env.SHUTTLE_WORKSPACE_RUN_ID ?? 'shuttle-workspace')
 }
 
-export function pullsRunId(env: ShuttleEnv): string {
-  return env.SHUTTLE_PULLS_RUN_ID ?? 'shuttle-pulls'
+/**
+ * A person's own workspace run. It lists the sessions that are private to them or shared with
+ * them; the organization's workspace run lists the public ones.
+ */
+export function personalWorkspaceRunId(env: ShuttleEnv, orgId: string, userId: string): string {
+  return personalRunId(orgId, userId, env.SHUTTLE_WORKSPACE_RUN_ID ?? 'shuttle-workspace')
+}
+
+export function pullsRunId(env: ShuttleEnv, orgId: string | null): string {
+  return scopedRunId(orgId, env.SHUTTLE_PULLS_RUN_ID ?? 'shuttle-pulls')
 }

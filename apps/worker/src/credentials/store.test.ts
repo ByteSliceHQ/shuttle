@@ -1,11 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import {
-  createCredentialStore,
-  CredentialsKeyMissingError,
-  DEPLOYMENT_OWNER,
-  type CredentialStorage,
-} from './store'
+import { createCredentialStore, CredentialsKeyMissingError, type CredentialStorage } from './store'
 
 function memoryStorage(): CredentialStorage & { values: Map<string, unknown> } {
   const values = new Map<string, unknown>()
@@ -22,6 +17,7 @@ function memoryStorage(): CredentialStorage & { values: Map<string, unknown> } {
   }
 }
 
+const OWNER = 'deployment'
 const secret = 'test-secret-0123456789abcdef0123456789abcdef'
 
 describe('credential store', () => {
@@ -34,9 +30,9 @@ describe('credential store', () => {
       files: { '.codex/auth.json': btoa('{"token":"file-very-secret"}') },
     }
 
-    await store.put(DEPLOYMENT_OWNER, 'cursor', payload)
+    await store.put(OWNER, 'cursor', payload)
 
-    expect(await store.get(DEPLOYMENT_OWNER, 'cursor')).toEqual(payload)
+    expect(await store.get(OWNER, 'cursor')).toEqual(payload)
 
     const raw = JSON.stringify([...storage.values])
 
@@ -47,20 +43,18 @@ describe('credential store', () => {
   test('returns null for a harness that is not connected', async () => {
     const store = createCredentialStore({ storage: memoryStorage(), secret })
 
-    expect(await store.get(DEPLOYMENT_OWNER, 'codex')).toBeNull()
+    expect(await store.get(OWNER, 'codex')).toBeNull()
   })
 
   test('lists connected harnesses per owner without the secret', async () => {
     const storage = memoryStorage()
     const store = createCredentialStore({ storage, secret, now: () => 1234 })
 
-    await store.put(DEPLOYMENT_OWNER, 'codex', { env: { A: '1' } })
-    await store.put(DEPLOYMENT_OWNER, 'acp:goose', { env: { B: '2' } })
+    await store.put(OWNER, 'codex', { env: { A: '1' } })
+    await store.put(OWNER, 'acp:goose', { env: { B: '2' } })
     await store.put('someone-else', 'cursor', { env: { C: '3' } })
 
-    const listed = await createCredentialStore({ storage, secret: undefined }).list(
-      DEPLOYMENT_OWNER,
-    )
+    const listed = await createCredentialStore({ storage, secret: undefined }).list(OWNER)
 
     expect(listed.toSorted((a, b) => a.harness.localeCompare(b.harness))).toEqual([
       { harness: 'acp:goose', updatedAt: 1234 },
@@ -71,43 +65,43 @@ describe('credential store', () => {
   test('removes a credential', async () => {
     const store = createCredentialStore({ storage: memoryStorage(), secret })
 
-    await store.put(DEPLOYMENT_OWNER, 'codex', { env: { A: '1' } })
+    await store.put(OWNER, 'codex', { env: { A: '1' } })
 
-    expect(await store.remove(DEPLOYMENT_OWNER, 'codex')).toBe(true)
-    expect(await store.get(DEPLOYMENT_OWNER, 'codex')).toBeNull()
-    expect(await store.remove(DEPLOYMENT_OWNER, 'codex')).toBe(false)
+    expect(await store.remove(OWNER, 'codex')).toBe(true)
+    expect(await store.get(OWNER, 'codex')).toBeNull()
+    expect(await store.remove(OWNER, 'codex')).toBe(false)
   })
 
   test('a record moved to another slot does not decrypt', async () => {
     const storage = memoryStorage()
     const store = createCredentialStore({ storage, secret })
 
-    await store.put(DEPLOYMENT_OWNER, 'codex', { env: { A: '1' } })
+    await store.put(OWNER, 'codex', { env: { A: '1' } })
 
     storage.values.set(
       'shuttle:credential:deployment:cursor',
       storage.values.get('shuttle:credential:deployment:codex'),
     )
 
-    expect(store.get(DEPLOYMENT_OWNER, 'cursor')).rejects.toThrow()
+    expect(store.get(OWNER, 'cursor')).rejects.toThrow()
   })
 
   test('a different secret does not decrypt', async () => {
     const storage = memoryStorage()
 
-    await createCredentialStore({ storage, secret }).put(DEPLOYMENT_OWNER, 'codex', {
+    await createCredentialStore({ storage, secret }).put(OWNER, 'codex', {
       env: { A: '1' },
     })
 
     const other = createCredentialStore({ storage, secret: `${secret}-rotated` })
 
-    expect(other.get(DEPLOYMENT_OWNER, 'codex')).rejects.toThrow()
+    expect(other.get(OWNER, 'codex')).rejects.toThrow()
   })
 
   test('refuses to store without a key', async () => {
     const store = createCredentialStore({ storage: memoryStorage(), secret: '  ' })
 
-    expect(store.put(DEPLOYMENT_OWNER, 'codex', { env: { A: '1' } })).rejects.toBeInstanceOf(
+    expect(store.put(OWNER, 'codex', { env: { A: '1' } })).rejects.toBeInstanceOf(
       CredentialsKeyMissingError,
     )
   })

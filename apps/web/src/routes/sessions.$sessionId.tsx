@@ -9,6 +9,7 @@ import { Conversation } from '@/components/conversation'
 import { SessionContextButtons } from '@/components/session-context'
 import { SessionPrPills } from '@/components/session-pr-pills'
 import { SessionRepos } from '@/components/session-repos'
+import { SessionShare } from '@/components/session-share'
 import { useReportLiveSession, useWorkspace } from '@/components/sidebar/workspace-context'
 import { StatusBadge } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
@@ -17,12 +18,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/componen
 import { agentIdentities, withVendorAgents } from '@/lib/agents'
 import { fetchSessionHarness, type HarnessId } from '@/lib/api'
 import { shortId } from '@/lib/cn'
-import {
-  authoredPullsForSession,
-  pullInbox,
-  pullsRunIdFromEnv,
-  type PullInboxState,
-} from '@/lib/pulls'
+import { authoredPullsForSession, pullInbox, usePullsRunId, type PullInboxState } from '@/lib/pulls'
 import { rememberSession } from '@/lib/recent-sessions'
 import { sessionActivity, type SessionActivity } from '@/lib/session-activity'
 import {
@@ -278,7 +274,7 @@ function SessionHeader({
   const sessionMeta = tree?.sessions[runId]
   const folder = sessionMeta ? tree?.folders[sessionMeta.folderId] : undefined
   const title = sessionMeta?.title ?? goal ?? 'Coding session'
-  const pullsStore = useRunStore(pullsRunIdFromEnv())
+  const pullsStore = useRunStore(usePullsRunId())
   const inbox = useProjection(pullsStore, pullInbox)
 
   const sessionPulls = useMemo(
@@ -318,6 +314,7 @@ function SessionHeader({
       </div>
       <div className="flex items-center gap-1">
         <SessionPrPills pulls={sessionPulls} labelFor={labelFor} onInspect={onInspect} />
+        <SessionShare key={runId} runId={runId} />
         <ConnectionIndicator connection={connection} />
         <StatusBadge status={badgeStatus} className="mr-1" />
         {folder ? (

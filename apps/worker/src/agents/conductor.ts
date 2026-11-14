@@ -8,6 +8,8 @@ import { resolveTeam, workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { loomsStub } from '../looms-stub'
 import { DEFAULT_TEAM, frameTask, presetRoles, type DelegateMode, type Team } from '../team'
+import { readSessionAccess } from '../tenancy/access'
+import { orgOfRun } from '../tenancy/run-id'
 import { createProposePullRequestTool } from './tools/pulls'
 import { createStackLayerTool } from './tools/stack'
 import { createVendorMemberAgent } from './vendor-member'
@@ -88,7 +90,7 @@ export function createConductorAgent(
     // The team and the linked repositories decide which tools exist, and both can change
     // between turns: the developer edits the team from the agent picker mid-session.
     resolveTools: async ({ input }) => [
-      ...delegateTools(await sessionTeam(env, storage), { worker }),
+      ...delegateTools(await sessionTeam(env, runId, storage), { worker }),
       ...(hasLinkedRepos(input) ? [stackLayer, proposePullRequest] : []),
     ],
   })
@@ -98,21 +100,32 @@ export function createConductorAgent(
  * The session's team, limited to vendor agents that are actually connected. Without storage
  * (unit tests and definition listings) a session has only Shuttle's own workers.
  */
-async function sessionTeam(env: ShuttleEnv, storage: DurableObjectStorage | undefined) {
+async function sessionTeam(
+  env: ShuttleEnv,
+  runId: string,
+  storage: DurableObjectStorage | undefined,
+) {
   if (!storage) {
     return DEFAULT_TEAM
   }
 
-  const team = await resolveTeam(env, storage)
+  const team = await resolveTeam(env, storage, runId)
 
   if (!team.codex && !team.claudeCode) {
     return team
   }
 
+  // Vendor agents run on the sign-in of the person who started the session.
+  const ownerId = (await readSessionAccess(storage))?.ownerId ?? null
+
   const connected = new Set(
-    (await loomsStub(env.LOOMS_RUN, workspaceRunId(env)).listCredentials()).map(
-      (entry) => entry.harness,
-    ),
+    ownerId
+      ? (
+          await loomsStub(env.LOOMS_RUN, workspaceRunId(env, orgOfRun(runId))).listCredentials(
+            ownerId,
+          )
+        ).map((entry) => entry.harness)
+      : [],
   )
 
   return {

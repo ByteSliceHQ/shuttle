@@ -26,6 +26,13 @@ export interface ShuttleEnv {
   readonly SANDBOX: DurableObjectNamespace<SessionSandbox>
   readonly EVENT_FIREHOSE: DurableObjectNamespace<EventFirehose>
   readonly REPLICA?: D1Database
+  /** Accounts, organizations and sign-in sessions (Better Auth), plus tenancy tables. */
+  readonly AUTH_DB?: D1Database
+  /** Signs sign-in sessions. At least 32 random characters. */
+  readonly BETTER_AUTH_SECRET?: string
+  /** GitHub OAuth client for "Sign in with GitHub". Optional; email and password always work. */
+  readonly GITHUB_CLIENT_ID?: string
+  readonly GITHUB_CLIENT_SECRET?: string
   readonly OPENROUTER_API_KEY?: string
   readonly LOOMS_MODEL?: string
   /** TypeSafe API key for Jev evaluator decisions (`TYPESAFE_AI_API_KEY`). */

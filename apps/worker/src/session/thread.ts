@@ -17,6 +17,7 @@ import {
 
 import { isHardStop } from '../agents/intake'
 import { jsonObject } from '../json'
+import { reflectionRunId } from '../tenancy/run-id'
 import {
   buildConductorInput,
   conductorChildThreadId,
@@ -929,11 +930,11 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         !state.activeIntake &&
         state.processedMessageIds.length > 0
       ) {
-        const reflectionRunId = `reflect_${ctx.runId}`
+        const reflectionRun = reflectionRunId(ctx.runId)
 
         effects.push(
           launch({
-            runId: reflectionRunId,
+            runId: reflectionRun,
             kind: 'agent',
             definitionName: 'reflector',
             input: {
@@ -944,7 +945,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             close: 'wait',
           }),
           emit(
-            shuttleModule.input('reflection.launched', { runId: reflectionRunId }),
+            shuttleModule.input('reflection.launched', { runId: reflectionRun }),
             'reflection_launched',
           ),
         )

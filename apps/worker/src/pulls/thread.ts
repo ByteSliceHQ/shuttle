@@ -9,6 +9,7 @@ import {
   type ThreadDefinition,
 } from '@swirls/looms/core'
 
+import { orgOfRun, scopedRunId } from '../tenancy/run-id'
 import { pullKey, pullsModule, type AutoReviewMode, type PullLinkedRole } from './scope'
 
 export interface PullRecord {
@@ -354,7 +355,11 @@ export function createPullsThread(): ThreadDefinition<PullsState> {
       const effects: RuntimeEffect[] = []
 
       for (const pending of state.pendingAutoReviews) {
-        const runId = `review-${pending.fullName.replace('/', '-')}-${pending.number}-${pending.headSha.slice(0, 8)}`
+        // The review session lives in the same organization as this pulls run.
+        const runId = scopedRunId(
+          orgOfRun(ctx.runId),
+          `review-${pending.fullName.replace('/', '-')}-${pending.number}-${pending.headSha.slice(0, 8)}`,
+        )
 
         effects.push(
           emit(

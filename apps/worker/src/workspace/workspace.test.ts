@@ -16,12 +16,14 @@ import {
   closeTab,
   createFolder,
   linkRepo,
+  listSession,
   openTab,
   reorderTabs,
   requestSession,
   retargetTab,
   sessionTabs,
   unlinkRepo,
+  unlistSession,
   workspace,
   workspaceDefinition,
   workspaceTree,
@@ -165,6 +167,121 @@ describe('workspace module', () => {
       }
 
       expect(tree.folders['folder-1']?.archived).toBe(true)
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test("a person's own workspace launches a session with the repos its request carried", async () => {
+    const looms = createLooms({
+      modules: [
+        agent({ definitions: [stubConductor, stubNarrator, stubWorker, stubReflector] }),
+        evaluator({ definitions: [intake] }),
+        approval(),
+        shuttleSession({ definitions: [codingSession], env: fakeEnv() }),
+        workspace(),
+      ],
+    })
+
+    try {
+      // No folders here: they live in the organization's workspace.
+      const { runId } = await looms.launchRun({
+        kind: 'shuttle-workspace',
+        definitionName: workspaceDefinition.name,
+        input: { title: 'Personal workspace' },
+      })
+
+      await looms.signal(runId, [
+        requestSession({
+          runId: 'session_private',
+          folderId: 'folder-elsewhere',
+          goal: 'Private work',
+          lessons: [],
+          playbookVersion: 0,
+          playbookRunId: null,
+          ownerId: 'alice',
+          repos: [
+            {
+              installationId: 42,
+              owner: 'byteslicehq',
+              name: 'shuttle',
+              fullName: 'byteslicehq/shuttle',
+              defaultBranch: 'main',
+              private: true,
+            },
+          ],
+        }),
+      ])
+
+      let tree = await looms.project(runId, workspaceTree)
+
+      for (let i = 0; i < 50 && tree.sessions['session_private']?.status !== 'running'; i++) {
+        await sleep(20)
+        tree = await looms.project(runId, workspaceTree)
+      }
+
+      expect(tree.sessions['session_private']).toMatchObject({
+        status: 'running',
+        ownerId: 'alice',
+        memberIds: [],
+      })
+
+      const events = await looms.fetch(
+        new Request('http://shuttle.test/runs/session_private/events'),
+      )
+
+      const body = (await events?.json()) as { events: { type: string; payload: unknown }[] }
+      const started = body.events.find((event) => event.type === 'runtime.run.started')
+
+      expect(JSON.stringify(started?.payload)).toContain('byteslicehq/shuttle')
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('lists a session that already exists without launching it, and unlists it', async () => {
+    const looms = createLooms({ modules: [workspace()] })
+
+    try {
+      const { runId } = await looms.launchRun({
+        kind: 'shuttle-workspace',
+        definitionName: workspaceDefinition.name,
+        input: { title: 'Personal workspace' },
+      })
+
+      const shared = {
+        runId: 'session_shared',
+        folderId: 'folder-1',
+        goal: 'Fix the build',
+        title: 'Fix the build (renamed)',
+        status: 'running',
+        activity: 'needs_input' as const,
+        createdAt: 10,
+        updatedAt: 20,
+        archived: false,
+        ownerId: 'alice',
+        memberIds: ['bob'],
+      }
+
+      await looms.signal(runId, [listSession(shared)])
+      // Listing it twice changes nothing.
+      await looms.signal(runId, [listSession({ ...shared, title: 'Ignored' })])
+
+      let tree = await looms.project(runId, workspaceTree)
+
+      expect(tree.sessions['session_shared']).toEqual(shared)
+
+      // It was listed, not requested: this workspace must never start it.
+      await sleep(50)
+
+      expect(await looms.getRun('session_shared').catch(() => null)).toMatchObject({
+        rootThreadId: null,
+      })
+
+      await looms.signal(runId, [unlistSession({ runId: 'session_shared' })])
+      tree = await looms.project(runId, workspaceTree)
+
+      expect(tree.sessions['session_shared']).toBeUndefined()
     } finally {
       await looms.stop()
     }

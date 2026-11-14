@@ -3,6 +3,7 @@ import { Schema } from 'effect'
 import { workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { loomsStub } from '../looms-stub'
+import { orgOfRun } from '../tenancy/run-id'
 import { requestSession } from '../workspace/signals'
 import { pullsModule } from './scope'
 
@@ -18,8 +19,8 @@ export function createLaunchReviewEffect(env: ShuttleEnv) {
       headSha: Schema.String,
       baseSha: Schema.String,
     }),
-    execute: async (input) => {
-      const stub = loomsStub(env.LOOMS_RUN, workspaceRunId(env))
+    execute: async (input, ctx) => {
+      const stub = loomsStub(env.LOOMS_RUN, workspaceRunId(env, orgOfRun(ctx.runId)))
 
       await stub.signal([
         requestSession({

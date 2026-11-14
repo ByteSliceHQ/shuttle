@@ -11,6 +11,7 @@ import {
 } from '@swirls/looms/core'
 
 import { jsonObject } from '../json'
+import { orgOfRun } from '../tenancy/run-id'
 import type { LinkedRepo, SessionActivity } from './scope'
 import { workspaceModule } from './scope'
 
@@ -50,6 +51,18 @@ export interface WorkspaceSession {
   readonly playbookRunId: string | null
   readonly definitionName: string
   readonly pull: SessionPullRef | null
+  /** The person who started the session. Null when Shuttle started it. */
+  readonly ownerId: string | null
+  /** People the owner shared the session with. */
+  readonly memberIds: readonly string[]
+  /** The repositories to launch with, when the request carried them. */
+  readonly repos?: readonly LinkedRepo[]
+}
+
+const SESSION_STATUSES = ['requested', 'running', 'completed', 'failed', 'cancelled'] as const
+
+function asSessionStatus(value: string): WorkspaceSession['status'] {
+  return SESSION_STATUSES.find((status) => status === value) ?? 'running'
 }
 
 export interface GithubInstallation {
@@ -291,7 +304,11 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
         }
 
         case 'workspace.session.requested': {
-          if (state.sessions[event.payload.runId]) {
+          // A workspace only ever launches sessions inside its own organization.
+          if (
+            state.sessions[event.payload.runId] ||
+            orgOfRun(event.payload.runId) !== orgOfRun(event.runId)
+          ) {
             return state
           }
 
@@ -321,6 +338,9 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
                 playbookRunId: event.payload.playbookRunId,
                 definitionName: event.payload.definitionName ?? 'coding',
                 pull: event.payload.pull ?? null,
+                ownerId: event.payload.ownerId ?? null,
+                memberIds: [],
+                ...(event.payload.repos ? { repos: event.payload.repos } : {}),
               },
             },
             mailboxEpoch: state.mailboxEpoch + 1,
@@ -388,6 +408,67 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
               },
             },
             mailboxEpoch: state.mailboxEpoch + 1,
+          }
+        }
+
+        case 'workspace.session.listed': {
+          const { payload } = event
+
+          // The session is already running; it only needs to appear here.
+          if (state.sessions[payload.runId] || orgOfRun(payload.runId) !== orgOfRun(event.runId)) {
+            return state
+          }
+
+          return {
+            ...state,
+            sessions: {
+              ...state.sessions,
+              [payload.runId]: {
+                runId: payload.runId,
+                folderId: payload.folderId,
+                goal: payload.goal,
+                title: payload.title,
+                status: asSessionStatus(payload.status),
+                activity: payload.activity,
+                createdAt: payload.createdAt,
+                updatedAt: payload.updatedAt,
+                archived: payload.archived,
+                launched: true,
+                lessons: [],
+                playbookVersion: 0,
+                playbookRunId: null,
+                definitionName: 'coding',
+                pull: null,
+                ownerId: payload.ownerId,
+                memberIds: payload.memberIds,
+              },
+            },
+          }
+        }
+
+        case 'workspace.session.unlisted': {
+          if (!state.sessions[event.payload.runId]) {
+            return state
+          }
+
+          const { [event.payload.runId]: _removed, ...sessions } = state.sessions
+
+          return { ...state, sessions }
+        }
+
+        case 'workspace.session.shared': {
+          const session = state.sessions[event.payload.runId]
+
+          if (!session) {
+            return state
+          }
+
+          return {
+            ...state,
+            sessions: {
+              ...state.sessions,
+              [event.payload.runId]: { ...session, memberIds: event.payload.memberIds },
+            },
           }
         }
 
@@ -499,7 +580,7 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
         }
 
         const folder = state.folders[session.folderId]
-        const repos = folder?.repos ?? []
+        const repos = session.repos ?? folder?.repos ?? []
 
         effects.push(
           launch({

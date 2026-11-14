@@ -5,28 +5,47 @@ import { getInstallation, listInstallationRepos, signState, verifyState } from '
 import { normalizeWebhook, verifyWebhookSignature } from '../github/webhooks'
 import { loomsStub } from '../looms-stub'
 import { ingestWebhook } from '../pulls/signals'
+import type { Actor } from '../tenancy/access'
+import { bindInstallation, orgOfInstallation } from '../tenancy/installations'
+import { isOrgId } from '../tenancy/run-id'
 import { connectGithub } from '../workspace/module'
 
-export async function handleGithubRoutes(
+/**
+ * Routes GitHub itself calls. They carry no sign-in: a webhook is checked by its signature, and
+ * the setup redirect by the signed state that names the organization that started it.
+ */
+const INSTALL_STATE = 'install:'
+
+export async function handleGithubPublicRoutes(
   request: Request,
   env: ShuttleEnv,
 ): Promise<Response | null> {
   const url = new URL(request.url)
 
-  if (request.method === 'GET' && url.pathname === '/github/install') {
-    return startInstall(env)
-  }
-
   if (request.method === 'GET' && url.pathname === '/github/setup') {
     return finishSetup(url, env)
   }
 
-  if (request.method === 'GET' && url.pathname === '/github/repos') {
-    return searchRepos(url, env)
-  }
-
   if (request.method === 'POST' && url.pathname === '/github/webhooks') {
     return handleWebhook(request, env)
+  }
+
+  return null
+}
+
+export async function handleGithubRoutes(
+  request: Request,
+  env: ShuttleEnv,
+  actor: Actor,
+): Promise<Response | null> {
+  const url = new URL(request.url)
+
+  if (request.method === 'GET' && url.pathname === '/github/install') {
+    return startInstall(env, actor.orgId)
+  }
+
+  if (request.method === 'GET' && url.pathname === '/github/repos') {
+    return searchRepos(url, env, actor.orgId)
   }
 
   return null
@@ -56,8 +75,15 @@ async function handleWebhook(request: Request, env: ShuttleEnv): Promise<Respons
     return Response.json({ ok: true, ignored: normalized.reason })
   }
 
-  await ensurePullsQuietly(env)
-  const stub = loomsStub(env.LOOMS_RUN, pullsRunId(env))
+  // Deliver the event to the organization the installation is connected to, and to no other.
+  const orgId = env.AUTH_DB ? await orgOfInstallation(env.AUTH_DB, normalized.installationId) : null
+
+  if (!orgId) {
+    return Response.json({ ok: true, ignored: 'installation is not connected' })
+  }
+
+  await ensurePullsQuietly(env, orgId)
+  const stub = loomsStub(env.LOOMS_RUN, pullsRunId(env, orgId))
 
   switch (normalized.kind) {
     case 'pull.upserted':
@@ -140,7 +166,7 @@ async function handleWebhook(request: Request, env: ShuttleEnv): Promise<Respons
   return Response.json({ ok: true })
 }
 
-async function startInstall(env: ShuttleEnv): Promise<Response> {
+async function startInstall(env: ShuttleEnv, orgId: string): Promise<Response> {
   const slug = env.GITHUB_APP_SLUG
 
   if (!slug) {
@@ -148,7 +174,7 @@ async function startInstall(env: ShuttleEnv): Promise<Response> {
   }
 
   const nonce = crypto.randomUUID()
-  const state = await signState(env, `install:${nonce}:${Date.now()}`)
+  const state = await signState(env, `${INSTALL_STATE}${orgId}:${nonce}:${Date.now()}`)
   const target = new URL(`https://github.com/apps/${slug}/installations/new`)
   target.searchParams.set('state', state)
 
@@ -165,8 +191,9 @@ async function finishSetup(url: URL, env: ShuttleEnv): Promise<Response> {
   }
 
   const verified = await verifyState(env, state)
+  const orgId = verified?.startsWith(INSTALL_STATE) ? verified.split(':')[1] : undefined
 
-  if (!verified?.startsWith('install:')) {
+  if (!isOrgId(orgId) || !env.AUTH_DB) {
     return Response.redirect(`${webUrl}/?github=invalid_state`, 302)
   }
 
@@ -177,8 +204,13 @@ async function finishSetup(url: URL, env: ShuttleEnv): Promise<Response> {
       return Response.redirect(`${webUrl}/?github=not_found`, 302)
     }
 
-    await ensureWorkspaceQuietly(env)
-    const stub = loomsStub(env.LOOMS_RUN, workspaceRunId(env))
+    // An installation belongs to the first organization that connects it.
+    if ((await bindInstallation(env.AUTH_DB, installation.id, orgId)) !== orgId) {
+      return Response.redirect(`${webUrl}/?github=already_connected`, 302)
+    }
+
+    await ensureWorkspaceQuietly(env, orgId)
+    const stub = loomsStub(env.LOOMS_RUN, workspaceRunId(env, orgId))
 
     await stub.signal([
       connectGithub({
@@ -194,11 +226,11 @@ async function finishSetup(url: URL, env: ShuttleEnv): Promise<Response> {
   }
 }
 
-async function searchRepos(url: URL, env: ShuttleEnv): Promise<Response> {
-  await ensureWorkspaceQuietly(env)
+async function searchRepos(url: URL, env: ShuttleEnv, orgId: string): Promise<Response> {
+  await ensureWorkspaceQuietly(env, orgId)
 
   const query = (url.searchParams.get('q') ?? '').trim().toLowerCase()
-  const tree = await readWorkspaceTree(env)
+  const tree = await readWorkspaceTree(env, orgId)
 
   const installationIds = Object.values(tree.installations).map(
     (installation) => installation.installationId,
@@ -233,10 +265,13 @@ async function searchRepos(url: URL, env: ShuttleEnv): Promise<Response> {
   })
 }
 
-async function readWorkspaceTree(env: ShuttleEnv): Promise<{
+async function readWorkspaceTree(
+  env: ShuttleEnv,
+  orgId: string,
+): Promise<{
   installations: Record<string, { installationId: number }>
 }> {
-  const runId = workspaceRunId(env)
+  const runId = workspaceRunId(env, orgId)
   const stub = loomsStub(env.LOOMS_RUN, runId)
 
   const request = new Request(`https://shuttle.internal/runs/${runId}/projections/workspaceTree`, {
