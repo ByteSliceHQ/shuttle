@@ -11,6 +11,8 @@ import type { AgentTurnResult, LlmAdapter, LlmCompleteArgs, LlmToolSpec } from '
 import { toLoomsToolCalls, toModelMessages } from '@swirls/looms/ai-vercel'
 import { asJson, type JsonValue } from '@swirls/looms/core'
 
+import { stallGuard } from './llm-stall'
+
 export interface TurnThinkingObserver {
   /** Clears accumulated thinking when an LLM attempt restarts (e.g. after compaction). */
   reset(): void
@@ -205,50 +207,71 @@ export function createReasoningLlm(options: ReasoningLlmOptions): LlmAdapter {
         observer.onComplete(text, durationMs)
       }
 
+      const handlePart = async (part: {
+        type: string
+        text?: unknown
+        delta?: unknown
+      }): Promise<void> => {
+        if (part.type === 'reasoning-start') {
+          thinkingStartedAt ??= Date.now()
+          return
+        }
+
+        if (part.type === 'reasoning-delta') {
+          await noteThinking(streamPartText(part))
+          return
+        }
+
+        if (part.type === 'reasoning-end') {
+          thinkingEndedAt = Date.now()
+          return
+        }
+
+        if (part.type === 'text-delta') {
+          if (thinkingStartedAt !== undefined && thinkingEndedAt === undefined) {
+            thinkingEndedAt = Date.now()
+          }
+
+          const delta = streamPartText(part)
+
+          if (delta) {
+            await args.onTextDelta?.(delta)
+          }
+        }
+      }
+
       if (streamEnabled && (args.onTextDelta || observer)) {
+        // A provider that stops sending without closing the stream would hold this turn open
+        // forever. The guard ends the call once it has been silent too long.
+        const guard = stallGuard(args.signal)
+
         const result = tools
           ? streamText({
               model: options.model,
               instructions: args.instructions,
               messages,
-              abortSignal: args.signal,
+              abortSignal: guard.signal,
               tools,
             })
           : streamText({
               model: options.model,
               instructions: args.instructions,
               messages,
-              abortSignal: args.signal,
+              abortSignal: guard.signal,
             })
 
-        for await (const part of result.fullStream) {
-          if (part.type === 'reasoning-start') {
-            thinkingStartedAt ??= Date.now()
-            continue
+        try {
+          for await (const part of result.fullStream) {
+            guard.touch()
+            await handlePart(part)
           }
+        } catch (cause) {
+          guard.done()
 
-          if (part.type === 'reasoning-delta') {
-            await noteThinking(streamPartText(part))
-            continue
-          }
-
-          if (part.type === 'reasoning-end') {
-            thinkingEndedAt = Date.now()
-            continue
-          }
-
-          if (part.type === 'text-delta') {
-            if (thinkingStartedAt !== undefined && thinkingEndedAt === undefined) {
-              thinkingEndedAt = Date.now()
-            }
-
-            const delta = streamPartText(part)
-
-            if (delta) {
-              await args.onTextDelta?.(delta)
-            }
-          }
+          throw guard.stalled() ? guard.signal.reason : cause
         }
+
+        guard.done()
 
         try {
           const [text, rawToolCalls, reasoningText, usage] = await Promise.all([
