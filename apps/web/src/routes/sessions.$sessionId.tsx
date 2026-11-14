@@ -8,6 +8,7 @@ import {
   Files,
   Folder as FolderIcon,
   GitCompareArrows,
+  GitPullRequest,
   Globe,
   PanelBottom,
   PanelRight,
@@ -44,7 +45,13 @@ import { agentIdentities, withVendorAgents } from '@/lib/agents'
 import { fetchSessionHarness, stopThread, type HarnessId } from '@/lib/api'
 import { cn, shortId } from '@/lib/cn'
 import { possessive, useOrgPeople } from '@/lib/org-people'
-import { authoredPullsForSession, pullInbox, usePullsRunId, type PullInboxState } from '@/lib/pulls'
+import {
+  authoredPullsForSession,
+  pullInbox,
+  reviewedPullForSession,
+  usePullsRunId,
+  type PullInboxState,
+} from '@/lib/pulls'
 import { rememberSession } from '@/lib/recent-sessions'
 import { sessionActivity } from '@/lib/session-activity'
 import {
@@ -785,6 +792,8 @@ function SessionTitleBar({
     [feed.publishedPulls, inbox, runId],
   )
 
+  const reviewed = useMemo(() => reviewedPullForSession(inbox, runId), [inbox, runId])
+
   // The title only ever truncates, so its length never moves the controls. As the bar narrows
   // the folder goes first, then the status and connection labels, then all but one avatar. The
   // title, the menu and the artifacts toggle stay to the end.
@@ -827,6 +836,20 @@ function SessionTitleBar({
         </div>
       </div>
       <div className="flex items-center gap-0.5">
+        {reviewed ? (
+          <a
+            href={reviewed.url}
+            target="_blank"
+            rel="noreferrer"
+            title={`Reviewing ${reviewed.fullName}#${reviewed.number}: ${reviewed.title}\n${reviewed.headRef} → ${reviewed.baseRef}`}
+            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 inline-flex max-w-52 shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] transition-colors duration-100 outline-none focus-visible:ring-2"
+          >
+            <GitPullRequest className="size-3 shrink-0" />
+            <span className="min-w-0 truncate">
+              Reviewing <span className="font-mono">#{reviewed.number}</span>
+            </span>
+          </a>
+        ) : null}
         <SessionPrPills pulls={sessionPulls} labelFor={labelFor} onInspect={onInspect} />
         <ConnectionIndicator connection={connection} />
         {status === 'idle' ? null : (

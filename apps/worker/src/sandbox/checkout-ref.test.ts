@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { $ } from 'bun'
 
 import { checkoutRefScript } from './container-workspace'
+import { baseCommitScript } from './workspace-summary'
 
 const git = ['git', '-c', 'user.name=Test', '-c', 'user.email=test@local']
 
@@ -68,6 +69,23 @@ describe('checkoutRefScript', () => {
     const changed = await $`git -C ${repo.target} diff --name-only ${repo.baseSha} HEAD`.text()
 
     expect(changed.trim()).toBe('app.js')
+
+    // And what the session counts as changed is measured from that base, not the default branch.
+    const base =
+      await $`bash -c ${`cd ${repo.target} && ${baseCommitScript('main')} && echo "$base"`}`.text()
+
+    expect(base.trim()).toBe(repo.baseSha)
+  })
+
+  test('without a base, changes are measured as in any other session', async () => {
+    const repo = await origin()
+
+    await repo.checkout(repo.headSha)
+
+    const base =
+      await $`bash -c ${`cd ${repo.target} && ${baseCommitScript('main')}; echo "$base"`}`.text()
+
+    expect(base.trim()).not.toBe(repo.baseSha)
   })
 
   test('a worktree already there is replaced', async () => {

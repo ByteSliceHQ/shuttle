@@ -10,6 +10,8 @@
  */
 
 export const BASE_CONFIG_KEY = 'shuttleBase'
+/** On a review session's branch: the base commit of the pull request it has checked out. */
+export const REVIEW_BASE_CONFIG_KEY = 'shuttleReviewBase'
 export const PARENT_CONFIG_KEY = 'shuttleParent'
 export const LAYER_CONFIG_KEY = 'shuttleLayer'
 

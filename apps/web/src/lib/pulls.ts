@@ -559,6 +559,16 @@ export function shuttleStackPosition(headRef: string): PullStackPosition | undef
   return /^shuttle\/[^/]+\/[^/]+$/.test(headRef) ? { id: 1, layer: 1 } : undefined
 }
 
+/** The pull request this session is reviewing, if it is a review session. */
+export function reviewedPullForSession(
+  inbox: PullInboxState,
+  runId: string,
+): PullInboxSummary | undefined {
+  return Object.values(inbox.pulls).find((pull) =>
+    pull.linkedSessions.some((session) => session.runId === runId && session.role === 'reviewer'),
+  )
+}
+
 /** Open pulls this session authored, with the proposing thread when known. */
 export function authoredPullsForSession(inbox: PullInboxState, runId: string): PublishedPull[] {
   return Object.values(inbox.pulls)

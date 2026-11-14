@@ -4,8 +4,10 @@ import {
   authoredPullCounts,
   groupPullsByLane,
   pullKey,
+  reviewedPullForSession,
   stacksOf,
   type InboxEntry,
+  type PullInboxState,
   type PullInboxSummary,
 } from './pulls'
 
@@ -203,5 +205,23 @@ describe('stacksOf', () => {
     expect(stacks).toHaveLength(1)
     expect(stacks[0]?.native).toBe(false)
     expect(stacks[0]?.layers.map((layer) => layer.number)).toEqual([1, 2])
+  })
+})
+
+describe('reviewedPullForSession', () => {
+  test('finds the pull request a session is linked to as reviewer, and no other', () => {
+    const inbox = {
+      pulls: {
+        'acme/glue#7': pull('acme/glue', 7, {
+          linkedSessions: [{ runId: 'run_a', role: 'author' }],
+        }),
+        'acme/glue#8': pull('acme/glue', 8, {
+          linkedSessions: [{ runId: 'run_a', role: 'reviewer' }],
+        }),
+      },
+    } as unknown as PullInboxState
+
+    expect(reviewedPullForSession(inbox, 'run_a')?.number).toBe(8)
+    expect(reviewedPullForSession(inbox, 'run_b')).toBeUndefined()
   })
 })

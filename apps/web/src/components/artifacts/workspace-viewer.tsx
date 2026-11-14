@@ -21,7 +21,12 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/componen
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/cn'
 import { useOrgPeople } from '@/lib/org-people'
-import { authoredPullsForSession, pullInbox, usePullsRunId } from '@/lib/pulls'
+import {
+  authoredPullsForSession,
+  pullInbox,
+  reviewedPullForSession,
+  usePullsRunId,
+} from '@/lib/pulls'
 import {
   adoptStray,
   fetchWorkspace,
@@ -571,6 +576,9 @@ function RepoFacts({
     ? authoredPullsForSession(inbox, runId).filter((pull) => pull.fullName === repo.fullName)
     : []
 
+  // A review session has a pull request checked out, not a branch cut from the default one.
+  const reviewed = reviewedPullForSession(inbox, runId)
+  const reviewing = repo.fullName && reviewed?.fullName === repo.fullName ? reviewed : undefined
   const Icon = repo.fullName ? GitBranch : Package
 
   return (
@@ -579,7 +587,18 @@ function RepoFacts({
       <span className="text-foreground min-w-0 truncate" title={repoLabel(repo)}>
         {repoLabel(repo)}
       </span>
-      {repo.fullName ? (
+      {reviewing ? (
+        <span
+          className="flex min-w-0 items-center gap-1"
+          title={`Pull request ${reviewing.number}: ${reviewing.title}\nChecked out at ${reviewing.headRef}. Changes are measured from ${reviewing.baseRef}.`}
+        >
+          <GitPullRequest aria-hidden className="size-3 shrink-0" />
+          <span className="shrink-0 tabular-nums">{reviewing.number}</span>
+          <span className="min-w-0 truncate">
+            {reviewing.headRef} → {reviewing.baseRef}
+          </span>
+        </span>
+      ) : repo.fullName ? (
         <span className="shrink-0" title={`Changes are measured from ${repo.defaultBranch}`}>
           {repo.defaultBranch}
         </span>

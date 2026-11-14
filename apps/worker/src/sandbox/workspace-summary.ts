@@ -1,4 +1,5 @@
 import { shellQuote } from './exec-argv'
+import { REVIEW_BASE_CONFIG_KEY } from './stack'
 import { worktreeRepoPath, worktreeRoot } from './workspace'
 
 /**
@@ -66,13 +67,16 @@ export const GIT_IGNORING = 'git -c core.excludesFile="$ignore"'
 /**
  * Shell that sets `$base` to the commit the session's work in the current repository started
  * from: where its branch left `defaultBranch`, or the oldest commit it has when the two share
- * no history here (a shallow clone whose default branch has since moved on).
+ * no history here (a shallow clone whose default branch has since moved on). A review session
+ * did not branch off anything: its work is a pull request, measured from that pull request's base.
  */
 export function baseCommitScript(defaultBranch: string): string {
   const branch = shellQuote(defaultBranch)
 
   return [
-    `base=$(git merge-base HEAD refs/remotes/origin/${branch} 2>/dev/null`,
+    `base=$(review=$(git config --get "branch.$(git rev-parse --abbrev-ref HEAD 2>/dev/null).${REVIEW_BASE_CONFIG_KEY}" 2>/dev/null)`,
+    `  && git rev-parse --verify -q "$review^{commit}" 2>/dev/null`,
+    `  || git merge-base HEAD refs/remotes/origin/${branch} 2>/dev/null`,
     `  || git merge-base HEAD refs/heads/${branch} 2>/dev/null`,
     `  || git rev-list --max-parents=0 HEAD 2>/dev/null | tail -1)`,
   ].join('')

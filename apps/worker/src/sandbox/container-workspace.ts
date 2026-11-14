@@ -3,7 +3,12 @@ import { shellQuote, timedBashArgv } from './exec-argv'
 import type { SandboxHost } from './host'
 import { parentDirectory } from './paths'
 import { repoAccess, repoUrls } from './repo-access'
-import { BASE_CONFIG_KEY, LAYER_CONFIG_KEY, PARENT_CONFIG_KEY } from './stack'
+import {
+  BASE_CONFIG_KEY,
+  LAYER_CONFIG_KEY,
+  PARENT_CONFIG_KEY,
+  REVIEW_BASE_CONFIG_KEY,
+} from './stack'
 import { StackWorkspaceOps } from './stack-ops'
 import {
   repoCheckoutPath,
@@ -42,7 +47,8 @@ function recordBaseCommand(worktree: string, branch: string): string {
 /**
  * Shell that makes `target` the session's worktree of the repository cloned at `source`, on
  * `branch` at the commit `sha`, replacing any worktree already there. `baseSha` is fetched too
- * when given, so the two can be compared; failing to fetch it is not an error.
+ * when given and recorded as what the branch's changes are measured from, so the session's
+ * changes are the pull request's; failing to fetch it is not an error.
  */
 export function checkoutRefScript(input: {
   readonly source: string
@@ -71,6 +77,20 @@ export function checkoutRefScript(input: {
     `{ [ -n "$parent" ] || parent=$(git -C ${source} rev-parse --abbrev-ref HEAD); }`,
     `git -C ${target} config ${shellQuote(`branch.${input.branch}.${LAYER_CONFIG_KEY}`)} 1`,
     `git -C ${target} config ${shellQuote(`branch.${input.branch}.${PARENT_CONFIG_KEY}`)} "$parent"`,
+    // With the base here, what the session shows as changed is what the pull request changes.
+    ...(input.baseSha
+      ? [
+          `if git -C ${target} cat-file -e ${shellQuote(`${input.baseSha}^{commit}`)} 2>/dev/null; then ${[
+            REVIEW_BASE_CONFIG_KEY,
+            BASE_CONFIG_KEY,
+          ]
+            .map(
+              (key) =>
+                `git -C ${target} config ${shellQuote(`branch.${input.branch}.${key}`)} ${shellQuote(input.baseSha ?? '')}`,
+            )
+            .join(' && ')}; fi`,
+        ]
+      : []),
   ].join(' && ')
 }
 
