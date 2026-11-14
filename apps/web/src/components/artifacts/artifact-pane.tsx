@@ -181,7 +181,7 @@ function ArtifactViewer({
     case 'browser':
       return <BrowserViewer runId={runId} target={tab.target} onRetarget={onRetarget} />
     case 'review':
-      return <ReviewViewer runId={runId} />
+      return <ReviewViewer runId={runId} folderId={folderId} />
 
     default: {
       const exhaustive: never = tab.kind

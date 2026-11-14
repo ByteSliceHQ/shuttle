@@ -4,9 +4,11 @@ import {
   getInstallationToken,
   githubFetch,
   githubGraphql,
+  githubGraphqlWithToken,
   githubUserToken,
   GithubGraphqlError,
 } from './client'
+import { commentFromWebhook, type WebhookComment } from './webhooks'
 
 export type PullReviewVerdict = 'approve' | 'request_changes' | 'comment'
 
@@ -534,6 +536,290 @@ export async function listReviewThreads(
       authorLogin: comment.author?.login ?? 'unknown',
     })),
   }))
+}
+
+/** One review thread on GitHub with everything about its comments. */
+export interface PullThreadSnapshot {
+  readonly rootId: number
+  readonly resolved: boolean
+  readonly comments: readonly {
+    readonly commentId: number
+    readonly rootId: number
+    readonly path: string
+    readonly line: number | null
+    readonly startLine?: number
+    readonly side: 'LEFT' | 'RIGHT'
+    readonly outdated: boolean
+    readonly body: string
+    readonly author: { readonly login: string; readonly avatarUrl: string }
+    readonly createdAt: number
+    readonly updatedAt: number
+    readonly url: string
+  }[]
+}
+
+interface ThreadNode {
+  isResolved: boolean
+  isOutdated: boolean
+  path: string
+  line: number | null
+  originalLine: number | null
+  startLine: number | null
+  originalStartLine: number | null
+  diffSide: 'LEFT' | 'RIGHT'
+  comments: {
+    nodes: {
+      fullDatabaseId: string
+      body: string
+      url: string
+      createdAt: string
+      updatedAt: string
+      author: { login: string; avatarUrl: string } | null
+    }[]
+  }
+}
+
+const THREADS_QUERY = `query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 50, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          isResolved
+          isOutdated
+          path
+          line
+          originalLine
+          startLine
+          originalStartLine
+          diffSide
+          comments(first: 100) {
+            nodes {
+              fullDatabaseId
+              body
+              url
+              createdAt
+              updatedAt
+              author { login avatarUrl }
+            }
+          }
+        }
+      }
+    }
+  }
+}`
+
+/** How many pages of threads are read: a pull request with more than this is cut short. */
+const THREAD_PAGES = 10
+
+/** A thread as the mirror keeps it. Null for a thread GitHub reports with no comments. */
+export function threadSnapshot(node: ThreadNode): PullThreadSnapshot | null {
+  const rootId = Number(node.comments.nodes[0]?.fullDatabaseId)
+
+  if (!Number.isSafeInteger(rootId) || rootId <= 0) {
+    return null
+  }
+
+  const startLine = node.startLine ?? node.originalStartLine
+
+  return {
+    rootId,
+    resolved: node.isResolved,
+    comments: node.comments.nodes.map((comment) => ({
+      commentId: Number(comment.fullDatabaseId),
+      rootId,
+      path: node.path,
+      line: node.line ?? node.originalLine,
+      ...(startLine === null ? {} : { startLine }),
+      side: node.diffSide === 'LEFT' ? 'LEFT' : 'RIGHT',
+      outdated: node.isOutdated,
+      body: comment.body,
+      author: {
+        login: comment.author?.login ?? 'unknown',
+        avatarUrl: comment.author?.avatarUrl ?? '',
+      },
+      createdAt: Date.parse(comment.createdAt),
+      updatedAt: Date.parse(comment.updatedAt),
+      url: comment.url,
+    })),
+  }
+}
+
+/** Every review thread on a pull request, as GitHub has them now. */
+export async function listPullThreads(
+  env: ShuttleEnv,
+  repo: LinkedRepo,
+  number: number,
+): Promise<PullThreadSnapshot[]> {
+  const threads: PullThreadSnapshot[] = []
+  let after: string | null = null
+
+  for (let page = 0; page < THREAD_PAGES; page += 1) {
+    const data: {
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            pageInfo: { hasNextPage: boolean; endCursor: string | null }
+            nodes: ThreadNode[]
+          }
+        } | null
+      }
+    } = await githubGraphql(
+      env,
+      THREADS_QUERY,
+      { owner: repo.owner, name: repo.name, number, after },
+      repo.installationId,
+    )
+
+    const connection = data.repository.pullRequest?.reviewThreads
+
+    if (!connection) {
+      break
+    }
+
+    threads.push(...connection.nodes.flatMap((node) => threadSnapshot(node) ?? []))
+
+    if (!connection.pageInfo.hasNextPage) {
+      break
+    }
+
+    after = connection.pageInfo.endCursor
+  }
+
+  return threads
+}
+
+/** A comment someone is posting in their own name, with the token that acts as them. */
+interface AsPerson {
+  readonly repo: LinkedRepo
+  readonly number: number
+  readonly userToken: string
+}
+
+async function postComment(
+  env: ShuttleEnv,
+  path: string,
+  userToken: string,
+  payload: Record<string, unknown>,
+): Promise<WebhookComment> {
+  const response = await githubFetch(env, path, {
+    method: 'POST',
+    token: userToken,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => '')).slice(0, 300)
+
+    throw new Error(`GitHub refused the comment (${response.status})${detail ? `: ${detail}` : ''}`)
+  }
+
+  return commentFromWebhook((await response.json()) as Record<string, unknown>)
+}
+
+/** Replies to a review thread as the person. `rootId` is the thread's first comment. */
+export function replyToThread(
+  env: ShuttleEnv,
+  input: AsPerson & { readonly rootId: number; readonly body: string },
+): Promise<WebhookComment> {
+  return postComment(
+    env,
+    `/repos/${input.repo.owner}/${input.repo.name}/pulls/${input.number}/comments/${input.rootId}/replies`,
+    input.userToken,
+    { body: input.body },
+  )
+}
+
+/** Starts a review thread on a line of the pull request's diff as the person. */
+export function commentOnLine(
+  env: ShuttleEnv,
+  input: AsPerson & {
+    readonly commitId: string
+    readonly path: string
+    readonly line: number
+    readonly side: 'LEFT' | 'RIGHT'
+    /** For a comment about several lines: where they start. `line` is where they end. */
+    readonly start?: { readonly line: number; readonly side: 'LEFT' | 'RIGHT' }
+    readonly body: string
+  },
+): Promise<WebhookComment> {
+  return postComment(
+    env,
+    `/repos/${input.repo.owner}/${input.repo.name}/pulls/${input.number}/comments`,
+    input.userToken,
+    {
+      body: input.body,
+      commit_id: input.commitId,
+      path: input.path,
+      line: input.line,
+      side: input.side,
+      ...(input.start ? { start_line: input.start.line, start_side: input.start.side } : {}),
+    },
+  )
+}
+
+const THREAD_IDS_QUERY = `query($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id comments(first: 1) { nodes { fullDatabaseId } } }
+      }
+    }
+  }
+}`
+
+/**
+ * Resolves or reopens a review thread as the person. GitHub only does this by the thread's own
+ * id, which nothing else carries, so it is looked up from the thread's first comment.
+ */
+export async function setThreadResolved(
+  input: AsPerson & { readonly rootId: number; readonly resolved: boolean },
+): Promise<void> {
+  let threadId: string | undefined
+  let after: string | null = null
+
+  for (let page = 0; page < THREAD_PAGES && !threadId; page += 1) {
+    const data: {
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            pageInfo: { hasNextPage: boolean; endCursor: string | null }
+            nodes: { id: string; comments: { nodes: { fullDatabaseId: string }[] } }[]
+          }
+        } | null
+      }
+    } = await githubGraphqlWithToken(
+      THREAD_IDS_QUERY,
+      { owner: input.repo.owner, name: input.repo.name, number: input.number, after },
+      input.userToken,
+    )
+
+    const connection = data.repository.pullRequest?.reviewThreads
+
+    threadId = connection?.nodes.find(
+      (node) => Number(node.comments.nodes[0]?.fullDatabaseId) === input.rootId,
+    )?.id
+
+    if (!connection?.pageInfo.hasNextPage) {
+      break
+    }
+
+    after = connection.pageInfo.endCursor
+  }
+
+  if (!threadId) {
+    throw new Error('That thread is no longer on the pull request.')
+  }
+
+  const mutation = input.resolved ? 'resolveReviewThread' : 'unresolveReviewThread'
+
+  await githubGraphqlWithToken(
+    `mutation($threadId: ID!) { ${mutation}(input: { threadId: $threadId }) { thread { id } } }`,
+    { threadId },
+    input.userToken,
+  )
 }
 
 export async function submitPullReview(

@@ -186,6 +186,16 @@ export function fileDiffScript(defaultBranch: string, path: string): string {
   ].join('\n')
 }
 
+/** The script that prints everything a repository has changed since the session started. */
+export function repoDiffScript(defaultBranch: string): string {
+  return [
+    IGNORE_SETUP,
+    baseCommitScript(defaultBranch),
+    diffFromBase('"$base"'),
+    'rm -f "$ignore"',
+  ].join('\n')
+}
+
 /**
  * The script that prints one file as it was when the session started. It exits non-zero when
  * the file did not exist then.

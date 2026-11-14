@@ -10,11 +10,16 @@ import {
   linkReviewSession,
   recordPublished,
   recordReview,
+  removeComment,
   requestReview,
   setRepoPolicy,
+  setThreadResolution,
+  syncThreads,
+  upsertComment,
   upsertPull,
 } from './signals'
 import { createPullsThread } from './thread'
+import { pullThreads } from './threads'
 
 export interface PullsModuleOptions {
   readonly env: ShuttleEnv
@@ -30,6 +35,7 @@ export function pulls(options: PullsModuleOptions) {
     },
     projections: {
       pullInbox,
+      pullThreads,
     },
     signals: {
       ingestWebhook,
@@ -37,6 +43,10 @@ export function pulls(options: PullsModuleOptions) {
       recordPublished,
       recordReview,
       linkReviewSession,
+      upsertComment,
+      removeComment,
+      setThreadResolution,
+      syncThreads,
       setRepoPolicy,
       requestReview,
     },

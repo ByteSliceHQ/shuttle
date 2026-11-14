@@ -1,3 +1,4 @@
+import { getAuth } from '../auth/auth'
 import {
   ensureNamedWorkspace,
   ensurePlaybookQuietly,
@@ -7,10 +8,18 @@ import {
 import { personalWorkspaceRunId, playbookRunId, pullsRunId, workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { getInstallation, listInstallationRepos } from '../github/app'
+import { commentOnLine, getPullRequest, replyToThread, setThreadResolved } from '../github/pulls'
+import { GITHUB_NOT_CONNECTED, githubTokenOf } from '../github/user-token'
 import { loomsStub } from '../looms-stub'
 import { syncFolderRepos } from '../pulls/folder-sync'
 import type { AutoReviewMode } from '../pulls/scope'
-import { linkReviewSession, setRepoPolicy } from '../pulls/signals'
+import {
+  linkReviewSession,
+  setRepoPolicy,
+  setThreadResolution,
+  upsertComment,
+} from '../pulls/signals'
+import { syncPullThreads } from '../pulls/thread-sync'
 import type { Actor, SessionAccess } from '../tenancy/access'
 import { installationConnected } from '../tenancy/installations'
 import { scopedRunId } from '../tenancy/run-id'
@@ -57,6 +66,52 @@ export async function handleWorkspaceRoutes(
 
   if (syncMatch && request.method === 'POST') {
     return syncFolderPulls(env, orgId, decodeURIComponent(syncMatch[1] ?? ''))
+  }
+
+  const threadsMatch = url.pathname.match(
+    /^\/workspace\/folders\/([^/]+)\/pulls\/([^/]+)\/(\d+)\/threads\/sync$/,
+  )
+
+  if (threadsMatch && request.method === 'POST') {
+    return syncThreadsOfPull(
+      env,
+      orgId,
+      decodeURIComponent(threadsMatch[1] ?? ''),
+      decodeURIComponent(threadsMatch[2] ?? ''),
+      Number(threadsMatch[3]),
+    )
+  }
+
+  const commentsMatch = url.pathname.match(
+    /^\/workspace\/folders\/([^/]+)\/pulls\/([^/]+)\/(\d+)\/comments$/,
+  )
+
+  if (commentsMatch && request.method === 'POST') {
+    return actOnPullAsPerson(
+      request,
+      env,
+      orgId,
+      decodeURIComponent(commentsMatch[1] ?? ''),
+      decodeURIComponent(commentsMatch[2] ?? ''),
+      Number(commentsMatch[3]),
+      null,
+    )
+  }
+
+  const resolutionMatch = url.pathname.match(
+    /^\/workspace\/folders\/([^/]+)\/pulls\/([^/]+)\/(\d+)\/threads\/(\d+)\/resolution$/,
+  )
+
+  if (resolutionMatch && request.method === 'POST') {
+    return actOnPullAsPerson(
+      request,
+      env,
+      orgId,
+      decodeURIComponent(resolutionMatch[1] ?? ''),
+      decodeURIComponent(resolutionMatch[2] ?? ''),
+      Number(resolutionMatch[3]),
+      Number(resolutionMatch[4]),
+    )
   }
 
   const reviewMatch = url.pathname.match(
@@ -368,6 +423,148 @@ async function syncFolderPulls(
 
   const pullsStub = loomsStub(env.LOOMS_RUN, pullsRunId(env, orgId))
   return Response.json(await syncFolderRepos(env, pullsStub, folderId, folder.repos))
+}
+
+/** Fetches a pull request's review threads from GitHub into the mirror people read. */
+async function syncThreadsOfPull(
+  env: ShuttleEnv,
+  orgId: string,
+  folderId: string,
+  fullName: string,
+  number: number,
+): Promise<Response> {
+  await ensureWorkspaceQuietly(env, orgId)
+  await ensurePullsQuietly(env, orgId)
+
+  const tree = await readWorkspaceFolders(env, orgId)
+  const repo = tree.folders[folderId]?.repos.find((item) => item.fullName === fullName)
+
+  if (!repo) {
+    return Response.json({ error: 'repository is not linked to this folder' }, { status: 404 })
+  }
+
+  try {
+    return Response.json(await syncPullThreads(env, orgId, repo, number))
+  } catch (cause) {
+    return Response.json(
+      { error: cause instanceof Error ? cause.message : 'could not read review threads' },
+      { status: 502 },
+    )
+  }
+}
+
+/**
+ * Something the signed-in person does on a pull request in their own name: a reply, a comment on
+ * a line, or resolving a thread (when `resolutionOf` names one). It goes to GitHub with their own
+ * token, and what GitHub answers is recorded straight away so everyone sees it without waiting
+ * for the webhook. When the webhook does arrive it carries the same comment and changes nothing.
+ */
+async function actOnPullAsPerson(
+  request: Request,
+  env: ShuttleEnv,
+  orgId: string,
+  folderId: string,
+  fullName: string,
+  number: number,
+  resolutionOf: number | null,
+): Promise<Response> {
+  await ensureWorkspaceQuietly(env, orgId)
+  await ensurePullsQuietly(env, orgId)
+
+  const tree = await readWorkspaceFolders(env, orgId)
+  const repo = tree.folders[folderId]?.repos.find((item) => item.fullName === fullName)
+
+  if (!repo) {
+    return Response.json({ error: 'repository is not linked to this folder' }, { status: 404 })
+  }
+
+  const userToken = await githubTokenOf(getAuth(env), request.headers)
+
+  if (!userToken) {
+    return Response.json(
+      {
+        error: GITHUB_NOT_CONNECTED,
+        message: 'Connect your GitHub account so this can be posted as you.',
+      },
+      { status: 409 },
+    )
+  }
+
+  const body = (await request.json().catch(() => ({}))) as {
+    body?: unknown
+    rootId?: unknown
+    path?: unknown
+    line?: unknown
+    side?: unknown
+    startLine?: unknown
+    startSide?: unknown
+    resolved?: unknown
+  }
+
+  const pullsStub = loomsStub(env.LOOMS_RUN, pullsRunId(env, orgId))
+  const target = { repo, number, userToken }
+
+  try {
+    if (resolutionOf !== null) {
+      const resolved = body.resolved === true
+
+      await setThreadResolved({ ...target, rootId: resolutionOf, resolved })
+
+      await pullsStub.signal([
+        setThreadResolution({
+          fullName,
+          number,
+          rootId: resolutionOf,
+          resolved,
+          updatedAt: Date.now(),
+        }),
+      ])
+
+      return Response.json({ ok: true })
+    }
+
+    const text = typeof body.body === 'string' ? body.body.trim() : ''
+
+    if (!text) {
+      return Response.json({ error: 'a comment needs something in it' }, { status: 400 })
+    }
+
+    let comment
+
+    if (typeof body.rootId === 'number') {
+      comment = await replyToThread(env, { ...target, rootId: body.rootId, body: text })
+    } else if (typeof body.path === 'string' && typeof body.line === 'number') {
+      const pull = await getPullRequest(env, repo, number)
+
+      comment = await commentOnLine(env, {
+        ...target,
+        commitId: pull.headSha,
+        path: body.path,
+        line: body.line,
+        side: body.side === 'LEFT' ? 'LEFT' : 'RIGHT',
+        ...(typeof body.startLine === 'number' && body.startLine !== body.line
+          ? {
+              start: {
+                line: body.startLine,
+                side: body.startSide === 'LEFT' ? ('LEFT' as const) : ('RIGHT' as const),
+              },
+            }
+          : {}),
+        body: text,
+      })
+    } else {
+      return Response.json({ error: 'a comment needs a thread or a line' }, { status: 400 })
+    }
+
+    await pullsStub.signal([upsertComment({ fullName, number, comment })])
+
+    return Response.json({ ok: true, commentId: comment.commentId })
+  } catch (cause) {
+    return Response.json(
+      { error: cause instanceof Error ? cause.message : 'GitHub did not accept that' },
+      { status: 502 },
+    )
+  }
 }
 
 async function startPullReview(

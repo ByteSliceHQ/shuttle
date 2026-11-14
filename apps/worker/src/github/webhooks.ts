@@ -62,6 +62,32 @@ export type NormalizedWebhook =
       readonly updatedAt: number
     }
   | {
+      readonly kind: 'comment.upserted'
+      readonly deliveryId: string
+      readonly installationId: number
+      readonly fullName: string
+      readonly number: number
+      readonly comment: WebhookComment
+    }
+  | {
+      readonly kind: 'comment.removed'
+      readonly deliveryId: string
+      readonly installationId: number
+      readonly fullName: string
+      readonly number: number
+      readonly commentId: number
+    }
+  | {
+      readonly kind: 'thread.resolution'
+      readonly deliveryId: string
+      readonly installationId: number
+      readonly fullName: string
+      readonly number: number
+      readonly rootId: number
+      readonly resolved: boolean
+      readonly updatedAt: number
+    }
+  | {
       readonly kind: 'ignored'
       readonly deliveryId: string
       readonly reason: string
@@ -156,6 +182,55 @@ function mapCheckConclusion(
       return 'failing'
     default:
       return 'neutral'
+  }
+}
+
+/** A review comment as GitHub's REST payloads carry it. */
+export interface WebhookComment {
+  readonly commentId: number
+  readonly rootId: number
+  readonly path: string
+  readonly line: number | null
+  readonly startLine?: number
+  readonly side: 'LEFT' | 'RIGHT'
+  readonly outdated: boolean
+  readonly body: string
+  readonly author: { readonly login: string; readonly avatarUrl: string }
+  readonly createdAt: number
+  readonly updatedAt: number
+  readonly url: string
+}
+
+/** Reads a review comment in the shape GitHub's REST API and its webhooks both use. */
+export function commentFromWebhook(comment: Record<string, unknown>): WebhookComment {
+  const commentId = asNumber(comment.id)
+  const user = asObject(comment.user)
+  const line = typeof comment.line === 'number' ? comment.line : null
+  const original = typeof comment.original_line === 'number' ? comment.original_line : null
+  const now = new Date().toISOString()
+
+  const start =
+    typeof comment.start_line === 'number'
+      ? comment.start_line
+      : typeof comment.original_start_line === 'number'
+        ? comment.original_start_line
+        : null
+
+  return {
+    commentId,
+    // A reply names the comment it answers; GitHub threads are one level deep.
+    rootId: asNumber(comment.in_reply_to_id) || commentId,
+    path: asString(comment.path),
+    // GitHub drops the line once the code under a comment changes, keeping where it was.
+    line: line ?? original,
+    ...(start === null ? {} : { startLine: start }),
+    side: asString(comment.side).toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT',
+    outdated: line === null,
+    body: asString(comment.body),
+    author: { login: asString(user?.login, 'unknown'), avatarUrl: asString(user?.avatar_url) },
+    createdAt: Date.parse(asString(comment.created_at, now)),
+    updatedAt: Date.parse(asString(comment.updated_at, now)),
+    url: asString(comment.html_url),
   }
 }
 
@@ -307,7 +382,57 @@ export function normalizeWebhook(
       }
     }
 
-    case 'pull_request_review_comment':
+    case 'pull_request_review_comment': {
+      const action = asString(body.action)
+      const pull = asObject(body.pull_request)
+      const comment = asObject(body.comment)
+      const commentId = asNumber(comment?.id)
+
+      if (!pull || !comment || !commentId) {
+        return { kind: 'ignored', deliveryId, reason: 'missing-comment' }
+      }
+
+      const target = {
+        deliveryId,
+        installationId: installationIdFrom(body),
+        fullName: fullNameFromRepo(body),
+        number: asNumber(pull.number),
+      }
+
+      if (action === 'deleted') {
+        return { kind: 'comment.removed', ...target, commentId }
+      }
+
+      if (action !== 'created' && action !== 'edited') {
+        return { kind: 'ignored', deliveryId, reason: `pull_request_review_comment.${action}` }
+      }
+
+      return { kind: 'comment.upserted', ...target, comment: commentFromWebhook(comment) }
+    }
+
+    case 'pull_request_review_thread': {
+      const action = asString(body.action)
+      const pull = asObject(body.pull_request)
+      const thread = asObject(body.thread)
+      const comments = Array.isArray(thread?.comments) ? thread.comments : []
+      const rootId = asNumber(asObject(comments[0])?.id)
+
+      if (!pull || !rootId || (action !== 'resolved' && action !== 'unresolved')) {
+        return { kind: 'ignored', deliveryId, reason: `pull_request_review_thread.${action}` }
+      }
+
+      return {
+        kind: 'thread.resolution',
+        deliveryId,
+        installationId: installationIdFrom(body),
+        fullName: fullNameFromRepo(body),
+        number: asNumber(pull.number),
+        rootId,
+        resolved: action === 'resolved',
+        updatedAt: Date.parse(asString(pull.updated_at, new Date().toISOString())),
+      }
+    }
+
     case 'installation_repositories':
     case 'ping':
       return { kind: 'ignored', deliveryId, reason: eventName }

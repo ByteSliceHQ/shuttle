@@ -44,7 +44,58 @@ const PullAuthorSchema = Schema.Struct({
   avatarUrl: Schema.String,
 })
 
+/** One comment in a review thread on GitHub. `commentId` is GitHub's own number for it. */
+export const PullCommentSchema = Schema.Struct({
+  commentId: Schema.Finite,
+  /** The first comment of the thread this one belongs to; its own id when it starts one. */
+  rootId: Schema.Finite,
+  path: Schema.String,
+  /** The line the thread sits on, or where it sat before the code under it changed. */
+  line: Schema.NullOr(Schema.Finite),
+  /** Where a thread about several lines starts; `line` is where it ends. */
+  startLine: Schema.optional(Schema.Finite),
+  side: Schema.Union([Schema.Literal('LEFT'), Schema.Literal('RIGHT')]),
+  /** The code under the thread has changed since it was written. */
+  outdated: Schema.Boolean,
+  body: Schema.String,
+  author: PullAuthorSchema,
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
+  url: Schema.String,
+})
+
 export const pullsCatalog = defineEventCatalog('pulls', {
+  /** A review comment was written or edited on GitHub. */
+  'comment.upserted': Schema.Struct({
+    fullName: Schema.String,
+    number: Schema.Finite,
+    comment: PullCommentSchema,
+  }),
+  'comment.removed': Schema.Struct({
+    fullName: Schema.String,
+    number: Schema.Finite,
+    commentId: Schema.Finite,
+  }),
+  'thread.resolution': Schema.Struct({
+    fullName: Schema.String,
+    number: Schema.Finite,
+    rootId: Schema.Finite,
+    resolved: Schema.Boolean,
+    updatedAt: Schema.Finite,
+  }),
+  /** Every review thread on a pull request as GitHub has it, replacing what was known. */
+  'threads.synced': Schema.Struct({
+    fullName: Schema.String,
+    number: Schema.Finite,
+    syncedAt: Schema.Finite,
+    threads: Schema.Array(
+      Schema.Struct({
+        rootId: Schema.Finite,
+        resolved: Schema.Boolean,
+        comments: Schema.Array(PullCommentSchema),
+      }),
+    ),
+  }),
   'pull.upserted': Schema.Struct({
     installationId: Schema.Finite,
     fullName: Schema.String,

@@ -146,7 +146,7 @@ function isGithubForbidden(cause: unknown): boolean {
   return false
 }
 
-async function githubGraphqlWithToken<T>(
+export async function githubGraphqlWithToken<T>(
   query: string,
   variables: Record<string, unknown>,
   token: string,

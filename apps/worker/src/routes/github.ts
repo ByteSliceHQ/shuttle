@@ -11,7 +11,7 @@ import {
 } from '../github/user-link'
 import { normalizeWebhook, verifyWebhookSignature } from '../github/webhooks'
 import { loomsStub } from '../looms-stub'
-import { ingestWebhook } from '../pulls/signals'
+import { ingestWebhook, removeComment, setThreadResolution, upsertComment } from '../pulls/signals'
 import type { Actor } from '../tenancy/access'
 import { claimInstallation, orgsOfInstallation } from '../tenancy/installations'
 import { isOrgId } from '../tenancy/run-id'
@@ -95,7 +95,12 @@ async function handleWebhook(request: Request, env: ShuttleEnv): Promise<Respons
     return Response.json({ ok: true, ignored: 'installation is not connected' })
   }
 
-  let signals: ReturnType<typeof ingestWebhook>[] = []
+  let signals: (
+    | ReturnType<typeof ingestWebhook>
+    | ReturnType<typeof upsertComment>
+    | ReturnType<typeof removeComment>
+    | ReturnType<typeof setThreadResolution>
+  )[] = []
 
   switch (normalized.kind) {
     case 'pull.upserted':
@@ -162,6 +167,38 @@ async function handleWebhook(request: Request, env: ShuttleEnv): Promise<Respons
           fullName: normalized.fullName,
           headSha: normalized.headSha,
           checkRollup: normalized.checkRollup,
+          updatedAt: normalized.updatedAt,
+        }),
+      ]
+
+      break
+    case 'comment.upserted':
+      signals = [
+        upsertComment({
+          fullName: normalized.fullName,
+          number: normalized.number,
+          comment: normalized.comment,
+        }),
+      ]
+
+      break
+    case 'comment.removed':
+      signals = [
+        removeComment({
+          fullName: normalized.fullName,
+          number: normalized.number,
+          commentId: normalized.commentId,
+        }),
+      ]
+
+      break
+    case 'thread.resolution':
+      signals = [
+        setThreadResolution({
+          fullName: normalized.fullName,
+          number: normalized.number,
+          rootId: normalized.rootId,
+          resolved: normalized.resolved,
           updatedAt: normalized.updatedAt,
         }),
       ]

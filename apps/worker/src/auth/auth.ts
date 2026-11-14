@@ -73,6 +73,13 @@ export function authOptions(env: AuthEnv, database: BetterAuthOptions['database'
     basePath: AUTH_BASE_PATH,
     trustedOrigins: trustedWebOrigins(env),
     emailAndPassword: { enabled: true },
+    // Someone signed in by email can connect their GitHub account, so what they say on a pull
+    // request is posted as them. Their GitHub address need not match the one they signed up with.
+    // GitHub is trusted because the App's sign-in cannot read a person's email addresses, so
+    // GitHub never reports one as verified, and an unverified provider is refused outright.
+    account: {
+      accountLinking: { enabled: true, allowDifferentEmails: true, trustedProviders: ['github'] },
+    },
     socialProviders: githubSignInEnabled(env)
       ? {
           github: {

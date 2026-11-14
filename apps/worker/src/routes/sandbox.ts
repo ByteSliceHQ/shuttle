@@ -27,8 +27,8 @@ import {
   type SavedRepo,
   type SavedWorkClient,
 } from '../sandbox/saved-work'
-import type { LinkedSandboxRepo } from '../sandbox/workspace'
-import type { WorkspaceRepoSummary } from '../sandbox/workspace-summary'
+import { worktreeRepoPath, type LinkedSandboxRepo } from '../sandbox/workspace'
+import { repoDiffScript, type WorkspaceRepoSummary } from '../sandbox/workspace-summary'
 import type { Actor } from '../tenancy/access'
 import { previewKeyFor } from '../tenancy/previews'
 import { orgOfRun } from '../tenancy/run-id'
@@ -143,7 +143,7 @@ export async function handleSandboxRoutes(
         ? baseFile(env, stub, runId, path)
         : readFile(stub, runId, path)
     case 'diff':
-      return path ? fileDiff(env, stub, runId, path) : listDiffs(stub, runId)
+      return path ? fileDiff(env, stub, runId, path) : listDiffs(env, stub, runId)
     case 'workspace':
       return liveWorkspace(env, stub, runId, personal ? userOfSandbox(sandboxName) : null)
 
@@ -707,30 +707,31 @@ async function readFile(
   }
 }
 
-async function listDiffs(stub: ReturnType<typeof sandboxStub>, runId: string): Promise<Response> {
-  const sessionRoot = `/workspace/.wt/${runId}`
+/** Longest a whole repository's diff is waited for. */
+const DIFF_TIMEOUT_MS = 20_000
 
+/**
+ * Every repository's changes since the session started, uncommitted work included. For a review
+ * session that is what the pull request changes: its worktree is the head, measured from the base.
+ */
+async function listDiffs(
+  env: ShuttleEnv,
+  stub: ReturnType<typeof sandboxStub>,
+  runId: string,
+): Promise<Response> {
   try {
-    const { files } = await stub.listFiles(sessionRoot)
-    const repoRoots = new Set<string>()
-
-    for (const path of files) {
-      // `/workspace/.wt/<runId>/<repo>/...`
-      const match = path.match(new RegExp(`^${escapeRegExp(sessionRoot)}/([^/]+)`))
-
-      if (match?.[1]) {
-        repoRoots.add(`${sessionRoot}/${match[1]}`)
-      }
-    }
-
     const diffs = []
 
-    for (const cwd of [...repoRoots].toSorted()) {
-      const { diff } = await stub.gitDiff(cwd)
-      const name = cwd.split('/').pop() ?? cwd
+    for (const repo of await sessionRepos(env, runId)) {
+      const cwd = worktreeRepoPath(runId, repo.name)
 
-      if (diff.trim()) {
-        diffs.push({ cwd, name, diff })
+      const result = await stub.exec(repoDiffScript(repo.defaultBranch), {
+        cwd,
+        timeoutMs: DIFF_TIMEOUT_MS,
+      })
+
+      if (result.exitCode === 0 && result.stdout.trim()) {
+        diffs.push({ cwd, name: repo.name, diff: result.stdout })
       }
     }
 
@@ -772,8 +773,4 @@ function looksBinary(sample: string): boolean {
   }
 
   return false
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }

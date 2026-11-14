@@ -58,7 +58,8 @@ Cloudflare Worker that hosts Shuttle sessions on Looms Durable Objects.
    - Permissions: Contents (read/write), Metadata (read), Pull requests
      (read/write), Checks (read), Commit statuses (read)
    - Webhook events: `pull_request`, `pull_request_review`,
-     `pull_request_review_comment`, `check_suite`, `installation_repositories`
+     `pull_request_review_comment`, `pull_request_review_thread`, `check_suite`,
+     `installation_repositories`
      (prefer `check_suite` over `check_run` to keep volume down)
    - Tick **Active** on the webhook. Any placeholder webhook URL is fine;
      `bun run dev` starts a Cloudflare quick tunnel and

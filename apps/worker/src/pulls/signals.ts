@@ -3,6 +3,7 @@ import { Schema } from 'effect'
 import {
   AutoReviewModeSchema,
   CheckRollupSchema,
+  PullCommentSchema,
   PullLinkedRoleSchema,
   PullUpsertActionSchema,
   ReviewDecisionSchema,
@@ -324,6 +325,67 @@ export const linkReviewSession = pullsModule.signal({
     runId: Schema.String,
   }),
   build: (input) => reviewerLinked(input),
+})
+
+export const upsertComment = pullsModule.signal({
+  description: 'Record a review comment written or edited on GitHub.',
+  input: Schema.Struct({
+    fullName: Schema.String,
+    number: Schema.Finite,
+    comment: PullCommentSchema,
+  }),
+  build: (input) =>
+    pullsModule.input('comment.upserted', input, {
+      idempotencyKey: `pulls-comment:${input.comment.commentId}:${input.comment.updatedAt}`,
+    }),
+})
+
+export const removeComment = pullsModule.signal({
+  description: 'Record that a review comment was deleted on GitHub.',
+  input: Schema.Struct({
+    fullName: Schema.String,
+    number: Schema.Finite,
+    commentId: Schema.Finite,
+  }),
+  build: (input) =>
+    pullsModule.input('comment.removed', input, {
+      idempotencyKey: `pulls-comment-removed:${input.commentId}`,
+    }),
+})
+
+export const setThreadResolution = pullsModule.signal({
+  description: 'Record that a review thread was resolved or reopened on GitHub.',
+  input: Schema.Struct({
+    fullName: Schema.String,
+    number: Schema.Finite,
+    rootId: Schema.Finite,
+    resolved: Schema.Boolean,
+    updatedAt: Schema.Finite,
+  }),
+  build: (input) =>
+    pullsModule.input('thread.resolution', input, {
+      idempotencyKey: `pulls-thread:${input.rootId}:${input.resolved}:${input.updatedAt}`,
+    }),
+})
+
+export const syncThreads = pullsModule.signal({
+  description: 'Replace what is known of a pull request’s review threads with a fresh copy.',
+  input: Schema.Struct({
+    fullName: Schema.String,
+    number: Schema.Finite,
+    syncedAt: Schema.Finite,
+    threads: Schema.Array(
+      Schema.Struct({
+        rootId: Schema.Finite,
+        resolved: Schema.Boolean,
+        comments: Schema.Array(PullCommentSchema),
+      }),
+    ),
+  }),
+  build: (input) =>
+    pullsModule.input('threads.synced', input, {
+      idempotencyKey: `pulls-threads-synced:${input.fullName}#${input.number}:${input.syncedAt}`,
+    }),
 })
 
 export const setRepoPolicy = pullsModule.signal({

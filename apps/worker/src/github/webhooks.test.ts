@@ -100,3 +100,89 @@ describe('github webhooks', () => {
     expect(result.kind).toBe('ignored')
   })
 })
+
+describe('review comment webhooks', () => {
+  const base = {
+    installation: { id: 7 },
+    repository: { full_name: 'acme/glue' },
+    pull_request: { number: 8, updated_at: '2026-11-14T10:00:00Z' },
+  }
+
+  const comment = {
+    id: 501,
+    in_reply_to_id: 500,
+    path: 'app.js',
+    line: null,
+    original_line: 40,
+    side: 'RIGHT',
+    body: 'Agreed.',
+    user: { login: 'dylan', avatar_url: 'https://example.com/a.png' },
+    created_at: '2026-11-14T10:00:00Z',
+    updated_at: '2026-11-14T10:01:00Z',
+    html_url: 'https://github.com/acme/glue/pull/8#discussion_r501',
+  }
+
+  test('a reply is filed under the comment it answers, keeping where an outdated one sat', () => {
+    const result = normalizeWebhook('pull_request_review_comment', 'del-c1', {
+      ...base,
+      action: 'created',
+      comment,
+    })
+
+    expect(result).toMatchObject({
+      kind: 'comment.upserted',
+      installationId: 7,
+      fullName: 'acme/glue',
+      number: 8,
+      comment: { commentId: 501, rootId: 500, line: 40, outdated: true, body: 'Agreed.' },
+    })
+  })
+
+  test('a comment that starts a thread is its own root, and a deletion names the comment', () => {
+    const started = normalizeWebhook('pull_request_review_comment', 'del-c2', {
+      ...base,
+      action: 'edited',
+      comment: { ...comment, id: 500, in_reply_to_id: undefined, line: 12 },
+    })
+
+    expect(started).toMatchObject({
+      kind: 'comment.upserted',
+      comment: { commentId: 500, rootId: 500, line: 12, outdated: false },
+    })
+
+    expect(
+      normalizeWebhook('pull_request_review_comment', 'del-c3', {
+        ...base,
+        action: 'deleted',
+        comment,
+      }),
+    ).toMatchObject({ kind: 'comment.removed', commentId: 501 })
+  })
+
+  test('resolving a thread names it by its first comment', () => {
+    const result = normalizeWebhook('pull_request_review_thread', 'del-t1', {
+      ...base,
+      action: 'resolved',
+      thread: { comments: [{ id: 500 }, { id: 501 }] },
+    })
+
+    expect(result).toMatchObject({ kind: 'thread.resolution', rootId: 500, resolved: true })
+  })
+})
+
+describe('review comments about several lines', () => {
+  test('keep where the lines start as well as where they end', () => {
+    const result = normalizeWebhook('pull_request_review_comment', 'del-c4', {
+      installation: { id: 7 },
+      repository: { full_name: 'acme/glue' },
+      pull_request: { number: 8 },
+      action: 'created',
+      comment: { id: 600, path: 'app.js', start_line: 5, line: 8, side: 'RIGHT', body: 'These.' },
+    })
+
+    expect(result).toMatchObject({
+      kind: 'comment.upserted',
+      comment: { commentId: 600, startLine: 5, line: 8 },
+    })
+  })
+})

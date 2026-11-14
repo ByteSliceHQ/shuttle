@@ -569,6 +569,26 @@ export function reviewedPullForSession(
   )
 }
 
+/**
+ * The pull request a session's review tab is about: the one it is reviewing, or else the one it
+ * opened, so the people who wrote a change see what is said about it where they are working.
+ * A session that opened several shows the one touched most recently.
+ */
+export function pullOfSession(inbox: PullInboxState, runId: string): PullInboxSummary | undefined {
+  return (
+    reviewedPullForSession(inbox, runId) ??
+    Object.values(inbox.pulls)
+      .filter(
+        (pull) =>
+          pull.state === 'open' &&
+          pull.linkedSessions.some(
+            (session) => session.runId === runId && session.role === 'author',
+          ),
+      )
+      .toSorted((a, b) => b.updatedAt - a.updatedAt)[0]
+  )
+}
+
 /** Open pulls this session authored, with the proposing thread when known. */
 export function authoredPullsForSession(inbox: PullInboxState, runId: string): PublishedPull[] {
   return Object.values(inbox.pulls)
