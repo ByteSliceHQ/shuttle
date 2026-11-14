@@ -591,6 +591,7 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
               goal: session.goal,
               folderId: session.folderId,
               workspaceRunId: ctx.runId,
+              ...(session.ownerId ? { ownerId: session.ownerId } : {}),
               sandboxName: sandboxNameFor(session.folderId),
               repos: repos.map((repo) => ({
                 installationId: repo.installationId,

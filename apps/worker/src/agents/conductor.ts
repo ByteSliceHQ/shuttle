@@ -7,8 +7,8 @@ import { isJsonObject, isJsonString } from '@swirls/looms/core'
 import { resolveTeam, workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { loomsStub } from '../looms-stub'
+import { readSponsor } from '../session/sponsor'
 import { DEFAULT_TEAM, frameTask, presetRoles, type DelegateMode, type Team } from '../team'
-import { readSessionAccess } from '../tenancy/access'
 import { orgOfRun } from '../tenancy/run-id'
 import { createProposePullRequestTool } from './tools/pulls'
 import { createStackLayerTool } from './tools/stack'
@@ -115,8 +115,8 @@ async function sessionTeam(
     return team
   }
 
-  // Vendor agents run on the sign-in of the person who started the session.
-  const ownerId = (await readSessionAccess(storage))?.ownerId ?? null
+  // Vendor agents run on the sign-in of the person the session is working for.
+  const ownerId = await readSponsor(storage)
 
   const connected = new Set(
     ownerId

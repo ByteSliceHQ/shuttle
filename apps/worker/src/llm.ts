@@ -44,6 +44,8 @@ export type VendorStep =
       readonly harness: string
       readonly label: string
       readonly model?: string
+      /** The person whose sign-in the turn runs on. */
+      readonly billedTo?: string
     }
   | { readonly type: 'message'; readonly text: string }
   | { readonly type: 'thought'; readonly text: string; readonly durationMs?: number }

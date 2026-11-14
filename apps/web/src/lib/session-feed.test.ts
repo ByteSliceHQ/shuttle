@@ -39,6 +39,27 @@ describe('session feed', () => {
     expect(feed.brief[0]).toMatchObject({ version: 1, text: 'Ship it' })
   })
 
+  test('a message keeps its author, and the agent records whose subscription it ran on', () => {
+    const feed = fold([
+      event('shuttle.user.said', {
+        messageId: 'm1',
+        text: 'Add a footer',
+        author: { id: 'bob', name: 'Bob' },
+      }),
+      event('shuttle.user.said', { messageId: 'm2', text: 'From before sign-in' }),
+      event(
+        'shuttle.vendor.turn_started',
+        { turn: 1, harness: 'claude-code', label: 'Claude Code', billedTo: 'bob' },
+        'thr_conductor',
+      ),
+    ])
+
+    const said = feed.items.filter((item) => item.kind === 'user')
+
+    expect(said.map((item) => item.author)).toEqual([{ id: 'bob', name: 'Bob' }, undefined])
+    expect(feed.vendorAgents['thr_conductor']).toMatchObject({ billedTo: 'bob' })
+  })
+
   test('keeps steers that land before the routed event', () => {
     const feed = fold([
       event('shuttle.user.said', { messageId: 'm1', text: 'Use zod' }),

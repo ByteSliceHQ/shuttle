@@ -29,6 +29,8 @@ export const ShuttleSessionInputSchema = z.object({
   repoUrl: z.string().nullable().optional(),
   folderId: z.string().nullable().optional(),
   workspaceRunId: z.string().nullable().optional(),
+  /** The person who started the session. */
+  ownerId: z.string().nullable().optional(),
   sandboxName: z.string().nullable().optional(),
   repos: z.array(LinkedRepoSchema).optional(),
   playbookRunId: z.string().nullable().optional(),

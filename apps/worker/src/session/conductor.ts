@@ -1,6 +1,7 @@
 import { deterministicThreadId } from '@swirls/looms/core'
 
 import { worktreeRepoPath } from '../sandbox/workspace'
+import { attributed } from './attribution'
 import type { LinkedSessionRepo, PendingMessage } from './thread'
 
 export type ConductorEndReason = 'failed' | 'cancelled' | 'completed'
@@ -125,6 +126,8 @@ export interface ConductorPromptInput {
   readonly lessons: readonly { id: string; text: string; scope?: string }[]
   readonly playbookVersion: number
   readonly conductor: ConductorState
+  /** Everyone who has spoken in the session; see `SessionState.speakerIds`. */
+  readonly speakerIds?: readonly string[]
 }
 
 export function buildConductorInput(input: ConductorPromptInput): string {
@@ -157,7 +160,9 @@ export function buildConductorInput(input: ConductorPromptInput): string {
 
   const queuedBlock =
     queued.length > 0
-      ? `\n\nQueued user messages:\n${queued.map((message) => `- ${message.text}`).join('\n')}`
+      ? `\n\nQueued user messages:\n${queued
+          .map((message) => `- ${attributed(message, input.speakerIds ?? [])}`)
+          .join('\n')}`
       : ''
 
   return `${input.goal}${lessonBlock}${repoBlock}${briefBlock}${restartBlock}${queuedBlock}`

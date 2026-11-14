@@ -131,7 +131,7 @@ describe('authorizeLoomsRoute', () => {
   })
 
   test('a listed signal is allowed and recorded as its sender', () => {
-    expect(check('POST', `/runs/${session}/signals/shuttle/say`)).toEqual(allowedAsAlice)
+    expect(check('POST', `/runs/${session}/signals/shuttle/reroute`)).toEqual(allowedAsAlice)
     expect(check('POST', `/runs/${session}/signals/approval/decision`)).toEqual(allowedAsAlice)
     expect(check('POST', `/runs/${workspace}/signals/workspace/openTab`)).toEqual(allowedAsAlice)
   })
@@ -154,6 +154,8 @@ describe('authorizeLoomsRoute', () => {
     )
 
     expect(check('POST', `/runs/${workspace}/signals/workspace/listSession`)).toMatchObject(denied)
+    // A message goes through the Worker's say route, which records its author.
+    expect(check('POST', `/runs/${session}/signals/shuttle/say`)).toMatchObject(denied)
     // A workspace signal is not a session signal.
     expect(check('POST', `/runs/${session}/signals/workspace/openTab`)).toMatchObject(denied)
   })

@@ -38,6 +38,8 @@ export interface VendorTurnDeps {
   readonly member?: { readonly threadId: string }
   /** The model and effort the developer picked for this agent. Absent parts are the agent's own. */
   readonly choice?: VendorModelChoice
+  /** The person whose sign-in `credentials` holds, shown on the turn. */
+  readonly billedTo?: string
   readonly sleep?: (ms: number) => Promise<void>
   readonly newRunKey?: () => string
 }
@@ -226,6 +228,7 @@ export async function runVendorTurn(
         harness,
         label: info.label,
         ...(model ? { model } : {}),
+        ...(deps.billedTo ? { billedTo: deps.billedTo } : {}),
       })
     }
   }

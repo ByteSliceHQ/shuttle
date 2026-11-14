@@ -65,6 +65,8 @@ export type FeedItem =
       readonly text: string
       readonly goal: boolean
       readonly forced?: InterjectionKind
+      /** Who sent it. Absent on the goal and on messages from before people signed in. */
+      readonly author?: MessageAuthor
     }
   | {
       readonly kind: 'agent'
@@ -189,6 +191,23 @@ export interface VendorAgent {
   readonly harness: string
   readonly label: string
   readonly model?: string
+  /** The person whose subscription the agent is running on. */
+  readonly billedTo?: string
+}
+
+export interface MessageAuthor {
+  readonly id: string
+  readonly name: string
+}
+
+function messageAuthor(value: unknown): { author?: MessageAuthor } {
+  if (!value || typeof value !== 'object') {
+    return {}
+  }
+
+  const { id, name } = value as { id?: unknown; name?: unknown }
+
+  return typeof id === 'string' && typeof name === 'string' ? { author: { id, name } } : {}
 }
 
 export interface PlaybookLessonRef {
@@ -468,6 +487,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
           text,
           goal: false,
           forced: isInterjectionKind(forced) ? forced : undefined,
+          ...messageAuthor(payload.author),
         }),
         messageText: { ...feed.messageText, [messageId]: text },
       }
@@ -663,12 +683,18 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       }
 
       const model = jsonText(payload.model)
+      const billedTo = jsonText(payload.billedTo)
 
       return {
         ...feed,
         vendorAgents: {
           ...feed.vendorAgents,
-          [event.threadId]: { harness, label, ...(model ? { model } : {}) },
+          [event.threadId]: {
+            harness,
+            label,
+            ...(model ? { model } : {}),
+            ...(billedTo ? { billedTo } : {}),
+          },
         },
       }
     }

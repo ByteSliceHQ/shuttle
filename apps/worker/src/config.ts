@@ -26,8 +26,8 @@ import {
 } from './llm'
 import { loomsStub } from './looms-stub'
 import { readSandboxBinding } from './session/bind-sandbox'
+import { resolveSponsor } from './session/sponsor'
 import { onTeam, readPinnedTeam, writeStoredTeam, type Team } from './team'
-import { readSessionAccess } from './tenancy/access'
 import { orgOfRun, personalRunId, scopedRunId } from './tenancy/run-id'
 import { vendorHarnessInfo } from './vendor/harnesses'
 import { readVendorModelChoice } from './vendor/models'
@@ -101,6 +101,10 @@ export function resolveLlm(
         return openRouter.complete(args)
       }
 
+      // Worked out on every turn, including the ones OpenRouter runs: a conductor on OpenRouter
+      // may hand its work to a vendor agent, which then runs on this person's sign-in.
+      const sponsorId = await resolveSponsor(storage, args.messages)
+
       // A session with no harness of its own takes the workspace default on its first turn and
       // keeps it, so changing the default later does not switch a session that is under way.
       let sessionHarness = await readPinnedHarness(storage)
@@ -154,7 +158,6 @@ export function resolveLlm(
       await sandbox.ensureWorktree(runId)
 
       const credentials = loomsStub(env.LOOMS_RUN, workspaceRunId(env, orgOfRun(runId)))
-      const ownerId = (await readSessionAccess(storage))?.ownerId ?? null
 
       // Read last, so a model picked while the sandbox was being prepared still applies. A
       // session with no choice of its own uses the most recent one made anywhere.
@@ -173,13 +176,14 @@ export function resolveLlm(
           ...(memberHarness
             ? { member: { threadId: getTurnThread(args.signal) ?? crypto.randomUUID() } }
             : {}),
-          // The turn runs on the sign-in of the person who started the session. A session
-          // Shuttle started itself has no one's sign-in to run on.
+          // The turn runs on the sign-in of the person it is working for, and on no one else's.
+          // A session Shuttle started itself, which nobody has spoken in, has no one's.
+          ...(sponsorId ? { billedTo: sponsorId } : {}),
           credentials: {
-            get: async (id) => (ownerId ? credentials.getCredential(ownerId, id) : null),
+            get: async (id) => (sponsorId ? credentials.getCredential(sponsorId, id) : null),
             put: async (id, payload) => {
-              if (ownerId) {
-                await credentials.putCredential(ownerId, id, payload)
+              if (sponsorId) {
+                await credentials.putCredential(sponsorId, id, payload)
               }
             },
           },

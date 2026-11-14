@@ -130,7 +130,12 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = {
 /** Thread definitions whose turns run on the session's vendor agent. */
 const VENDOR_RUN_DEFINITIONS = new Set(['conductor'])
 
-function renamed(identity: AgentIdentity, label: string, model?: string): AgentIdentity {
+function renamed(
+  identity: AgentIdentity,
+  label: string,
+  model?: string,
+  whose = 'your',
+): AgentIdentity {
   return {
     ...identity,
     label,
@@ -138,8 +143,8 @@ function renamed(identity: AgentIdentity, label: string, model?: string): AgentI
       ...identity.role,
       label,
       blurb: model
-        ? `${label} on your subscription, running ${model}.`
-        : `${label} on your subscription.`,
+        ? `${label} on ${whose} subscription, running ${model}.`
+        : `${label} on ${whose} subscription.`,
     },
   }
 }
@@ -153,8 +158,10 @@ function renamed(identity: AgentIdentity, label: string, model?: string): AgentI
  */
 export function withVendorAgents(
   identities: ReadonlyMap<string, AgentIdentity>,
-  vendorAgents: Readonly<Record<string, { label: string; model?: string }>>,
+  vendorAgents: Readonly<Record<string, { label: string; model?: string; billedTo?: string }>>,
   sessionHarness?: string,
+  /** Says whose subscription a turn ran on, such as "your" or "Alice's". */
+  whose?: (userId: string) => string,
 ): ReadonlyMap<string, AgentIdentity> {
   const pendingLabel = sessionHarness ? HARNESS_LABELS[sessionHarness] : undefined
 
@@ -168,7 +175,15 @@ export function withVendorAgents(
     const agent = vendorAgents[threadId]
 
     if (agent) {
-      next.set(threadId, renamed(identity, agent.label, agent.model))
+      next.set(
+        threadId,
+        renamed(
+          identity,
+          agent.label,
+          agent.model,
+          agent.billedTo && whose ? whose(agent.billedTo) : undefined,
+        ),
+      )
     } else if (pendingLabel && VENDOR_RUN_DEFINITIONS.has(identity.definitionName)) {
       next.set(threadId, renamed(identity, pendingLabel))
     } else {

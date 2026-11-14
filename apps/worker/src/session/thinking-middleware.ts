@@ -115,6 +115,7 @@ export function vendorStepEvent(step: VendorStep, turn: number, threadId: string
           harness: step.harness,
           label: step.label,
           ...(step.model ? { model: step.model } : {}),
+          ...(step.billedTo ? { billedTo: step.billedTo } : {}),
         },
         threadId,
       }

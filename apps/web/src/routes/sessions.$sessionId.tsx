@@ -18,6 +18,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/componen
 import { agentIdentities, withVendorAgents } from '@/lib/agents'
 import { fetchSessionHarness, type HarnessId } from '@/lib/api'
 import { shortId } from '@/lib/cn'
+import { possessive, useOrgPeople } from '@/lib/org-people'
 import { authoredPullsForSession, pullInbox, usePullsRunId, type PullInboxState } from '@/lib/pulls'
 import { rememberSession } from '@/lib/recent-sessions'
 import { sessionActivity, type SessionActivity } from '@/lib/session-activity'
@@ -29,6 +30,7 @@ import {
   type PublishedPull,
   type SessionFeed,
 } from '@/lib/session-feed'
+import { useTenant } from '@/lib/tenant'
 import { useWidthBucket } from '@/lib/use-width-bucket'
 import type { RunStatus } from '@swirls/looms/core'
 import {
@@ -104,9 +106,15 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
     )
   }, [runId])
 
+  const me = useTenant().user.id
+  const people = useOrgPeople()
+
   const identities = useMemo(
-    () => withVendorAgents(agentIdentities(tree.root), feed.vendorAgents, harness),
-    [tree.root, feed.vendorAgents, harness],
+    () =>
+      withVendorAgents(agentIdentities(tree.root), feed.vendorAgents, harness, (userId) =>
+        possessive(userId, me, people),
+      ),
+    [tree.root, feed.vendorAgents, harness, me, people],
   )
 
   const goal = feed.items.find((item) => item.kind === 'user' && item.goal)

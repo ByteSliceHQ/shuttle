@@ -76,6 +76,10 @@ export async function stopSession(runId: string, threadId: string): Promise<void
   }
 }
 
+/**
+ * Sends a message into a session. The Worker records who sent it from the sign-in, so it goes
+ * through a route of its own and not straight to the run as a signal.
+ */
 export async function say(
   runId: string,
   text: string,
@@ -84,17 +88,16 @@ export async function say(
 ) {
   const messageId = crypto.randomUUID()
 
-  await signal(
-    runId,
-    'shuttle/say',
-    {
-      messageId,
-      text,
-      ...(forceKind ? { forceKind } : {}),
-      ...(targetThreadId ? { targetThreadId } : {}),
-    },
-    'Failed to send message',
-  )
+  const response = await postJson(`/sessions/${encodeURIComponent(runId)}/say`, {
+    messageId,
+    text,
+    ...(forceKind ? { forceKind } : {}),
+    ...(targetThreadId ? { targetThreadId } : {}),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to send message: ${response.status} ${await response.text()}`)
+  }
 
   return { messageId }
 }

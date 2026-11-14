@@ -20,12 +20,19 @@ const InterjectionKindSchema = Schema.Union([
   Schema.Literal('stop'),
 ])
 
+/** The person a message came from. */
+export const MessageAuthorSchema = Schema.Struct({ id: Schema.String, name: Schema.String })
+
+export type MessageAuthor = Schema.Schema.Type<typeof MessageAuthorSchema>
+
 export const shuttleCatalog = defineEventCatalog('shuttle', {
   'user.said': Schema.Struct({
     messageId: Schema.String,
     text: Schema.String,
     forceKind: Schema.optional(InterjectionKindSchema),
     targetThreadId: Schema.optional(Schema.String),
+    /** Who sent the message. Set by the Worker from the sign-in, never by the browser. */
+    author: Schema.optional(MessageAuthorSchema),
   }),
   'intake.started': Schema.Struct({
     messageId: Schema.String,
@@ -205,6 +212,8 @@ export const shuttleCatalog = defineEventCatalog('shuttle', {
     harness: Schema.String,
     label: Schema.String,
     model: Schema.optional(Schema.String),
+    /** The person whose sign-in the turn runs on. */
+    billedTo: Schema.optional(Schema.String),
   }),
   'vendor.message': Schema.Struct({
     turn: Schema.Finite,

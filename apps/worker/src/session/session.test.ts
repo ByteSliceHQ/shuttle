@@ -11,6 +11,7 @@ import { createLooms, type Looms } from '@swirls/looms/runtime'
 import { intake } from '../agents/intake'
 import { fakeEnv } from '../testing/fake-env'
 import { codingSession, say, shuttleSession, transcript, routing } from './module'
+import { sponsorOfMessages } from './sponsor'
 
 const TextInput = z.object({
   text: z.string().optional(),
@@ -235,6 +236,80 @@ describe('shuttle session routing', () => {
       expect(chips.some((chip) => chip.kind === 'task' && chip.summary.includes('steered'))).toBe(
         true,
       )
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('agents learn who a message is from once several people speak, and who the work is for', async () => {
+    const turns: { text: string; sponsor: string | null }[] = []
+
+    const stubConductor = defineAgent({
+      name: 'conductor',
+      input: TextInput,
+      instructions: 'Conduct.',
+      conversational: true,
+      maxTurns: 500,
+      runTurn: ({ messages, input }) => {
+        const text = lastUserText(messages) || String(input.text ?? '')
+        turns.push({ text, sponsor: sponsorOfMessages(messages) })
+
+        return { message: { role: 'assistant', content: 'ok' }, done: true }
+      },
+    })
+
+    const looms = createSessionLooms(stubConductor)
+    const alice = { id: 'alice', name: 'Alice' }
+    const bob = { id: 'bob', name: 'Bob' }
+    const turnFor = (text: string) => turns.find((turn) => turn.text.includes(text))
+
+    try {
+      const { runId } = await looms.launch(codingSession, {
+        goal: 'Build a todo app',
+        lessons: [],
+        playbookVersion: 0,
+        ownerId: 'alice',
+      })
+
+      await waitFor(() => turnFor('Build a todo app') !== undefined)
+
+      // The first turn is the goal: nobody has asked for anything by name yet.
+      expect(turnFor('Build a todo app')?.sponsor).toBeNull()
+
+      await looms.signal(runId, [
+        say({ messageId: 't1', text: 'add dark mode', forceKind: 'task', author: alice }),
+      ])
+
+      await waitFor(() => turnFor('add dark mode') !== undefined)
+
+      // Only the owner has spoken, so the message reads as before, and the work is hers.
+      expect(turnFor('add dark mode')).toEqual({ text: 'add dark mode', sponsor: 'alice' })
+
+      await looms.signal(runId, [
+        say({ messageId: 't2', text: 'add a footer', forceKind: 'task', author: bob }),
+      ])
+
+      await waitFor(() => turnFor('add a footer') !== undefined)
+
+      // A second person joined: the agent is told who is speaking, and now works for him.
+      expect(turnFor('add a footer')).toEqual({ text: 'Bob: add a footer', sponsor: 'bob' })
+
+      await looms.signal(runId, [
+        say({
+          messageId: 'i1',
+          text: 'keep it accessible',
+          forceKind: 'constraint',
+          author: alice,
+        }),
+      ])
+
+      await waitFor(() => turnFor('keep it accessible') !== undefined)
+
+      // A constraint changes the brief, not who the work is for.
+      expect(turnFor('keep it accessible')).toEqual({
+        text: 'Brief v2: Alice: keep it accessible',
+        sponsor: 'bob',
+      })
     } finally {
       await looms.stop()
     }

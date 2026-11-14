@@ -3,6 +3,7 @@ import { playbookRunId, workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { isVendorHarness, parseHarness } from '../harness'
 import { loomsStub } from '../looms-stub'
+import { say } from '../session/signals'
 import { parseTeam } from '../team'
 import { canShareSession, isPublicSession, type Actor, type SessionAccess } from '../tenancy/access'
 import { scopedRunId } from '../tenancy/run-id'
@@ -31,6 +32,12 @@ export async function handleShuttleRoutes(
 
   if (accessMatch) {
     return sessionAccess(request, env, actor, decodeURIComponent(accessMatch[1] ?? ''))
+  }
+
+  const sayMatch = url.pathname.match(/^\/sessions\/([^/]+)\/say$/)
+
+  if (request.method === 'POST' && sayMatch) {
+    return sessionSay(request, env, actor, decodeURIComponent(sayMatch[1] ?? ''))
   }
 
   const listingMatch = url.pathname.match(/^\/sessions\/([^/]+)\/(rename|archive)$/)
@@ -161,6 +168,55 @@ async function sessionAccess(
   await moveListings(env, actor.orgId, runId, access, saved)
 
   return Response.json(describe(saved))
+}
+
+const INTERJECTION_KINDS = ['question', 'idea', 'constraint', 'correction', 'task', 'stop'] as const
+
+/**
+ * Sends a person's message into a session.
+ *
+ *   POST /sessions/:id/say    { messageId, text, forceKind?, targetThreadId? }
+ *
+ * The author is taken from the sign-in, so a message can never be sent in someone else's name.
+ */
+async function sessionSay(
+  request: Request,
+  env: ShuttleEnv,
+  actor: Actor,
+  runId: string,
+): Promise<Response> {
+  const body = (await request.json().catch(() => null)) as {
+    messageId?: unknown
+    text?: unknown
+    forceKind?: unknown
+    targetThreadId?: unknown
+  } | null
+
+  const messageId = typeof body?.messageId === 'string' ? body.messageId.trim() : ''
+  const text = typeof body?.text === 'string' ? body.text : ''
+  const forceKind = INTERJECTION_KINDS.find((kind) => kind === body?.forceKind)
+
+  if (!messageId || messageId.length > 128 || !text.trim()) {
+    return Response.json({ error: 'messageId and text are required' }, { status: 400 })
+  }
+
+  if (body?.forceKind !== undefined && !forceKind) {
+    return Response.json({ error: 'unknown message kind' }, { status: 400 })
+  }
+
+  const message = say({
+    messageId,
+    text,
+    ...(forceKind ? { forceKind } : {}),
+    ...(typeof body?.targetThreadId === 'string' ? { targetThreadId: body.targetThreadId } : {}),
+    author: { id: actor.userId, name: actor.name || actor.email },
+  })
+
+  await loomsStub(env.LOOMS_RUN, runId).signal([
+    { ...message, origin: { type: 'external', actorId: actor.userId } },
+  ])
+
+  return Response.json({ messageId })
 }
 
 /**

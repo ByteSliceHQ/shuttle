@@ -1,5 +1,6 @@
 import { cancel, deterministicThreadId, emit, spawn, type RuntimeEffect } from '@swirls/looms/core'
 
+import { attributed } from './attribution'
 import { liveConductorThreadId } from './conductor'
 import { shuttleModule } from './scope'
 import type { PendingRoute, SessionState } from './thread'
@@ -9,13 +10,24 @@ export interface RouteResult {
   readonly queued: boolean
 }
 
-function steerEvent(threadId: string, content: string, interrupt: boolean, messageId?: string) {
+/**
+ * A message for an agent. `sponsorId` marks it as work someone asked for: the turn it starts runs
+ * on that person's sign-in (see `sponsor.ts`). Questions and brief changes carry none, so they
+ * never change whose sign-in the work runs on.
+ */
+function steerEvent(
+  threadId: string,
+  content: string,
+  interrupt: boolean,
+  messageId?: string,
+  sponsorId?: string,
+) {
   return {
     type: 'agent.steered' as const,
     payload: {
       turn: 0,
       ...(messageId ? { messageId } : {}),
-      message: { role: 'user' as const, content },
+      message: { role: 'user' as const, content, ...(sponsorId ? { name: sponsorId } : {}) },
       interrupt,
     },
     threadId,
@@ -30,6 +42,7 @@ export function routeForEffects(
   runId: string,
 ): RouteResult {
   const conductorThreadId = liveConductorThreadId(state.conductor)
+  const text = attributed(route, state.speakerIds)
 
   const target =
     route.targetThreadId ??
@@ -54,7 +67,7 @@ export function routeForEffects(
           kind: 'agent',
           definitionName: 'narrator',
           input: {
-            text: route.text,
+            text,
             messageId: route.messageId,
             sessionRunId: runId,
             brief: state.briefText,
@@ -70,7 +83,7 @@ export function routeForEffects(
 
     case 'constraint': {
       const nextVersion = state.briefVersion + 1
-      const nextBrief = `${state.briefText}\n\n[${route.kind} v${nextVersion}] ${route.text}`
+      const nextBrief = `${state.briefText}\n\n[${route.kind} v${nextVersion}] ${text}`
 
       effects.push(
         emit(
@@ -95,7 +108,7 @@ export function routeForEffects(
       for (const threadId of recipients) {
         effects.push(
           emit(
-            steerEvent(threadId, `Brief v${nextVersion}: ${route.text}`, false, route.messageId),
+            steerEvent(threadId, `Brief v${nextVersion}: ${text}`, false, route.messageId),
             `steer_brief_${route.messageId}_${threadId}`,
           ),
         )
@@ -111,7 +124,7 @@ export function routeForEffects(
 
       effects.push(
         emit(
-          steerEvent(target, route.text, true, route.messageId),
+          steerEvent(target, text, true, route.messageId, route.author?.id),
           `steer_correction_${route.messageId}`,
         ),
       )
@@ -126,7 +139,7 @@ export function routeForEffects(
 
       effects.push(
         emit(
-          steerEvent(conductorThreadId, route.text, false, route.messageId),
+          steerEvent(conductorThreadId, text, false, route.messageId, route.author?.id),
           `steer_task_${route.messageId}`,
         ),
       )

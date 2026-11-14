@@ -39,6 +39,7 @@ import {
   type ThoughtInfo,
   type ToolCallItem,
 } from '@/lib/session-feed'
+import { useTenant } from '@/lib/tenant'
 import { clockTime } from '@/lib/time'
 import { useNow } from '@/lib/use-now'
 
@@ -439,11 +440,15 @@ function UserMessage({
   context: ConversationContext
   className?: string
 }) {
+  const me = useTenant().user.id
+
   return (
     <div className={cn('group/user flex w-full flex-col gap-1.5', className)}>
       <div className="flex flex-col items-end gap-1.5">
         <div className="text-muted-foreground flex items-center gap-2 pr-1 text-[11px]">
-          <span className="text-foreground/80 font-medium">{item.goal ? 'Goal' : 'You'}</span>
+          <span className="text-foreground/80 font-medium">
+            {item.goal ? 'Goal' : item.author && item.author.id !== me ? item.author.name : 'You'}
+          </span>
           <span className="tabular-nums">{clockTime(item.ts)}</span>
         </div>
         <div

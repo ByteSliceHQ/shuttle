@@ -33,7 +33,7 @@ import {
 } from './conductor'
 import { appendPrPublishEffects, withPrApprovalDecision } from './publish-effects'
 import { routeForEffects } from './route-effects'
-import { shuttleModule } from './scope'
+import { shuttleModule, type MessageAuthor } from './scope'
 import {
   withPrProposal,
   withPrPublishSettled,
@@ -51,6 +51,7 @@ export interface PendingMessage {
   readonly text: string
   readonly forceKind?: InterjectionKind
   readonly targetThreadId?: string
+  readonly author?: MessageAuthor
 }
 
 export interface ActiveIntake {
@@ -59,6 +60,7 @@ export interface ActiveIntake {
   readonly text: string
   readonly forceKind?: InterjectionKind
   readonly targetThreadId?: string
+  readonly author?: MessageAuthor
 }
 
 export interface PendingRoute {
@@ -66,6 +68,7 @@ export interface PendingRoute {
   readonly kind: InterjectionKind
   readonly targetThreadId: string | null
   readonly text: string
+  readonly author?: MessageAuthor
 }
 
 export interface LinkedSessionRepo {
@@ -85,6 +88,11 @@ export interface SessionPullRef {
 }
 
 export interface SessionState {
+  /**
+   * Everyone who has spoken in the session, starting with the person who began it. Once there
+   * is more than one, agents are told who each message is from.
+   */
+  readonly speakerIds: readonly string[]
   readonly goal: string
   readonly repoUrl: string | null
   readonly folderId: string | null
@@ -291,7 +299,10 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             }
           : null
 
+      const ownerId = asString(input.ownerId)
+
       return {
+        speakerIds: ownerId ? [ownerId] : [],
         goal: asString(input.goal) ?? 'Improve the repository',
         repoUrl: asString(input.repoUrl),
         folderId: asString(input.folderId),
@@ -451,8 +462,14 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             return state
           }
 
+          const author = payload.author
+
           return {
             ...state,
+            speakerIds:
+              author && !state.speakerIds.includes(author.id)
+                ? [...state.speakerIds, author.id]
+                : state.speakerIds,
             pendingMessages: [
               ...state.pendingMessages,
               {
@@ -460,6 +477,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
                 text: payload.text,
                 forceKind: payload.forceKind,
                 targetThreadId: payload.targetThreadId,
+                ...(author ? { author } : {}),
               },
             ],
             processedMessageIds: [...state.processedMessageIds, payload.messageId],
@@ -501,12 +519,17 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
               text: pending.text,
               forceKind: pending.forceKind,
               targetThreadId: pending.targetThreadId,
+              ...(pending.author ? { author: pending.author } : {}),
             },
           }
         }
 
         case 'shuttle.intake.bypassed': {
           const payload = event.payload
+
+          const bypassed = state.pendingMessages.find(
+            (message) => message.messageId === payload.messageId,
+          )
 
           return {
             ...state,
@@ -518,6 +541,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
               kind: payload.kind,
               targetThreadId: payload.targetThreadId,
               text: payload.text,
+              ...(bypassed?.author ? { author: bypassed.author } : {}),
             },
             mailboxEpoch: state.mailboxEpoch + 1,
           }
@@ -541,6 +565,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
                 kind,
                 targetThreadId: base.activeIntake.targetThreadId ?? null,
                 text: base.activeIntake.text,
+                ...(base.activeIntake.author ? { author: base.activeIntake.author } : {}),
               },
             }
           }
@@ -620,6 +645,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
                 ? queueForConductor(state.conductor, {
                     messageId: route.messageId,
                     text: route.text,
+                    ...(route.author ? { author: route.author } : {}),
                   })
                 : state.conductor,
           }
@@ -791,6 +817,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
                 lessons: state.lessons,
                 playbookVersion: state.playbookVersion,
                 conductor: state.conductor,
+                speakerIds: state.speakerIds,
               }),
               repos: state.repos.map((repo) => repo.fullName),
             },

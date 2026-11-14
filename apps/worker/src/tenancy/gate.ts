@@ -28,7 +28,8 @@ const TAB_SIGNALS = [
  * a Worker route, which checks the request and records who made it.
  */
 const BROWSER_SIGNALS: Record<RunKind, readonly string[]> = {
-  session: ['shuttle/say', 'shuttle/reroute', 'approval/decision'],
+  // A message goes through `POST /sessions/:id/say`, which records who sent it.
+  session: ['shuttle/reroute', 'approval/decision'],
   workspace: [
     'workspace/createFolder',
     'workspace/renameFolder',
