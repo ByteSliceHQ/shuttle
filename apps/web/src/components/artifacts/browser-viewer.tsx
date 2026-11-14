@@ -1,21 +1,41 @@
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, RotateCw } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { EmptyState } from '@/components/ui/panel'
-import { resolveBrowserTarget } from '@/lib/sandbox'
+import { fetchPreviewLabel, resolveBrowserTarget } from '@/lib/sandbox'
 import { tabTitleForKind } from '@/lib/session-tabs'
 
 export function BrowserViewer({
+  runId,
   target,
-  folderId,
   onRetarget,
 }: {
+  runId: string
   target: string
-  folderId?: string
   onRetarget: (title: string, nextTarget: string) => void
 }) {
+  // The label that leads to this session's sandbox in a preview hostname.
+  const [previewLabel, setPreviewLabel] = useState<string>()
+
+  useEffect(() => {
+    let current = true
+
+    fetchPreviewLabel(runId).then(
+      (label) => {
+        if (current) {
+          setPreviewLabel(label)
+        }
+      },
+      () => {},
+    )
+
+    return () => {
+      current = false
+    }
+  }, [runId])
+
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [draft, setDraft] = useState(target)
   const [syncedTarget, setSyncedTarget] = useState(target)
@@ -29,7 +49,7 @@ export function BrowserViewer({
     setDraft(target)
   }
 
-  const src = useMemo(() => resolveBrowserTarget(target, folderId), [target, folderId])
+  const src = useMemo(() => resolveBrowserTarget(target, previewLabel), [target, previewLabel])
 
   function navigate(next: string) {
     const resolved = next.trim()

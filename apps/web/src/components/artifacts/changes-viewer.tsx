@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { EmptyState } from '@/components/ui/panel'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/cn'
-import { fetchSandboxDiff, type SandboxDiffEntry } from '@/lib/sandbox'
+import { fetchSandboxDiff, type SandboxDiffEntry, type SandboxSource } from '@/lib/sandbox'
 import { parseUnifiedDiff } from '@/lib/unified-diff'
+
+import { ASLEEP_MESSAGE, SavedNote } from './saved-note'
 
 export function ChangesViewer({
   runId,
@@ -18,6 +20,7 @@ export function ChangesViewer({
 }) {
   const [diffs, setDiffs] = useState<SandboxDiffEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [source, setSource] = useState<SandboxSource>({})
 
   useEffect(() => {
     let cancelled = false
@@ -27,6 +30,7 @@ export function ChangesViewer({
       .then((result) => {
         if (!cancelled) {
           setDiffs(result.diffs)
+          setSource({ source: result.source, savedAt: result.savedAt })
           setError(null)
         }
       })
@@ -66,38 +70,45 @@ export function ChangesViewer({
   if (files.length === 0) {
     return (
       <EmptyState icon={<GitCompareArrows />} title="No changes">
-        Worktree diffs will appear here as agents edit files.
+        {source.source === 'asleep'
+          ? ASLEEP_MESSAGE
+          : source.source === 'saved'
+            ? 'The saved copy has no changes.'
+            : 'Worktree diffs will appear here as agents edit files.'}
       </EmptyState>
     )
   }
 
   return (
-    <ScrollArea className="h-full">
-      <div className="flex flex-col gap-4 p-3">
-        {files.map((file) => (
-          <section key={`${file.repo}:${file.path}`} className="min-w-0">
-            <header className="text-foreground mb-1.5 flex items-baseline gap-2 font-mono text-[11px]">
-              <span className="text-muted-foreground shrink-0">{file.repo}</span>
-              <span className="min-w-0 truncate font-medium">{file.path}</span>
-            </header>
-            <pre className="bg-card overflow-x-auto rounded-md border p-2 font-mono text-[11px] leading-[18px]">
-              {file.lines.map((line, index) => (
-                <div
-                  key={index}
-                  className={cn(
-                    'whitespace-pre',
-                    line.kind === 'add' && 'bg-status-completed/10 text-status-completed',
-                    line.kind === 'del' && 'bg-destructive/10 text-destructive',
-                    line.kind === 'hunk' && 'text-muted-foreground',
-                  )}
-                >
-                  {line.text}
-                </div>
-              ))}
-            </pre>
-          </section>
-        ))}
-      </div>
-    </ScrollArea>
+    <div className="flex h-full min-h-0 flex-col">
+      <SavedNote source={source} />
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="flex flex-col gap-4 p-3">
+          {files.map((file) => (
+            <section key={`${file.repo}:${file.path}`} className="min-w-0">
+              <header className="text-foreground mb-1.5 flex items-baseline gap-2 font-mono text-[11px]">
+                <span className="text-muted-foreground shrink-0">{file.repo}</span>
+                <span className="min-w-0 truncate font-medium">{file.path}</span>
+              </header>
+              <pre className="bg-card overflow-x-auto rounded-md border p-2 font-mono text-[11px] leading-[18px]">
+                {file.lines.map((line, index) => (
+                  <div
+                    key={index}
+                    className={cn(
+                      'whitespace-pre',
+                      line.kind === 'add' && 'bg-status-completed/10 text-status-completed',
+                      line.kind === 'del' && 'bg-destructive/10 text-destructive',
+                      line.kind === 'hunk' && 'text-muted-foreground',
+                    )}
+                  >
+                    {line.text}
+                  </div>
+                ))}
+              </pre>
+            </section>
+          ))}
+        </div>
+      </ScrollArea>
+    </div>
   )
 }

@@ -3,14 +3,24 @@ export interface SandboxFileEntry {
   readonly kind: 'file' | 'dir'
 }
 
-export interface SandboxFilesResponse {
+/**
+ * Where a tab's contents came from: the running `sandbox`, the session's work as last `saved`
+ * while its sandbox sleeps, or nowhere because the sandbox is `asleep` with nothing saved.
+ */
+export interface SandboxSource {
+  readonly source?: 'sandbox' | 'saved' | 'asleep'
+  /** When the saved copy was saved, in milliseconds. */
+  readonly savedAt?: number | null
+}
+
+export interface SandboxFilesResponse extends SandboxSource {
   readonly root: string
   readonly files: SandboxFileEntry[]
   readonly mode?: 'memory' | 'container'
   readonly error?: string
 }
 
-export interface SandboxFileResponse {
+export interface SandboxFileResponse extends SandboxSource {
   readonly path: string
   readonly content: string
   readonly binary?: boolean
@@ -23,7 +33,7 @@ export interface SandboxDiffEntry {
   readonly diff: string
 }
 
-export interface SandboxDiffResponse {
+export interface SandboxDiffResponse extends SandboxSource {
   readonly diffs: SandboxDiffEntry[]
 }
 
@@ -112,7 +122,39 @@ export function sandboxTerminalUrl(
   return `${protocol}//${host}${sandboxBase(identity.runId)}/terminal${query}`
 }
 
-/** Preview host for container ports: `p3000-<folderId>.localhost:8790` locally. */
+/** Whose sandbox holds a session's files, as it bears on a terminal the viewer opens. */
+export interface SandboxPlace {
+  /** Whether each person has a sandbox of their own. */
+  readonly personal: boolean
+  /** The person whose sandbox holds the session's files. Null when unknown or not personal. */
+  readonly holderId: string | null
+  /** Whether the session's files are in the sandbox the viewer's terminal opens in. */
+  readonly here: boolean
+}
+
+export async function fetchSandboxPlace(runId: string): Promise<SandboxPlace> {
+  const response = await fetch(`${sandboxBase(runId)}/place`)
+
+  if (!response.ok) {
+    throw new Error(`Failed to load the sandbox: ${response.status}`)
+  }
+
+  return (await response.json()) as SandboxPlace
+}
+
+/** The label that leads to a session's sandbox in a preview hostname. Only people who can open
+ * the session can ask for it. */
+export async function fetchPreviewLabel(runId: string): Promise<string> {
+  const response = await fetch(`${sandboxBase(runId)}/preview`)
+
+  if (!response.ok) {
+    throw new Error(`Failed to load the preview address: ${response.status}`)
+  }
+
+  return ((await response.json()) as { label: string }).label
+}
+
+/** Preview host for sandbox ports: `p3000-<label>.localhost:8790` locally. */
 export function previewUrl(port: number, folderId: string, previewHost?: string): string {
   const host = previewHost ?? `${window.location.hostname.replace(/^www\./, '')}`
 

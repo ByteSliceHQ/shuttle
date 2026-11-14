@@ -10,7 +10,6 @@ import type { ArtifactTab } from '@/lib/workspace'
 
 import { BrowserViewer } from './browser-viewer'
 import { ChangesViewer } from './changes-viewer'
-import { FileViewer } from './file-viewer'
 import { FilesViewer } from './files-viewer'
 import { ReviewViewer } from './review-viewer'
 import { TabStrip } from './tab-strip'
@@ -122,13 +121,6 @@ export function ArtifactPane({
                   onSelectSeq={onSelectSeq}
                   identities={identities}
                   refreshEpoch={refreshEpoch}
-                  onOpenFile={(path) =>
-                    void openTab({
-                      kind: 'file',
-                      target: path,
-                      title: path.split('/').pop() || 'File',
-                    })
-                  }
                   onRetarget={(title, target) => void retargetTab(tab.tabId, title, target)}
                 />
               </div>
@@ -154,7 +146,6 @@ function ArtifactViewer({
   onSelectSeq,
   identities,
   refreshEpoch,
-  onOpenFile,
   onRetarget,
 }: {
   tab: ArtifactTab
@@ -170,7 +161,6 @@ function ArtifactViewer({
   onSelectSeq: (seq: number | undefined) => void
   identities: ReadonlyMap<string, { label: string }>
   refreshEpoch: number
-  onOpenFile: (path: string) => void
   onRetarget: (title: string, target: string) => void
 }) {
   switch (tab.kind) {
@@ -189,21 +179,17 @@ function ArtifactViewer({
         />
       )
     case 'files':
+    // Tabs for single files are no longer opened; one saved earlier shows as the Files tab on
+    // that file.
+    case 'file':
       return (
         <FilesViewer
+          key={runId}
           runId={runId}
           folderId={folderId}
           identities={identities}
-          onOpenFile={onOpenFile}
-        />
-      )
-    case 'file':
-      return (
-        <FileViewer
-          runId={runId}
-          folderId={folderId}
-          path={tab.target}
           refreshEpoch={refreshEpoch}
+          initialPath={tab.kind === 'file' ? worktreePath(runId, tab.target) : undefined}
         />
       )
     case 'changes':
@@ -211,7 +197,7 @@ function ArtifactViewer({
     case 'terminal':
       return <TerminalViewer runId={runId} folderId={folderId} cwd={tab.target} />
     case 'browser':
-      return <BrowserViewer target={tab.target} folderId={folderId} onRetarget={onRetarget} />
+      return <BrowserViewer runId={runId} target={tab.target} onRetarget={onRetarget} />
     case 'review':
       return <ReviewViewer runId={runId} />
 
@@ -221,4 +207,11 @@ function ArtifactViewer({
       return exhaustive
     }
   }
+}
+
+/** A file tab's target as a path under the session's worktree, which is how the Files tab names files. */
+function worktreePath(runId: string, target: string): string {
+  const root = `/workspace/.wt/${runId}/`
+
+  return target.startsWith(root) ? target.slice(root.length) : target
 }
