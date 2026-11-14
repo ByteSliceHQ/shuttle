@@ -5,6 +5,7 @@ import { defineAgent, defineTool } from '@swirls/looms/agent'
 import { playbookRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { loomsStub } from '../looms-stub'
+import { mayShareLessons } from '../reflect/sharing'
 import { orgOfRun, sessionOfReflection } from '../tenancy/run-id'
 import { createHistoryTools } from '../tools/history'
 
@@ -29,8 +30,19 @@ export function createReflectorAgent(env: ShuttleEnv, runId: string) {
       sourceRunId: z.string().optional(),
     }),
     handler: async (input) => {
+      // A private session's lessons stay out of the playbook the whole organization reads.
+      if (!(await mayShareLessons(env, sessionRunId))) {
+        return {
+          lessonId: null,
+          ok: false,
+          playbookRunId: null,
+          reason: 'This session is private, so its lessons are not added to the shared playbook.',
+        }
+      }
+
       const lessonId = `lesson_${crypto.randomUUID()}`
-      const playbookId = input.playbookRunId ?? playbookRunId(env, orgOfRun(runId))
+      // Always the playbook of this run's own organization, whatever the model was told or says.
+      const playbookId = playbookRunId(env, orgOfRun(runId))
       const sourceRunId = input.sourceRunId ?? sessionRunId
       const stub = loomsStub(env.LOOMS_RUN, playbookId)
 
@@ -47,7 +59,7 @@ export function createReflectorAgent(env: ShuttleEnv, runId: string) {
         },
       ])
 
-      return { lessonId, ok: true, playbookRunId: playbookId }
+      return { lessonId, ok: true, playbookRunId: playbookId, reason: null }
     },
   })
 
