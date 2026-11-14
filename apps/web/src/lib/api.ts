@@ -1,5 +1,38 @@
 import type { InterjectionKind } from './session-feed'
 
+/**
+ * What to tell someone when a request fails: what they were trying to do, and the Worker's own
+ * reason when it gave a readable one. Never the raw response body.
+ */
+async function requestFailure(action: string, response: Response): Promise<Error> {
+  const body = (await response.text().catch(() => '')).trim()
+  let reason: string | undefined
+
+  try {
+    const parsed: unknown = JSON.parse(body)
+
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      'error' in parsed &&
+      typeof parsed.error === 'string'
+    ) {
+      reason = parsed.error
+    }
+  } catch {
+    // Not JSON. Short plain text is a reason; a page of HTML is not.
+    if (body && body.length <= 160 && !body.startsWith('<')) {
+      reason = body
+    }
+  }
+
+  if (response.status === 404 && (!reason || /^not found$/i.test(reason))) {
+    return new Error(`${action}: this session could not be found.`)
+  }
+
+  return new Error(reason ? `${action}: ${reason}` : `${action} (${response.status}).`)
+}
+
 export interface PlaybookLesson {
   id: string
   text: string
@@ -72,7 +105,7 @@ export async function stopSession(runId: string, threadId: string): Promise<void
   )
 
   if (!response.ok) {
-    throw new Error(`Failed to stop agent: ${response.status} ${await response.text()}`)
+    throw await requestFailure('Failed to stop agent', response)
   }
 }
 
@@ -96,7 +129,7 @@ export async function say(
   })
 
   if (!response.ok) {
-    throw new Error(`Failed to send message: ${response.status} ${await response.text()}`)
+    throw await requestFailure('Failed to send message', response)
   }
 
   return { messageId }
@@ -184,7 +217,7 @@ export async function setLlmModel(runId: string, model: string): Promise<{ model
   })
 
   if (!response.ok) {
-    throw new Error(`Failed to set model: ${response.status} ${await response.text()}`)
+    throw await requestFailure('Failed to set model', response)
   }
 
   return (await response.json()) as { model: string }
@@ -323,7 +356,7 @@ export async function setSessionHarness(
   })
 
   if (!response.ok) {
-    throw new Error(`Failed to switch agent: ${response.status} ${await response.text()}`)
+    throw await requestFailure('Failed to switch agent', response)
   }
 
   return (await response.json()) as { harness: HarnessId }
@@ -349,7 +382,7 @@ export async function setSessionTeam(runId: string, team: Team): Promise<{ team:
   })
 
   if (!response.ok) {
-    throw new Error(`Failed to change the team: ${response.status} ${await response.text()}`)
+    throw await requestFailure('Failed to change the team', response)
   }
 
   return (await response.json()) as { team: Team }
@@ -407,7 +440,7 @@ export async function setSessionVendorModel(
   })
 
   if (!response.ok) {
-    throw new Error(`Failed to set agent model: ${response.status} ${await response.text()}`)
+    throw await requestFailure('Failed to set agent model', response)
   }
 
   return (await response.json()) as { choices: VendorModelChoices }

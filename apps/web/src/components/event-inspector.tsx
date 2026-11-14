@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import type { ReactNode } from 'react'
 
+import { cn } from '@/lib/cn'
 import { eventMeta, familyColor, type SessionEvent } from '@/lib/event-catalog'
 import { asJson } from '@swirls/looms/core'
 
@@ -23,15 +24,17 @@ export function EventInspector({
   event,
   threadLabel,
   onClose,
+  className,
 }: {
   event: SessionEvent
   threadLabel?: string
   onClose?: () => void
+  className?: string
 }) {
   const meta = eventMeta(event)
 
   return (
-    <div className="bg-sidebar flex h-[46%] min-h-44 shrink-0 flex-col border-t">
+    <div className={cn('bg-sidebar flex h-[46%] min-h-44 shrink-0 flex-col border-t', className)}>
       <Tabs defaultValue="payload" className="min-h-0 flex-1 gap-0">
         <div className="flex h-10 shrink-0 items-center gap-2 pr-2 pl-3">
           <span

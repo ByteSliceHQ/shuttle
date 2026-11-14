@@ -1,27 +1,50 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { Check, Copy, Folder, MessagesSquare, PanelRight, Users } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  Check,
+  Copy,
+  Ellipsis,
+  Files,
+  Folder as FolderIcon,
+  GitCompareArrows,
+  Globe,
+  PanelBottom,
+  PanelRight,
+  Search,
+  SquareTerminal,
+  Users,
+  X,
+} from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { AgentTree } from '@/components/agent-tree'
 import { ArtifactPane } from '@/components/artifacts/artifact-pane'
+import { CommandPalette, type Command } from '@/components/command-palette'
 import { Composer } from '@/components/composer'
-import { Conversation } from '@/components/conversation'
+import { Conversation, type OpenArtifact } from '@/components/conversation'
+import { EventStream } from '@/components/event-stream'
 import { SessionContextButtons } from '@/components/session-context'
 import { SessionPrPills } from '@/components/session-pr-pills'
 import { SessionRepos } from '@/components/session-repos'
 import { SessionShare } from '@/components/session-share'
 import { useReportLiveSession, useWorkspace } from '@/components/sidebar/workspace-context'
-import { StatusBadge } from '@/components/status-dot'
+import { StatusDot } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
-import { PanelHeader, PanelTitle } from '@/components/ui/panel'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Kbd, PanelHeader, PanelTitle } from '@/components/ui/panel'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { agentIdentities, withVendorAgents } from '@/lib/agents'
 import { fetchSessionHarness, stopThread, type HarnessId } from '@/lib/api'
-import { shortId } from '@/lib/cn'
+import { cn, shortId } from '@/lib/cn'
 import { possessive, useOrgPeople } from '@/lib/org-people'
 import { authoredPullsForSession, pullInbox, usePullsRunId, type PullInboxState } from '@/lib/pulls'
 import { rememberSession } from '@/lib/recent-sessions'
-import { sessionActivity, type SessionActivity } from '@/lib/session-activity'
+import { sessionActivity } from '@/lib/session-activity'
 import {
   sessionFeed,
   vendorLiveFeed,
@@ -30,9 +53,20 @@ import {
   type PublishedPull,
   type SessionFeed,
 } from '@/lib/session-feed'
+import {
+  shortcutLabel,
+  useAgentsOpen,
+  useArtifactsChoice,
+  useCollapsiblePanel,
+  useEventsOpen,
+  usePaneShortcuts,
+  type PaneShortcut,
+} from '@/lib/session-panes'
+import { statusClass, statusLabel } from '@/lib/status'
 import { useTenant } from '@/lib/tenant'
+import { useSessionTabs } from '@/lib/use-session-tabs'
 import { useWidthBucket } from '@/lib/use-width-bucket'
-import type { RunStatus } from '@swirls/looms/core'
+import type { WorkspaceFolder } from '@/lib/workspace'
 import {
   type LoomsConnectionStatus,
   useEventCounts,
@@ -62,12 +96,17 @@ function SessionPage() {
 }
 
 /**
- * Session-area widths, in CSS pixels, at which a pane is added. Below the first only the
- * conversation shows (events open over it); from the second the agents pane joins.
+ * Session-area widths, in CSS pixels, at which a pane can dock. Below the first only the
+ * conversation shows (artifacts open over it); from the second the agents pane can dock too.
  */
 const PANE_BREAKPOINTS = [640, 980] as const
 
 type PaneLayout = 'one' | 'two' | 'three'
+
+const AGENTS_SHORTCUT = { key: 'a', shift: true } as const
+const ARTIFACTS_SHORTCUT = { key: 'b', shift: true } as const
+const EVENTS_SHORTCUT = { key: 'j' } as const
+const PALETTE_SHORTCUT = { key: 'k' } as const
 
 function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThreadId?: string }) {
   const store = useRunStore(runId)
@@ -89,11 +128,151 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
 
   const [selectedThreadId, setSelectedThreadId] = useState<string | undefined>()
   const [selectedSeq, setSelectedSeq] = useState<number | undefined>()
-  const [focusEventsToken, setFocusEventsToken] = useState(0)
   const [layoutRef, paneCount] = useWidthBucket<HTMLDivElement>(PANE_BREAKPOINTS)
   const layout: PaneLayout = paneCount >= 2 ? 'three' : paneCount === 1 ? 'two' : 'one'
+
+  // The default view is the conversation alone. Agents and event history stay closed until
+  // asked for; artifacts show once the session has something open in them, unless the reader
+  // has opened or closed the pane themself.
+  const tabsController = useSessionTabs(runId)
+  const [agentsOpen, setAgentsOpen] = useAgentsOpen()
+  const [eventsOpen, setEventsOpen] = useEventsOpen()
+  const [artifactsChoice, setArtifactsChoice] = useArtifactsChoice(runId)
+  const artifactsDocked = artifactsChoice ?? tabsController.tabs.order.length > 0
   // Only read in the one-pane layout, where the artifact pane opens over the conversation.
-  const [artifactsOpen, setArtifactsOpen] = useState(false)
+  const [artifactsOverlay, setArtifactsOverlay] = useState(false)
+  const artifactsOpen = layout === 'one' ? artifactsOverlay : artifactsDocked
+
+  const toggleArtifacts = () => {
+    if (layout === 'one') {
+      setArtifactsOverlay(!artifactsOverlay)
+    } else {
+      setArtifactsChoice(!artifactsDocked)
+    }
+  }
+
+  const revealArtifacts = useCallback(() => {
+    setArtifactsOverlay(true)
+    setArtifactsChoice(true)
+  }, [setArtifactsChoice])
+
+  // Opens what a message points at. A preview that is already open comes forward instead of
+  // opening a second time.
+  const { tabs: sessionTabs, openTab, setActiveTabId } = tabsController
+
+  const openArtifact = useCallback<OpenArtifact>(
+    (kind, target) => {
+      revealArtifacts()
+
+      const existing =
+        kind === 'browser'
+          ? Object.values(sessionTabs.tabs).find(
+              (tab) => tab.kind === 'browser' && tab.target === target,
+            )
+          : undefined
+
+      if (existing) {
+        setActiveTabId(existing.tabId)
+      } else {
+        void openTab({ kind, target })
+      }
+    },
+    [revealArtifacts, sessionTabs, openTab, setActiveTabId],
+  )
+
+  const [paletteOpen, setPaletteOpen] = useState(false)
+
+  // Everything the default view keeps out of sight, findable by name.
+  const commands: Command[] = [
+    ...(layout === 'three'
+      ? [
+          {
+            id: 'agents',
+            label: agentsOpen ? 'Hide agents' : 'Show agents',
+            icon: <Users />,
+            shortcut: shortcutLabel(AGENTS_SHORTCUT),
+            keywords: 'threads tree conductor worker',
+            run: () => setAgentsOpen(!agentsOpen),
+          },
+        ]
+      : []),
+    {
+      id: 'artifacts',
+      label: artifactsOpen ? 'Hide artifacts' : 'Show artifacts',
+      icon: <PanelRight />,
+      shortcut: shortcutLabel(ARTIFACTS_SHORTCUT),
+      keywords: 'panel tabs side',
+      run: toggleArtifacts,
+    },
+    {
+      id: 'events',
+      label: eventsOpen ? 'Hide event history' : 'Show event history',
+      icon: <PanelBottom />,
+      shortcut: shortcutLabel(EVENTS_SHORTCUT),
+      keywords: 'debug log inspect',
+      run: () => setEventsOpen(!eventsOpen),
+    },
+    {
+      id: 'workspace',
+      label: 'Open workspace',
+      icon: <Files />,
+      keywords: 'files changes diff code',
+      run: () => openArtifact('files'),
+    },
+    {
+      id: 'terminal',
+      label: 'Open terminal',
+      icon: <SquareTerminal />,
+      keywords: 'shell console',
+      run: () => openArtifact('terminal'),
+    },
+    {
+      id: 'browser',
+      label: 'Open browser',
+      icon: <Globe />,
+      keywords: 'preview web page',
+      run: () => openArtifact('browser'),
+    },
+    {
+      id: 'review',
+      label: 'Open review',
+      icon: <GitCompareArrows />,
+      keywords: 'pull request diff',
+      run: () => openArtifact('review'),
+    },
+    {
+      id: 'copy-run-id',
+      label: 'Copy run ID',
+      icon: <Copy />,
+      keywords: 'session identifier',
+      run: () => void navigator.clipboard.writeText(runId),
+    },
+  ]
+
+  const agentsPanel = useCollapsiblePanel({
+    open: agentsOpen,
+    onOpenChange: setAgentsOpen,
+    preferredSize: '18',
+  })
+
+  const artifactsPanel = useCollapsiblePanel({
+    open: artifactsDocked,
+    onOpenChange: setArtifactsChoice,
+    preferredSize: '34',
+  })
+
+  const eventsPanel = useCollapsiblePanel({
+    open: eventsOpen,
+    onOpenChange: setEventsOpen,
+    preferredSize: '38',
+  })
+
+  usePaneShortcuts([
+    { ...AGENTS_SHORTCUT, run: () => setAgentsOpen(!agentsOpen) },
+    { ...ARTIFACTS_SHORTCUT, run: toggleArtifacts },
+    { ...EVENTS_SHORTCUT, run: () => setEventsOpen(!eventsOpen) },
+    { ...PALETTE_SHORTCUT, run: () => setPaletteOpen(!paletteOpen) },
+  ])
 
   // Which agent runs the session is known before its first step, so the thread carries the
   // agent's name from the start and never shows as Shuttle's conductor first.
@@ -120,7 +299,17 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
   const goal = feed.items.find((item) => item.kind === 'user' && item.goal)
   const hasInterjected = feed.items.some((item) => item.kind === 'user' && !item.goal)
   const goalText = goal?.kind === 'user' ? goal.text : undefined
-  const folderId = useWorkspace()?.tree.sessions[runId]?.folderId
+  const workspaceTree = useWorkspace()?.tree
+  const folderId = workspaceTree?.sessions[runId]?.folderId
+  const folder = folderId ? workspaceTree?.folders[folderId] : undefined
+
+  // A finished run says how it ended; a live one says what it is doing now.
+  const sessionStatus =
+    summary.status === 'completed' || summary.status === 'failed' || summary.status === 'cancelled'
+      ? summary.status
+      : summary.startedAt !== undefined
+        ? activityState.activity
+        : 'working'
 
   useEffect(() => {
     if (goalText) {
@@ -142,12 +331,15 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
     [identities],
   )
 
-  const inspect = useCallback((threadId: string, seq?: number) => {
-    setSelectedThreadId(threadId)
-    setSelectedSeq(seq)
-    setFocusEventsToken((token) => token + 1)
-    setArtifactsOpen(true)
-  }, [])
+  // Inspecting an agent or one of its steps opens event history on it.
+  const inspect = useCallback(
+    (threadId: string, seq?: number) => {
+      setSelectedThreadId(threadId)
+      setSelectedSeq(seq)
+      setEventsOpen(true)
+    },
+    [setEventsOpen],
+  )
 
   const focusThreadKnown = focusThreadId !== undefined && identities.has(focusThreadId)
   const [focusedThreadId, setFocusedThreadId] = useState<string | undefined>()
@@ -156,7 +348,7 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
     setFocusedThreadId(focusThreadId)
     setSelectedThreadId(focusThreadId)
     setSelectedSeq(undefined)
-    setFocusEventsToken((token) => token + 1)
+    setEventsOpen(true)
   }
 
   const artifacts = (
@@ -164,124 +356,337 @@ function SessionWorkspace({ runId, focusThreadId }: { runId: string; focusThread
       runId={runId}
       folderId={folderId}
       events={events}
-      startedAt={summary.startedAt}
-      threadId={selectedThreadId}
-      threadLabel={labelFor(selectedThreadId ?? null)}
-      labelFor={labelFor}
-      onClearThread={() => setSelectedThreadId(undefined)}
-      selectedSeq={selectedSeq}
-      onSelectSeq={setSelectedSeq}
-      focusEventsToken={focusEventsToken}
+      controller={tabsController}
+      onReveal={revealArtifacts}
     />
   )
 
   return (
     <div ref={layoutRef} className="flex h-full min-h-0 flex-col">
-      <SessionHeader
-        runId={runId}
-        goal={goalText}
-        status={summary.status}
-        activity={summary.startedAt !== undefined ? activityState.activity : 'working'}
-        connection={summary.connection}
-        feed={feed}
-        labelFor={labelFor}
-        onInspect={inspect}
-        artifactsToggle={
-          layout === 'one'
-            ? { open: artifactsOpen, onToggle: () => setArtifactsOpen((open) => !open) }
-            : undefined
-        }
-      />
-      <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
-        {layout === 'three' ? (
-          <>
-            <ResizablePanel id="agents" defaultSize="18" minSize={200} maxSize="30">
-              <aside className="bg-sidebar flex h-full min-h-0 flex-col">
-                <PanelHeader>
-                  <Users className="text-muted-foreground size-3.5" />
-                  <PanelTitle meta={identities.size || undefined}>Agents</PanelTitle>
-                </PanelHeader>
-                <AgentTree
-                  root={tree.root}
-                  activityState={activityState}
-                  identities={identities}
-                  eventCounts={eventCounts}
-                  totalEventCount={events.length}
-                  selectedThreadId={selectedThreadId}
-                  onSelect={(threadId) => {
-                    setSelectedThreadId(threadId)
-                    setSelectedSeq(undefined)
-                  }}
-                  onStop={(threadId) => stopThread(runId, threadId)}
-                />
-              </aside>
-            </ResizablePanel>
-            <ResizableHandle />
-          </>
-        ) : null}
-        <ResizablePanel id="conversation" defaultSize="52" minSize={layout === 'one' ? 0 : 320}>
-          <main className="relative flex h-full min-h-0 flex-col">
-            <Conversation
-              runId={runId}
-              feed={feed}
-              activity={activityState}
-              streaming={streaming}
-              identities={identities}
-              onInspect={inspect}
-            />
-            <Composer
-              runId={runId}
-              harness={harness}
-              onHarnessChange={setHarness}
-              identities={identities}
-              disabled={summary.finished}
-              showExamples={!hasInterjected}
-            />
-            {layout === 'one' && artifactsOpen ? (
-              <aside className="bg-background absolute inset-0 z-20 min-h-0">{artifacts}</aside>
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />
+      <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
+        <ResizablePanel id="session" minSize={160}>
+          <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0">
+            {layout === 'three' ? (
+              <>
+                <ResizablePanel
+                  id="agents"
+                  panelRef={agentsPanel.panelRef}
+                  onResize={agentsPanel.onResize}
+                  defaultSize={agentsPanel.defaultSize}
+                  collapsible
+                  collapsedSize={0}
+                  minSize={200}
+                  maxSize="30"
+                >
+                  <aside
+                    inert={!agentsOpen}
+                    aria-label="Agents"
+                    className="bg-sidebar flex h-full min-h-0 flex-col"
+                  >
+                    <PanelHeader className="pr-2">
+                      <Users className="text-muted-foreground size-3.5" />
+                      <PanelTitle meta={identities.size || undefined}>Agents</PanelTitle>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="ml-auto"
+                        aria-label="Close agents"
+                        onClick={() => setAgentsOpen(false)}
+                      >
+                        <X />
+                      </Button>
+                    </PanelHeader>
+                    <AgentTree
+                      root={tree.root}
+                      activityState={activityState}
+                      identities={identities}
+                      eventCounts={eventCounts}
+                      totalEventCount={events.length}
+                      selectedThreadId={selectedThreadId}
+                      showCounts={eventsOpen}
+                      onSelect={(threadId) => {
+                        setSelectedThreadId(threadId)
+                        setSelectedSeq(undefined)
+
+                        // Picking an agent is asking what it did: show its events.
+                        if (threadId) {
+                          setEventsOpen(true)
+                        }
+                      }}
+                      onStop={(threadId) => stopThread(runId, threadId)}
+                    />
+                  </aside>
+                </ResizablePanel>
+                <ResizableHandle className={agentsOpen ? undefined : 'hidden'} />
+              </>
             ) : null}
-          </main>
-        </ResizablePanel>
-        {layout === 'one' ? null : (
-          <>
-            <ResizableHandle />
-            <ResizablePanel id="artifacts" defaultSize="30" minSize={280}>
-              <aside className="h-full min-h-0">{artifacts}</aside>
+            <ResizablePanel id="conversation" minSize={layout === 'one' ? 0 : 320}>
+              <main className="flex h-full min-h-0 flex-col">
+                <SessionTitleBar
+                  runId={runId}
+                  goal={goalText}
+                  folder={folder}
+                  connection={summary.connection}
+                  feed={feed}
+                  labelFor={labelFor}
+                  onInspect={inspect}
+                  status={sessionStatus}
+                  onShowAgents={layout === 'three' ? () => setAgentsOpen(true) : undefined}
+                  eventsOpen={eventsOpen}
+                  onToggleEvents={() => setEventsOpen(!eventsOpen)}
+                  onOpenPalette={() => setPaletteOpen(true)}
+                  leading={
+                    layout === 'three' && !agentsOpen ? (
+                      <PaneToggle
+                        label="Agents"
+                        shortcut={AGENTS_SHORTCUT}
+                        open={agentsOpen}
+                        onToggle={() => setAgentsOpen(true)}
+                        align="start"
+                      >
+                        <Users />
+                      </PaneToggle>
+                    ) : null
+                  }
+                  trailing={
+                    <PaneToggle
+                      label="Artifacts"
+                      shortcut={ARTIFACTS_SHORTCUT}
+                      open={artifactsOpen}
+                      onToggle={toggleArtifacts}
+                    >
+                      <PanelRight />
+                    </PaneToggle>
+                  }
+                />
+                {/* Artifacts open over this area in the one-pane layout, under the title bar. */}
+                <div className="relative flex min-h-0 flex-1 flex-col">
+                  <Conversation
+                    runId={runId}
+                    feed={feed}
+                    activity={activityState}
+                    streaming={streaming}
+                    identities={identities}
+                    onInspect={inspect}
+                    onOpenArtifact={openArtifact}
+                  />
+                  <Composer
+                    runId={runId}
+                    harness={harness}
+                    onHarnessChange={setHarness}
+                    identities={identities}
+                    disabled={summary.finished}
+                    showExamples={!hasInterjected}
+                    context={
+                      <>
+                        {folder ? (
+                          <SessionRepos
+                            folderId={folder.folderId}
+                            folderName={folder.name}
+                            repos={folder.repos}
+                            align="start"
+                          />
+                        ) : null}
+                        <SessionContextButtons feed={feed} />
+                      </>
+                    }
+                  />
+                  {layout === 'one' && artifactsOverlay ? (
+                    <aside className="bg-background absolute inset-0 z-20 min-h-0">
+                      {artifacts}
+                    </aside>
+                  ) : null}
+                </div>
+              </main>
             </ResizablePanel>
-          </>
-        )}
+            {layout === 'one' ? null : (
+              <>
+                <ResizableHandle className={artifactsDocked ? undefined : 'hidden'} />
+                <ResizablePanel
+                  id="artifacts"
+                  panelRef={artifactsPanel.panelRef}
+                  onResize={artifactsPanel.onResize}
+                  defaultSize={artifactsPanel.defaultSize}
+                  collapsible
+                  collapsedSize={0}
+                  minSize={280}
+                >
+                  <aside inert={!artifactsDocked} aria-label="Artifacts" className="h-full min-h-0">
+                    {artifacts}
+                  </aside>
+                </ResizablePanel>
+              </>
+            )}
+          </ResizablePanelGroup>
+        </ResizablePanel>
+        <ResizableHandle
+          className={cn(
+            'h-px w-full after:inset-x-0 after:inset-y-auto after:top-1/2 after:left-0 after:h-2 after:w-full after:translate-x-0 after:-translate-y-1/2',
+            !eventsOpen && 'hidden',
+          )}
+        />
+        <ResizablePanel
+          id="events"
+          panelRef={eventsPanel.panelRef}
+          onResize={eventsPanel.onResize}
+          defaultSize={eventsPanel.defaultSize}
+          collapsible
+          collapsedSize={0}
+          minSize={180}
+          maxSize="80"
+        >
+          <section
+            inert={!eventsOpen}
+            aria-label="Event history"
+            className="bg-sidebar h-full min-h-0"
+          >
+            <EventStream
+              events={events}
+              startedAt={summary.startedAt}
+              threadId={selectedThreadId}
+              threadLabel={labelFor(selectedThreadId ?? null)}
+              labelFor={labelFor}
+              onClearThread={() => setSelectedThreadId(undefined)}
+              selectedSeq={selectedSeq}
+              onSelectSeq={setSelectedSeq}
+              title="Event history"
+              split
+              onClose={() => setEventsOpen(false)}
+            />
+          </section>
+        </ResizablePanel>
       </ResizablePanelGroup>
     </div>
   )
 }
 
-function SessionHeader({
+/** A header button that shows or hides one of the session's panes, with its shortcut on hover. */
+function PaneToggle({
+  label,
+  shortcut,
+  open,
+  onToggle,
+  align = 'end',
+  children,
+}: {
+  label: string
+  shortcut: Pick<PaneShortcut, 'key' | 'shift'>
+  open: boolean
+  onToggle: () => void
+  align?: 'start' | 'end'
+  children: ReactNode
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={label}
+          aria-pressed={open}
+          onClick={onToggle}
+          className="aria-pressed:bg-accent aria-pressed:text-foreground"
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" align={align}>
+        <span className="inline-flex items-center gap-1.5">
+          {open ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
+          <Kbd>{shortcutLabel(shortcut)}</Kbd>
+        </span>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+/**
+ * What the session is doing, in the title bar. The bar leaves it out while idle: nothing to
+ * report is the resting state, and a badge for it is noise.
+ */
+function SessionStatusLine({
+  status,
+  onShowAgents,
+}: {
+  status: string
+  /** Opens the agents pane, where there is room for one. */
+  onShowAgents?: () => void
+}) {
+  const body = (
+    <>
+      <StatusDot status={status} />
+      <span className="hidden @md:inline">{statusLabel(status)}</span>
+    </>
+  )
+
+  const className = cn(
+    'inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2 text-[11.5px] font-medium whitespace-nowrap',
+    statusClass(status),
+  )
+
+  return onShowAgents ? (
+    <button
+      type="button"
+      onClick={onShowAgents}
+      aria-label={`${statusLabel(status)}. Show agents`}
+      title={`${statusLabel(status)}. Show agents`}
+      className={cn(
+        className,
+        'ease-snappy transition-[background-color,transform] duration-150 outline-none hover:bg-current/10 focus-visible:bg-current/10 active:scale-[0.97]',
+      )}
+    >
+      {body}
+    </button>
+  ) : (
+    <span className={className} title={statusLabel(status)}>
+      {body}
+    </span>
+  )
+}
+
+/**
+ * The session's name and what it produced, at the top of the conversation. It has no border and
+ * shares the panel header height (and the app sidebar's top bar), so it reads as part of the conversation and lines up with the
+ * panes beside it.
+ */
+function SessionTitleBar({
   runId,
   goal,
-  status,
-  activity,
+  folder,
   connection,
   feed,
   labelFor,
   onInspect,
-  artifactsToggle,
+  status,
+  onShowAgents,
+  eventsOpen,
+  onToggleEvents,
+  onOpenPalette,
+  leading,
+  trailing,
 }: {
   runId: string
   goal: string | undefined
-  status: RunStatus
-  activity: SessionActivity
+  folder: WorkspaceFolder | undefined
   connection: LoomsConnectionStatus
   feed: SessionFeed
   labelFor: (threadId: string | null) => string | undefined
   onInspect: (threadId: string) => void
-  /** Present only in the one-pane layout, where events and files open over the conversation. */
-  artifactsToggle?: { readonly open: boolean; readonly onToggle: () => void }
+  /** How the run ended, or what it is doing now. Nothing shows for it while idle. */
+  status: string
+  /** Opens the agents pane, where there is room for one. */
+  onShowAgents?: () => void
+  eventsOpen: boolean
+  onToggleEvents: () => void
+  onOpenPalette: () => void
+  /** Sits before the title: the control that brings back a closed agents pane. */
+  leading?: ReactNode
+  /** Sits at the far end: the control that shows or hides the artifacts pane. */
+  trailing?: ReactNode
 }) {
   const [copied, setCopied] = useState(false)
-  const tree = useWorkspace()?.tree
-  const sessionMeta = tree?.sessions[runId]
-  const folder = sessionMeta ? tree?.folders[sessionMeta.folderId] : undefined
-  const title = sessionMeta?.title ?? goal ?? 'Coding session'
+  const title = useWorkspace()?.tree.sessions[runId]?.title ?? goal ?? 'Coding session'
   const pullsStore = useRunStore(usePullsRunId())
   const inbox = useProjection(pullsStore, pullInbox)
 
@@ -290,80 +695,77 @@ function SessionHeader({
     [feed.publishedPulls, inbox, runId],
   )
 
-  const badgeStatus =
-    status === 'completed' || status === 'failed' || status === 'cancelled' ? status : activity
-
-  // Two columns: the title only ever truncates, so its length never moves the controls.
-  // The controls drop out by priority as the header narrows; status and pull requests stay.
+  // The title only ever truncates, so its length never moves the controls. As the bar narrows
+  // the folder goes first, then the status and connection labels, then all but one avatar. The
+  // title, the menu and the artifacts toggle stay to the end.
   return (
-    <header className="@container grid h-12 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b px-3 @2xl:gap-4">
+    <header className="@container grid h-12 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2">
       <div className="flex min-w-0 items-center gap-1.5">
-        {folder ? (
-          <>
-            <Link
-              to="/folders/$folderId"
-              params={{ folderId: folder.folderId }}
-              title={folder.name}
-              className="text-muted-foreground hover:text-foreground hidden max-w-40 shrink-0 items-center gap-1.5 text-[12px] transition-colors duration-100 sm:inline-flex"
-            >
-              <Folder className="size-3.5 shrink-0" />
-              <span className="truncate" dir="auto">
-                {folder.name}
+        {leading}
+        <div className="flex min-w-0 items-center gap-1.5 pl-1">
+          {folder ? (
+            <>
+              <Link
+                to="/folders/$folderId"
+                params={{ folderId: folder.folderId }}
+                title={folder.name}
+                className="text-muted-foreground hover:text-foreground hidden max-w-24 shrink-0 items-center gap-1.5 text-[12px] transition-colors duration-100 @xl:inline-flex @4xl:max-w-40"
+              >
+                <FolderIcon className="size-3.5 shrink-0" />
+                <span className="truncate" dir="auto">
+                  {folder.name}
+                </span>
+              </Link>
+              <span aria-hidden className="text-muted-foreground/50 hidden text-[12px] @xl:inline">
+                /
               </span>
-            </Link>
-            <span aria-hidden className="text-muted-foreground/50 hidden text-[12px] sm:inline">
-              /
-            </span>
-          </>
-        ) : null}
-        <h1 className="min-w-0 truncate text-[13px] font-medium" dir="auto" title={title}>
-          {title}
-        </h1>
+            </>
+          ) : null}
+          <h1 className="min-w-0 truncate text-[13px] font-medium" dir="auto" title={title}>
+            {title}
+          </h1>
+        </div>
       </div>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-0.5">
         <SessionPrPills pulls={sessionPulls} labelFor={labelFor} onInspect={onInspect} />
-        <SessionShare key={runId} runId={runId} />
         <ConnectionIndicator connection={connection} />
-        <StatusBadge status={badgeStatus} className="mr-1" />
-        {folder ? (
-          <div className="hidden @xl:contents">
-            <SessionRepos
-              folderId={folder.folderId}
-              folderName={folder.name}
-              repos={folder.repos}
-            />
-          </div>
-        ) : null}
-        <div className="hidden @3xl:contents">
-          <SessionContextButtons feed={feed} />
-        </div>
-        <div className="hidden @4xl:contents">
-          <span aria-hidden className="bg-border mx-1 h-4 w-px" />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="font-mono"
-            title={`Copy run id ${runId}`}
-            onClick={() => {
-              void navigator.clipboard.writeText(runId).then(() => setCopied(true))
-            }}
-            onPointerLeave={() => setCopied(false)}
-          >
-            {copied ? <Check className="text-status-completed" /> : <Copy />}
-            {shortId(runId)}
-          </Button>
-        </div>
-        {artifactsToggle ? (
-          <Button
-            variant={artifactsToggle.open ? 'secondary' : 'ghost'}
-            size="sm"
-            aria-pressed={artifactsToggle.open}
-            onClick={artifactsToggle.onToggle}
-          >
-            {artifactsToggle.open ? <MessagesSquare /> : <PanelRight />}
-            {artifactsToggle.open ? 'Chat' : 'Events'}
-          </Button>
-        ) : null}
+        {status === 'idle' ? null : (
+          <SessionStatusLine status={status} onShowAgents={onShowAgents} />
+        )}
+        <SessionShare key={runId} runId={runId} />
+        <DropdownMenu onOpenChange={(open) => !open && setCopied(false)}>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon-sm" aria-label="More session actions">
+              <Ellipsis />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem onSelect={onOpenPalette}>
+              <Search />
+              Commands
+              <Kbd className="ml-auto">{shortcutLabel(PALETTE_SHORTCUT)}</Kbd>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onToggleEvents}>
+              <PanelBottom />
+              {eventsOpen ? 'Hide event history' : 'Show event history'}
+              <Kbd className="ml-auto">{shortcutLabel(EVENTS_SHORTCUT)}</Kbd>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={(event) => {
+                // Stay open long enough to show that it copied.
+                event.preventDefault()
+                void navigator.clipboard.writeText(runId).then(() => setCopied(true))
+              }}
+            >
+              {copied ? <Check className="text-status-completed" /> : <Copy />}
+              {copied ? 'Copied' : 'Copy run ID'}
+              <span className="text-muted-foreground ml-auto font-mono text-[10px]">
+                {shortId(runId)}
+              </span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {trailing}
       </div>
     </header>
   )
@@ -402,9 +804,14 @@ function ConnectionIndicator({ connection }: { connection: LoomsConnectionStatus
     case 'connecting':
     case 'reconnecting':
       return (
-        <span className="text-status-waiting inline-flex items-center gap-1.5 text-[11px]">
+        <span
+          title={connection === 'connecting' ? 'Connecting' : 'Reconnecting'}
+          className="text-status-waiting inline-flex shrink-0 items-center gap-1.5 px-1 text-[11px]"
+        >
           <span className="bg-status-waiting size-1.5 animate-pulse rounded-full" />
-          {connection === 'connecting' ? 'Connecting' : 'Reconnecting'}
+          <span className="hidden @md:inline">
+            {connection === 'connecting' ? 'Connecting' : 'Reconnecting'}
+          </span>
         </span>
       )
 

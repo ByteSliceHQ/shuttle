@@ -68,17 +68,16 @@ export function TabStrip({
   }
 
   return (
-    <div className="flex h-11 shrink-0 items-center gap-0.5 border-b px-1.5">
+    <div className="flex h-12 shrink-0 items-center gap-0.5 border-b px-1.5">
       <ScrollArea
         horizontal
         vertical={false}
         barClassName="h-1.5"
         className="min-w-0 flex-1"
-        viewportClassName="[&>div]:flex! [&>div]:h-11 [&>div]:w-max [&>div]:items-center [&>div]:gap-0.5"
+        viewportClassName="[&>div]:flex! [&>div]:h-12 [&>div]:w-max [&>div]:items-center [&>div]:gap-0.5"
       >
         {tabs.map((tab) => {
           const active = tab.tabId === activeTabId
-          const closable = tab.kind !== 'events'
 
           return (
             <button
@@ -105,7 +104,7 @@ export function TabStrip({
               }}
               onClick={() => onSelect(tab.tabId)}
               onAuxClick={(event) => {
-                if (event.button === 1 && closable) {
+                if (event.button === 1) {
                   event.preventDefault()
                   onClose(tab.tabId)
                 }
@@ -123,23 +122,21 @@ export function TabStrip({
               <span className="min-w-0 truncate" dir="auto">
                 {tabLabel(tab)}
               </span>
-              {closable ? (
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  aria-label={`Close ${tabLabel(tab)}`}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    onClose(tab.tabId)
-                  }}
-                  className={cn(
-                    'text-muted-foreground hover:text-foreground hover:bg-background/70 -mr-0.5 flex size-4 shrink-0 items-center justify-center rounded-sm transition-opacity duration-100',
-                    active ? 'opacity-70' : 'opacity-0 group-hover:opacity-70',
-                  )}
-                >
-                  <X className="size-3" />
-                </span>
-              ) : null}
+              <span
+                role="button"
+                tabIndex={-1}
+                aria-label={`Close ${tabLabel(tab)}`}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onClose(tab.tabId)
+                }}
+                className={cn(
+                  'text-muted-foreground hover:text-foreground hover:bg-background/70 -mr-0.5 flex size-4 shrink-0 items-center justify-center rounded-sm transition-opacity duration-100',
+                  active ? 'opacity-70' : 'opacity-0 group-hover:opacity-70',
+                )}
+              >
+                <X className="size-3" />
+              </span>
             </button>
           )
         })}
@@ -161,7 +158,6 @@ export function TabStrip({
           />
           <LauncherItem kind="browser" label="Browser" icon={<Globe />} onOpen={onOpen} />
           <LauncherItem kind="review" label="Review" icon={<GitCompareArrows />} onOpen={onOpen} />
-          <LauncherItem kind="events" label="Events" icon={<ListTree />} onOpen={onOpen} />
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

@@ -1,3 +1,4 @@
+import type { SessionAccess } from '@/lib/api'
 import type {
   GithubInstallation,
   LinkedRepo,
@@ -220,5 +221,55 @@ export function workspaceFixture(mode: Exclude<FixtureMode, 'live'>, now: number
       const exhaustive: never = mode
       return exhaustive
     }
+  }
+}
+
+/** Who is in a session, and what they are called, for the session's avatars. */
+export interface SessionPeopleFixture {
+  readonly access: SessionAccess
+  /** Names by user id. Someone missing from it has no name on record. */
+  readonly people: ReadonlyMap<string, string>
+}
+
+/**
+ * Worst-case people for a session's avatars: long and short names, scripts without spaces, an
+ * emoji first, stray spaces, lowercase, someone with no name at all, and more than fit.
+ */
+export function sessionPeopleFixture(
+  mode: Exclude<FixtureMode, 'live'>,
+  me: string,
+): SessionPeopleFixture {
+  if (mode === 'empty') {
+    return {
+      access: { ownerId: me, memberIds: [], visibility: 'private', canShare: true },
+      people: new Map(),
+    }
+  }
+
+  const named: readonly (readonly [string, string])[] = [
+    [me, 'Jo'],
+    ['fx-u1', 'Aleksandra Wiśniewska-Kowalczyk'],
+    ['fx-u2', '🦊 Fox'],
+    ['fx-u3', '王秀英'],
+    ['fx-u4', 'نور الهدى عبد الرحمن'],
+    ['fx-u5', 'dana'],
+    ['fx-u6', '  Sam   Lee '],
+    ['fx-u7', 'Christopher Alexander Montgomery III'],
+    ['fx-u8', '👩🏽‍💻 Priya'],
+    ['fx-u9', 'bartholomew.fitzgerald@northwind-industries-holdings.example.com'],
+  ]
+
+  // In the huge case the session is shared with a whole organization, one person at a time.
+  const crowd = mode === 'huge' ? Array.from({ length: 1283 }, (_, index) => `fx-m${index}`) : []
+
+  return {
+    access: {
+      ownerId: 'fx-u1',
+      // fx-nameless is in the session but has no name on record.
+      memberIds: [me, ...named.slice(2).map(([userId]) => userId), 'fx-nameless', ...crowd],
+      visibility: mode === 'huge' ? 'private' : 'public',
+      canShare: false,
+    },
+    people: new Map(named),
   }
 }

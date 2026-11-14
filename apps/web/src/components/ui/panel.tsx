@@ -2,12 +2,15 @@ import type { ComponentProps, ReactNode } from 'react'
 
 import { cn } from '@/lib/cn'
 
-/** Every panel header shares this height so the columns read as one surface. */
+/**
+ * Every panel header shares this height, which is also the app sidebar's top bar, so the
+ * columns and their dividers line up as one surface.
+ */
 function PanelHeader({ className, ...props }: ComponentProps<'div'>) {
   return (
     <div
       data-slot="panel-header"
-      className={cn('flex h-11 shrink-0 items-center gap-2 border-b px-3', className)}
+      className={cn('flex h-12 shrink-0 items-center gap-2 border-b px-3', className)}
       {...props}
     />
   )

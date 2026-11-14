@@ -32,15 +32,23 @@ function DialogOverlay({ className, ...props }: ComponentProps<typeof DialogPrim
 function DialogContent({
   className,
   children,
+  instant = false,
   ...props
-}: ComponentProps<typeof DialogPrimitive.Content>) {
+}: ComponentProps<typeof DialogPrimitive.Content> & {
+  /**
+   * Appears and leaves with no animation. For dialogs opened from the keyboard many times a
+   * day, such as a command palette, where an entrance only makes the shortcut feel slow.
+   */
+  instant?: boolean
+}) {
   return (
     <DialogPortal>
-      <DialogOverlay />
+      <DialogOverlay className={instant ? 'animate-none!' : undefined} />
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
           'modal bg-popover text-popover-foreground border-border fixed top-1/2 left-1/2 z-50 grid w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl border p-5 shadow-xl shadow-black/40',
+          instant && 'animate-none!',
           className,
         )}
         {...props}

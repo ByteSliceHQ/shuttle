@@ -32,6 +32,9 @@ export function EventStream({
   selectedSeq,
   onSelectSeq,
   toolbar = false,
+  title = 'Events',
+  split = false,
+  onClose,
 }: {
   events: readonly SessionEvent[]
   startedAt?: number
@@ -41,8 +44,13 @@ export function EventStream({
   onClearThread?: () => void
   selectedSeq?: number
   onSelectSeq: (seq: number | undefined) => void
-  /** When true, drop the panel title — the tab strip already names Events. */
+  /** When true, drop the panel title. */
   toolbar?: boolean
+  title?: string
+  /** Puts the inspector beside the list instead of under it, for a wide and short panel. */
+  split?: boolean
+  /** Adds a close button to the header. */
+  onClose?: () => void
 }) {
   const [query, setQuery] = useState('')
   const [follow, setFollow] = useState(true)
@@ -109,7 +117,7 @@ export function EventStream({
           </span>
         ) : (
           <PanelTitle meta={filtered ? `${visible.length}/${events.length}` : events.length}>
-            Events
+            {title}
           </PanelTitle>
         )}
         <div className={cn('relative min-w-0 flex-1 basis-24', toolbar ? '' : 'ml-auto')}>
@@ -180,6 +188,11 @@ export function EventStream({
         >
           <ArrowDownToLine />
         </Button>
+        {onClose ? (
+          <Button variant="ghost" size="icon-sm" aria-label={`Close ${title}`} onClick={onClose}>
+            <X />
+          </Button>
+        ) : null}
       </PanelHeader>
       {threadId ? (
         <div className="flex h-8 shrink-0 items-center gap-2 border-b px-3 text-[11px]">
@@ -201,45 +214,48 @@ export function EventStream({
           </span>
         </div>
       ) : null}
-      <FollowList
-        items={visible}
-        getKey={(event) => event.id}
-        estimateSize={ROW_ESTIMATE}
-        overscan={16}
-        follow={follow}
-        onFollowChange={setFollow}
-        className="min-h-24"
-        itemClassName="px-1.5"
-        empty={
-          <p className="text-muted-foreground p-6 text-center text-xs">
-            {events.length === 0 ? 'Waiting for events…' : 'No events match these filters.'}
-          </p>
-        }
-        renderItem={(event) => (
-          <EventRow
-            event={event}
-            startedAt={startedAt}
-            threadLabel={labelFor(event.threadId)}
-            selected={selectedSeq === event.seq}
-            onSelectSeq={(seq) => {
-              // Keep the picked row in view instead of chasing new arrivals.
-              if (seq !== undefined) {
-                setFollow(false)
-              }
+      <div className={cn('flex min-h-0 flex-1', split ? 'flex-row' : 'flex-col')}>
+        <FollowList
+          items={visible}
+          getKey={(event) => event.id}
+          estimateSize={ROW_ESTIMATE}
+          overscan={16}
+          follow={follow}
+          onFollowChange={setFollow}
+          className="min-h-24"
+          itemClassName="px-1.5"
+          empty={
+            <p className="text-muted-foreground p-6 text-center text-xs">
+              {events.length === 0 ? 'Waiting for events…' : 'No events match these filters.'}
+            </p>
+          }
+          renderItem={(event) => (
+            <EventRow
+              event={event}
+              startedAt={startedAt}
+              threadLabel={labelFor(event.threadId)}
+              selected={selectedSeq === event.seq}
+              onSelectSeq={(seq) => {
+                // Keep the picked row in view instead of chasing new arrivals.
+                if (seq !== undefined) {
+                  setFollow(false)
+                }
 
-              onSelectSeq(seq)
-            }}
-          />
-        )}
-      />
-      {selected ? (
-        <EventInspector
-          key={selected.seq}
-          event={selected}
-          threadLabel={labelFor(selected.threadId)}
-          onClose={() => onSelectSeq(undefined)}
+                onSelectSeq(seq)
+              }}
+            />
+          )}
         />
-      ) : null}
+        {selected ? (
+          <EventInspector
+            key={selected.seq}
+            event={selected}
+            threadLabel={labelFor(selected.threadId)}
+            onClose={() => onSelectSeq(undefined)}
+            className={split ? 'h-full w-[46%] min-w-72 border-t-0 border-l' : undefined}
+          />
+        ) : null}
+      </div>
     </div>
   )
 }

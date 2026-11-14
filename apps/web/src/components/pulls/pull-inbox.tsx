@@ -174,7 +174,7 @@ function CollapsedRail({ data }: { data: PullInboxData }) {
       onClick={() => setPullInboxCollapsed(false)}
       className="pull-inbox-layer text-muted-foreground hover:text-foreground hover:bg-accent/30 focus-visible:bg-accent/40 flex h-full w-11 flex-col items-center transition-colors duration-100 outline-none"
     >
-      <span className="flex h-11 w-full shrink-0 items-center justify-center border-b">
+      <span className="flex h-12 w-full shrink-0 items-center justify-center border-b">
         <PanelRightOpen className="size-3.5" />
       </span>
       <span className="relative mt-3.5">

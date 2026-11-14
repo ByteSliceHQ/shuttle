@@ -42,7 +42,10 @@ function quote(text: string): string {
   return chars.length > QUOTE_MAX ? `${chars.slice(0, QUOTE_MAX - 1).join('')}…` : chars.join('')
 }
 
-/** Header triggers for the brief and the playbook lessons, sharing one side sheet. */
+/**
+ * The brief the agents are working from, as one chip under the composer. Its sheet also holds
+ * the playbook lessons the session started with. The version shows only once it was amended.
+ */
 export function SessionContextButtons({ feed }: { feed: SessionFeed }) {
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<ContextTab>('brief')
@@ -82,27 +85,25 @@ export function SessionContextButtons({ feed }: { feed: SessionFeed }) {
 
   return (
     <>
-      <Button variant="ghost" size="sm" onClick={() => show('brief')}>
-        <FileText />
-        Brief
-        <span
-          className={cn(
-            'font-mono text-[10px] tabular-nums',
-            feed.brief.length > 1 ? 'text-route-idea' : 'text-muted-foreground',
-          )}
-        >
-          v{brief.version}
-        </span>
-      </Button>
       <Button
         variant="ghost"
         size="sm"
-        onClick={() => show('playbook')}
-        aria-label={`${lessonCountLabel(lessons.length)} from the playbook`}
+        onClick={() => show('brief')}
+        title="Brief"
+        aria-label={
+          lessons.length > 0
+            ? `Brief, with ${lessonCountLabel(lessons.length)} from the playbook`
+            : 'Brief'
+        }
       >
-        <BookOpen />
-        <span className="tabular-nums">{lessons.length}</span>
-        <span className="hidden sm:inline">{lessons.length === 1 ? 'lesson' : 'lessons'}</span>
+        <FileText />
+        {/* Icon only where the composer is narrow, so the row under it stays on one line. */}
+        <span className="hidden @md:inline">Brief</span>
+        {feed.brief.length > 1 ? (
+          <span className="text-route-idea font-mono text-[10px] tabular-nums">
+            v{brief.version}
+          </span>
+        ) : null}
       </Button>
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetContent>

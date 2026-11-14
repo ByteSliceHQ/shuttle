@@ -6,15 +6,17 @@ import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { repoCountLabel, type LinkedRepo } from '@/lib/workspace'
 
-/** One trigger for every linked repo, so the header width doesn't grow with the folder. */
+/** One trigger for every linked repo, so its width doesn't grow with the folder. */
 export function SessionRepos({
   folderId,
   folderName,
   repos,
+  align = 'end',
 }: {
   folderId: string
   folderName: string
   repos: readonly LinkedRepo[]
+  align?: 'start' | 'end'
 }) {
   const [first] = repos
 
@@ -39,7 +41,7 @@ export function SessionRepos({
           <ChevronDown className="opacity-60" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" collisionPadding={12} className="w-80">
+      <PopoverContent align={align} collisionPadding={12} className="w-80">
         <div className="flex items-baseline gap-2 border-b px-3 py-2.5">
           <span className="text-[12px] font-medium">Repositories</span>
           <span className="text-muted-foreground font-mono text-[11px] tabular-nums">

@@ -5,7 +5,9 @@ import {
   CircleStop,
   ChevronRight,
   CornerDownRight,
+  FileDiff,
   GitPullRequest,
+  Globe,
   LoaderCircle,
   MessageCircleQuestion,
   MessageSquareDashed,
@@ -14,11 +16,12 @@ import {
   TriangleAlert,
   X,
 } from 'lucide-react'
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 import type { AgentIdentity } from '@/lib/agents'
 import { agentRole } from '@/lib/agents'
 import { answerQuestion, decideStructuredApproval, reroute, stopSession } from '@/lib/api'
+import { changedPaths, previewPorts } from '@/lib/artifact-links'
 import { cn, compactJson, errorMessage } from '@/lib/cn'
 import { classifyHeuristic } from '@/lib/intake-heuristic'
 import { jsonFields, jsonText } from '@/lib/json'
@@ -70,12 +73,19 @@ type Row =
       readonly thinkingEndedAt?: number
     }
 
+/** Shows something in the artifacts pane, such as the workspace or a preview by port. */
+export type OpenArtifact = (
+  kind: 'files' | 'browser' | 'terminal' | 'review',
+  target?: string,
+) => void
+
 interface ConversationContext {
   readonly runId: string
   readonly feed: SessionFeed
   readonly activity: SessionActivityState
   readonly identities: ReadonlyMap<string, AgentIdentity>
   readonly onInspect: (threadId: string, seq?: number) => void
+  readonly onOpenArtifact?: OpenArtifact
   readonly thoughtOpen: ReadonlyMap<string, boolean>
   readonly setThoughtOpen: (key: string, open: boolean) => void
   readonly liveByToolCardId: ReadonlyMap<string, StreamingTurn>
@@ -161,6 +171,7 @@ export function Conversation({
   streaming,
   identities,
   onInspect,
+  onOpenArtifact,
 }: {
   runId: string
   feed: SessionFeed
@@ -168,6 +179,8 @@ export function Conversation({
   streaming: Readonly<Record<string, StreamingTurn>>
   identities: ReadonlyMap<string, AgentIdentity>
   onInspect: (threadId: string, seq?: number) => void
+  /** Left out, messages carry no links into the artifacts pane. */
+  onOpenArtifact?: OpenArtifact
 }) {
   const { rows, liveByToolCardId, inlineNarratorByMessageId } = useMemo(() => {
     let lastUserIndex = -1
@@ -279,6 +292,7 @@ export function Conversation({
       activity,
       identities,
       onInspect,
+      onOpenArtifact,
       thoughtOpen,
       setThoughtOpen,
       liveByToolCardId,
@@ -291,6 +305,7 @@ export function Conversation({
       activity,
       identities,
       onInspect,
+      onOpenArtifact,
       thoughtOpen,
       setThoughtOpen,
       liveByToolCardId,
@@ -932,7 +947,52 @@ function AgentBubble({
             )}
           />
         ) : null}
+        {replyText && !streaming && context?.onOpenArtifact ? (
+          <PreviewLinks text={text ?? ''} onOpen={context.onOpenArtifact} />
+        ) : null}
       </div>
+    </div>
+  )
+}
+
+/** A quiet button under a message that opens what the message is about in the artifacts pane. */
+function ArtifactLink({
+  icon,
+  onOpen,
+  children,
+}: {
+  icon: ReactNode
+  onOpen: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="text-muted-foreground hover:text-foreground hover:bg-accent/60 bg-card/60 ease-snappy inline-flex h-7 max-w-full items-center gap-1.5 rounded-lg border px-2.5 text-[12px] transition-[background-color,color,transform] duration-150 active:scale-[0.97] [&_svg]:size-3.5 [&_svg]:shrink-0"
+    >
+      {icon}
+      <span className="min-w-0 truncate">{children}</span>
+      <ArrowRight className="opacity-60" />
+    </button>
+  )
+}
+
+/** Links to the previews a message says are running. */
+function PreviewLinks({ text, onOpen }: { text: string; onOpen: OpenArtifact }) {
+  const ports = useMemo(() => previewPorts(text), [text])
+
+  if (ports.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {ports.map((port) => (
+        <ArtifactLink key={port} icon={<Globe />} onOpen={() => onOpen('browser', port)}>
+          Open preview on port <span className="tabular-nums">{port}</span>
+        </ArtifactLink>
+      ))}
     </div>
   )
 }
@@ -1084,6 +1144,7 @@ function ToolActivity({
   const thoughtExpanded = Boolean(context.thoughtOpen.get(thoughtToggleKey))
   const totalThoughtDurationMs = sumThoughtDuration(item.thoughts)
 
+  const changed = useMemo(() => changedPaths(item.calls), [item.calls])
   const runningCalls = item.calls.filter((call) => call.status === 'running')
   const running = runningCalls.length
   const lastRunningCall = runningCalls.at(-1)
@@ -1223,6 +1284,15 @@ function ToolActivity({
           </ul>
         ) : null}
       </div>
+      {changed.length > 0 && context.onOpenArtifact ? (
+        <div className="mt-1.5">
+          <ArtifactLink icon={<FileDiff />} onOpen={() => context.onOpenArtifact?.('files')}>
+            {changed.length === 1
+              ? `Changed ${changed[0]?.split('/').pop() ?? '1 file'}`
+              : `Changed ${changed.length.toLocaleString()} files`}
+          </ArtifactLink>
+        </div>
+      ) : null}
     </div>
   )
 }

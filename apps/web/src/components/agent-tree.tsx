@@ -1,8 +1,8 @@
-import { ChevronRight, Layers, LoaderCircle, Square } from 'lucide-react'
+import { ChevronRight, Cog, Layers, LoaderCircle, Square } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 
 import type { AgentIdentity } from '@/lib/agents'
-import { agentRole } from '@/lib/agents'
+import { agentRole, isSystemAgent } from '@/lib/agents'
 import { cn } from '@/lib/cn'
 import { resolveThreadActivityTone, type SessionActivityState } from '@/lib/session-activity'
 import { statusLabel } from '@/lib/status'
@@ -18,20 +18,35 @@ interface FlatNode {
   readonly depth: number
 }
 
-function flatten(root: ThreadNode | null, collapsed: ReadonlySet<string>): FlatNode[] {
+/**
+ * The rows under `root`, in tree order. Housekeeping agents are left out when `system` is given,
+ * and collected into it instead, so the tree can show them as one group.
+ */
+function flatten(
+  root: ThreadNode | null,
+  collapsed: ReadonlySet<string>,
+  baseDepth = 0,
+  system?: ThreadNode[],
+): FlatNode[] {
   const rows: FlatNode[] = []
 
   if (!root) {
     return rows
   }
 
-  const stack: FlatNode[] = [{ node: root, depth: 0 }]
+  const stack: FlatNode[] = [{ node: root, depth: baseDepth }]
 
   while (stack.length > 0) {
     const next = stack.pop()
 
     if (!next) {
       break
+    }
+
+    if (system && next.depth > baseDepth && isSystemAgent(next.node.definitionName)) {
+      system.push(next.node)
+
+      continue
     }
 
     rows.push(next)
@@ -53,6 +68,7 @@ export function AgentTree({
   eventCounts,
   totalEventCount,
   selectedThreadId,
+  showCounts = false,
   onSelect,
   onStop,
 }: {
@@ -62,12 +78,31 @@ export function AgentTree({
   eventCounts: ReadonlyMap<string, number>
   totalEventCount: number
   selectedThreadId: string | undefined
+  /** Shows how many events each thread has. Only useful beside the event history. */
+  showCounts?: boolean
   onSelect: (threadId: string | undefined) => void
   /** Stops a thread and everything beneath it. Left out, agents cannot be stopped from here. */
   onStop?: (threadId: string) => Promise<void>
 }) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
-  const rows = useMemo(() => flatten(root, collapsed), [root, collapsed])
+  const [systemOpen, setSystemOpen] = useState(false)
+
+  // Intake, narrators and the reflector run for every message. They are most of the tree and
+  // rarely what the reader came for, so they sit in one group that starts closed.
+  const { rows, systemRows } = useMemo(() => {
+    const system: ThreadNode[] = []
+    const main = flatten(root, collapsed, 0, system)
+
+    return {
+      rows: main,
+      systemRows: system.flatMap((node) => flatten(node, collapsed, 2)),
+    }
+  }, [root, collapsed])
+
+  const systemCount = systemRows.filter((row) => row.depth === 2).length
+
+  // A selected housekeeping agent stays in view even while its group is closed.
+  const showSystem = systemOpen || systemRows.some((row) => row.node.threadId === selectedThreadId)
 
   const toggle = useCallback((id: string) => {
     setCollapsed((prev) => {
@@ -82,6 +117,22 @@ export function AgentTree({
       return next
     })
   }, [])
+
+  const renderRow = (row: FlatNode) => (
+    <TreeRow
+      key={row.node.threadId}
+      row={row}
+      activityState={activityState}
+      identity={identities.get(row.node.threadId)}
+      count={showCounts ? (eventCounts.get(row.node.threadId) ?? 0) : undefined}
+      selected={selectedThreadId === row.node.threadId}
+      collapsed={collapsed.has(row.node.threadId)}
+      onToggle={toggle}
+      onSelect={onSelect}
+      // The session's own thread is not an agent to stop.
+      onStop={row.depth > 0 ? onStop : undefined}
+    />
+  )
 
   return (
     <ScrollArea className="min-h-0 flex-1">
@@ -98,28 +149,52 @@ export function AgentTree({
         >
           <Layers className="size-3.5 shrink-0" />
           <span>All threads</span>
-          <span className="text-muted-foreground ml-auto font-mono text-[10px] tabular-nums">
-            {totalEventCount}
-          </span>
+          {showCounts ? (
+            <span className="text-muted-foreground ml-auto font-mono text-[10px] tabular-nums">
+              {totalEventCount}
+            </span>
+          ) : null}
         </button>
         {rows.length === 0 ? (
           <p className="text-muted-foreground px-2 py-3 text-xs">Waiting for threads…</p>
         ) : (
-          rows.map((row) => (
-            <TreeRow
-              key={row.node.threadId}
-              row={row}
-              activityState={activityState}
-              identity={identities.get(row.node.threadId)}
-              count={eventCounts.get(row.node.threadId) ?? 0}
-              selected={selectedThreadId === row.node.threadId}
-              collapsed={collapsed.has(row.node.threadId)}
-              onToggle={toggle}
-              onSelect={onSelect}
-              // The session's own thread is not an agent to stop.
-              onStop={row.depth > 0 ? onStop : undefined}
-            />
-          ))
+          <>
+            {rows.map(renderRow)}
+            {systemCount > 0 ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setSystemOpen(!showSystem)}
+                  aria-expanded={showSystem}
+                  title="Agents that route and answer messages, and learn from the session"
+                  className="text-muted-foreground hover:bg-accent/50 hover:text-foreground relative flex h-8 w-full items-center rounded-md pr-2 text-left text-xs transition-colors duration-100"
+                  style={{ paddingLeft: 4 + INDENT }}
+                >
+                  <span
+                    aria-hidden
+                    className="bg-border absolute inset-y-0 w-px"
+                    style={{ left: 12 }}
+                  />
+                  <span className="flex size-4 shrink-0 items-center justify-center">
+                    <ChevronRight
+                      className={cn(
+                        'ease-snappy size-3 transition-transform duration-150',
+                        showSystem && 'rotate-90',
+                      )}
+                    />
+                  </span>
+                  <span className="flex min-w-0 items-center gap-2 pl-1">
+                    <Cog className="size-3.5 shrink-0" />
+                    <span className="truncate font-medium">System</span>
+                  </span>
+                  <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums">
+                    {systemCount}
+                  </span>
+                </button>
+                {showSystem ? systemRows.map(renderRow) : null}
+              </>
+            ) : null}
+          </>
         )}
       </div>
     </ScrollArea>
@@ -140,7 +215,8 @@ function TreeRow({
   row: FlatNode
   activityState: SessionActivityState
   identity: AgentIdentity | undefined
-  count: number
+  /** How many events the thread has, or nothing to leave the count out. */
+  count: number | undefined
   selected: boolean
   collapsed: boolean
   onToggle: (threadId: string) => void
@@ -218,16 +294,18 @@ function TreeRow({
         <Icon className={cn('size-3.5 shrink-0', role.tone)} />
         <span className="min-w-0 truncate font-medium">{label}</span>
         <StatusDot status={tone} className="ml-0.5" />
-        <span
-          className={cn(
-            'text-muted-foreground ml-auto shrink-0 font-mono text-[10px] tabular-nums',
-            // The stop button takes the count's place while the row is hovered or focused.
-            stoppable && 'group-focus-within/row:invisible group-hover/row:invisible',
-            stopping && 'invisible',
-          )}
-        >
-          {count}
-        </span>
+        {count === undefined ? null : (
+          <span
+            className={cn(
+              'text-muted-foreground ml-auto shrink-0 font-mono text-[10px] tabular-nums',
+              // The stop button takes the count's place while the row is hovered or focused.
+              stoppable && 'group-focus-within/row:invisible group-hover/row:invisible',
+              stopping && 'invisible',
+            )}
+          >
+            {count}
+          </span>
+        )}
       </button>
       {stoppable ? (
         <button

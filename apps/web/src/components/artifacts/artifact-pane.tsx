@@ -1,12 +1,12 @@
-import { LayoutPanelTop } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Files, Globe, LayoutPanelTop, SquareTerminal } from 'lucide-react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
-import { EventStream } from '@/components/event-stream'
+import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/panel'
 import { cn } from '@/lib/cn'
 import type { SessionEvent } from '@/lib/event-catalog'
-import { useSessionTabs } from '@/lib/use-session-tabs'
-import type { ArtifactTab } from '@/lib/workspace'
+import type { SessionTabsController } from '@/lib/use-session-tabs'
+import type { ArtifactTab, ArtifactTabKind } from '@/lib/workspace'
 
 import { BrowserViewer } from './browser-viewer'
 import { ReviewViewer } from './review-viewer'
@@ -14,34 +14,27 @@ import { TabStrip } from './tab-strip'
 import { TerminalViewer } from './terminal-viewer'
 import { WorkspaceViewer } from './workspace-viewer'
 
+const STARTERS: readonly { kind: ArtifactTabKind; label: string; icon: ReactNode }[] = [
+  { kind: 'files', label: 'Workspace', icon: <Files /> },
+  { kind: 'terminal', label: 'Terminal', icon: <SquareTerminal /> },
+  { kind: 'browser', label: 'Browser', icon: <Globe /> },
+]
+
 export function ArtifactPane({
   runId,
   folderId,
   events,
-  startedAt,
-  threadId,
-  threadLabel,
-  labelFor,
-  onClearThread,
-  selectedSeq,
-  onSelectSeq,
-  focusEventsToken,
+  controller,
+  onReveal,
 }: {
   runId: string
   folderId?: string
   events: readonly SessionEvent[]
-  startedAt?: number
-  threadId?: string
-  threadLabel?: string
-  labelFor: (threadId: string | null) => string | undefined
-  onClearThread?: () => void
-  selectedSeq?: number
-  onSelectSeq: (seq: number | undefined) => void
-  /** Bumped when conversation asks to inspect — focuses Events. */
-  focusEventsToken?: number
+  /** The session's tabs. The page owns them, since whether the pane shows depends on them. */
+  controller: SessionTabsController
+  /** Asks the page to show the pane, for a shortcut that opens a tab while it is closed. */
+  onReveal?: () => void
 }) {
-  const controller = useSessionTabs(runId)
-
   const { tabs, activeTabId, setActiveTabId, openTab, closeTab, reorderTabs, retargetTab } =
     controller
 
@@ -57,22 +50,6 @@ export function ArtifactPane({
         .length,
     [events],
   )
-
-  // Only react to real inspect bumps — not mount (token 0) and not openTab identity churn.
-  const lastFocusToken = useRef(0)
-
-  useEffect(() => {
-    if (focusEventsToken === undefined || focusEventsToken <= 0) {
-      return
-    }
-
-    if (focusEventsToken === lastFocusToken.current) {
-      return
-    }
-
-    lastFocusToken.current = focusEventsToken
-    void openTab({ kind: 'events' })
-  }, [focusEventsToken, openTab])
 
   // Go to file, on the shortcut editors use for it. It brings the Files tab forward and opens
   // its search, from anywhere on the page.
@@ -93,6 +70,7 @@ export function ArtifactPane({
       }
 
       event.preventDefault()
+      onReveal?.()
       void openTab({ kind: 'files' })
       setSearchToken(Date.now())
     }
@@ -100,7 +78,7 @@ export function ArtifactPane({
     window.addEventListener('keydown', onKeyDown, true)
 
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [openTab])
+  }, [openTab, onReveal])
 
   return (
     <div className="bg-sidebar flex h-full min-h-0 flex-col">
@@ -114,8 +92,23 @@ export function ArtifactPane({
       />
 
       {orderedTabs.length === 0 ? (
-        <EmptyState icon={<LayoutPanelTop />} title="No open tabs">
-          Use + to open Events, Workspace, Terminal, or Browser.
+        <EmptyState icon={<LayoutPanelTop />} title="Nothing open yet">
+          <span className="mb-3 block">
+            Open the workspace to see files and changes, or start a terminal or a browser preview.
+          </span>
+          <span className="flex flex-wrap justify-center gap-1.5">
+            {STARTERS.map((starter) => (
+              <Button
+                key={starter.kind}
+                variant="secondary"
+                size="sm"
+                onClick={() => void openTab({ kind: starter.kind })}
+              >
+                {starter.icon}
+                {starter.label}
+              </Button>
+            ))}
+          </span>
         </EmptyState>
       ) : (
         <div className="relative min-h-0 flex-1">
@@ -136,14 +129,6 @@ export function ArtifactPane({
                   tab={tab}
                   runId={runId}
                   folderId={folderId}
-                  events={events}
-                  startedAt={startedAt}
-                  threadId={threadId}
-                  threadLabel={threadLabel}
-                  labelFor={labelFor}
-                  onClearThread={onClearThread}
-                  selectedSeq={selectedSeq}
-                  onSelectSeq={onSelectSeq}
                   refreshEpoch={refreshEpoch}
                   searchToken={searchToken}
                   onRetarget={(title, target) => void retargetTab(tab.tabId, title, target)}
@@ -161,14 +146,6 @@ function ArtifactViewer({
   tab,
   runId,
   folderId,
-  events,
-  startedAt,
-  threadId,
-  threadLabel,
-  labelFor,
-  onClearThread,
-  selectedSeq,
-  onSelectSeq,
   refreshEpoch,
   searchToken,
   onRetarget,
@@ -176,33 +153,14 @@ function ArtifactViewer({
   tab: ArtifactTab
   runId: string
   folderId?: string
-  events: readonly SessionEvent[]
-  startedAt?: number
-  threadId?: string
-  threadLabel?: string
-  labelFor: (threadId: string | null) => string | undefined
-  onClearThread?: () => void
-  selectedSeq?: number
-  onSelectSeq: (seq: number | undefined) => void
   refreshEpoch: number
   searchToken: number
   onRetarget: (title: string, target: string) => void
 }) {
   switch (tab.kind) {
+    // Event history opens as a drawer under the session; it is never shown as a tab.
     case 'events':
-      return (
-        <EventStream
-          events={events}
-          startedAt={startedAt}
-          threadId={threadId}
-          threadLabel={threadLabel}
-          labelFor={labelFor}
-          onClearThread={onClearThread}
-          selectedSeq={selectedSeq}
-          onSelectSeq={onSelectSeq}
-          toolbar
-        />
-      )
+      return null
     // One tab shows the workspace. Tabs saved under its earlier names open it too: a Changes
     // tab on what changed, a single-file tab on that file.
     case 'files':

@@ -1,27 +1,9 @@
 import { reduceTabMutation, type TabMutation } from './tab-set'
 import type { ArtifactTab, ArtifactTabKind, SessionTabSet } from './workspace'
 
-export const DEFAULT_EVENTS_TAB_ID = 'events'
-
-export const DEFAULT_EVENTS_TAB: ArtifactTab = {
-  tabId: DEFAULT_EVENTS_TAB_ID,
-  kind: 'events',
-  title: 'Events',
-  target: '',
-  openedAt: 0,
-}
-
 export const emptyTabSet: SessionTabSet = {
   order: [],
   tabs: {},
-}
-
-/** Sessions with no tab events yet show a single Events tab. */
-export function defaultTabSet(): SessionTabSet {
-  return {
-    order: [DEFAULT_EVENTS_TAB_ID],
-    tabs: { [DEFAULT_EVENTS_TAB_ID]: DEFAULT_EVENTS_TAB },
-  }
 }
 
 export function hasTabEvents(set: SessionTabSet | undefined): boolean {
@@ -29,25 +11,26 @@ export function hasTabEvents(set: SessionTabSet | undefined): boolean {
 }
 
 /**
- * Sessions with no tab events yet get a default Events tab.
- * Once any tabs exist, keep Events pinned even if it was never opened durably —
- * otherwise the default disappears as soon as the first Files/Terminal open lands.
+ * The tabs a session shows. Event history is no longer a tab — it opens as a drawer under the
+ * session — so Events tabs saved by older sessions are left out. A session with nothing open
+ * has no tabs.
  */
 export function resolveTabSet(projected: SessionTabSet | undefined): SessionTabSet {
-  if (!hasTabEvents(projected)) {
-    return defaultTabSet()
-  }
-
   const set = projected ?? emptyTabSet
 
-  if (Object.values(set.tabs).some((tab) => tab.kind === 'events')) {
+  if (!Object.values(set.tabs).some((tab) => tab.kind === 'events')) {
     return set
   }
 
-  return {
-    order: [DEFAULT_EVENTS_TAB_ID, ...set.order],
-    tabs: { ...set.tabs, [DEFAULT_EVENTS_TAB_ID]: DEFAULT_EVENTS_TAB },
+  const tabs: Record<string, ArtifactTab> = {}
+
+  for (const [tabId, tab] of Object.entries(set.tabs)) {
+    if (tab.kind !== 'events') {
+      tabs[tabId] = tab
+    }
   }
+
+  return { order: set.order.filter((tabId) => tabs[tabId]), tabs }
 }
 
 export type PendingTabOp =

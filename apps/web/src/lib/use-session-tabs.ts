@@ -58,7 +58,7 @@ export function useSessionTabs(sessionRunId: string): SessionTabsController {
   const resolvedActive = resolveActiveTabId(tabs, preferred)
 
   // Keep latest tabs in a ref so open/close callbacks stay identity-stable.
-  // Otherwise ArtifactPane's focus-Events effect re-runs every render and steals focus.
+  // Otherwise effects that depend on them re-run every render.
   const tabsRef = useRef(tabs)
   const preferredRef = useRef(preferred)
   const resolvedActiveRef = useRef(resolvedActive)
@@ -121,11 +121,6 @@ export function useSessionTabs(sessionRunId: string): SessionTabsController {
   const closeTab = useCallback(
     async (tabId: string) => {
       const current = tabsRef.current
-
-      // Events is the default pinned tab; closing it just falls back to Events again.
-      if (current.tabs[tabId]?.kind === 'events') {
-        return
-      }
 
       const nextActive = neighborAfterClose(current.order, tabId)
       setPendingRaw((prev) => [...prev, { kind: 'close', tabId }])

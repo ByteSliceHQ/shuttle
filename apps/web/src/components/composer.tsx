@@ -88,6 +88,7 @@ export function Composer({
   onHarnessChange: reportHarness,
   disabled = false,
   showExamples = true,
+  context,
 }: {
   runId: string
   /** Which agent runs this session. Owned by the session page, which also names the agent. */
@@ -96,6 +97,8 @@ export function Composer({
   identities: ReadonlyMap<string, AgentIdentity>
   disabled?: boolean
   showExamples?: boolean
+  /** What the session works from (repos, brief), shown under the composer on the left. */
+  context?: ReactNode
 }) {
   const [text, setText] = useState('')
   const [kind, setKind] = useState<InterjectionKind | typeof AUTO>(AUTO)
@@ -248,12 +251,12 @@ export function Composer({
   }
 
   return (
-    <div className="relative z-10 -mt-5 shrink-0 px-4 pt-5 pb-4 sm:px-6">
+    <div className="relative z-10 -mt-5 shrink-0 px-4 pt-5 pb-2.5 sm:px-6">
       <div
         aria-hidden
         className="from-background via-background/85 pointer-events-none absolute inset-x-0 top-0 bottom-0 -z-10 bg-linear-to-t via-65% to-transparent"
       />
-      <div className="mx-auto w-full max-w-3xl">
+      <div className="@container mx-auto w-full max-w-3xl">
         {showExamples ? (
           <StarterSuggestions
             visible={revealExamples}
@@ -324,23 +327,6 @@ export function Composer({
             </div>
 
             <div className="flex min-w-0 items-center gap-1">
-              <HarnessSwitcher
-                value={harness}
-                onChange={onHarnessChange}
-                team={team}
-                onTeamChange={onTeamChange}
-                disabled={disabled}
-              />
-              <ModelSwitcher
-                harness={harness}
-                team={team}
-                value={model}
-                onChange={onModelChange}
-                vendorChoices={vendorChoices}
-                onVendorChoiceChange={onVendorChoiceChange}
-                disabled={disabled}
-              />
-              {harness === 'shuttle' ? <ContextUsage runId={runId} modelId={model} /> : null}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -364,6 +350,30 @@ export function Composer({
           </div>
         </form>
         {error ? <p className="text-status-failed mt-2 text-xs">{error}</p> : null}
+        {/* One line at any width: the model name truncates before anything wraps. */}
+        {/* Inset so its first and last icons sit under the steer and send buttons. */}
+        <div className="mt-1.5 flex items-center justify-between gap-2 px-1.5">
+          <div className="flex shrink-0 items-center gap-0.5">{context}</div>
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-0.5">
+            <HarnessSwitcher
+              value={harness}
+              onChange={onHarnessChange}
+              team={team}
+              onTeamChange={onTeamChange}
+              disabled={disabled}
+            />
+            <ModelSwitcher
+              harness={harness}
+              team={team}
+              value={model}
+              onChange={onModelChange}
+              vendorChoices={vendorChoices}
+              onVendorChoiceChange={onVendorChoiceChange}
+              disabled={disabled}
+            />
+            {harness === 'shuttle' ? <ContextUsage runId={runId} modelId={model} /> : null}
+          </div>
+        </div>
       </div>
     </div>
   )

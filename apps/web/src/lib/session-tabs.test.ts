@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test'
 
 import {
   applyPendingOps,
-  defaultTabSet,
   neighborAfterClose,
   prunePendingOps,
   resolveActiveTabId,
@@ -44,17 +43,18 @@ function set(tabs: ArtifactTab[], order?: string[]): SessionTabSet {
 }
 
 describe('session-tabs', () => {
-  test('defaults to a single Events tab when projection is empty', () => {
-    expect(resolveTabSet(undefined).order).toEqual(['events'])
-    expect(resolveTabSet({ order: [], tabs: {} }).order).toEqual(['events'])
+  test('shows no tabs when nothing is open', () => {
+    expect(resolveTabSet(undefined).order).toEqual([])
+    expect(resolveTabSet({ order: [], tabs: {} }).order).toEqual([])
   })
 
-  test('keeps Events pinned when other tabs open without it', () => {
-    const resolved = resolveTabSet(set([files]))
+  test('leaves out Events tabs saved by older sessions', () => {
+    const resolved = resolveTabSet(set([events, files]))
 
-    expect(resolved.order).toEqual(['events', 'files'])
-    expect(resolved.tabs.events?.kind).toBe('events')
-    expect(resolveTabSet(set([events, files])).order).toEqual(['events', 'files'])
+    expect(resolved.order).toEqual(['files'])
+    expect(resolved.tabs.events).toBeUndefined()
+    expect(resolveTabSet(set([events])).order).toEqual([])
+    expect(resolveTabSet(set([files, browser])).order).toEqual(['files', 'browser'])
   })
 
   test('applies and prunes optimistic open/close/reorder/retarget', () => {
@@ -86,7 +86,7 @@ describe('session-tabs', () => {
     expect(neighborAfterClose(['events', 'files', 'browser'], 'files')).toBe('browser')
     expect(neighborAfterClose(['events', 'files', 'browser'], 'browser')).toBe('files')
     expect(neighborAfterClose(['events'], 'events')).toBeNull()
-    expect(resolveActiveTabId(defaultTabSet(), null)).toBe('events')
+    expect(resolveActiveTabId(resolveTabSet(undefined), null)).toBeNull()
   })
 
   test('titles browsers and file paths', () => {

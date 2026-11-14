@@ -79,6 +79,14 @@ const fallbackRole: AgentRole = {
   blurb: 'Looms thread.',
 }
 
+/** Agents that keep the session running rather than doing the work someone asked for. */
+const SYSTEM_DEFINITIONS = new Set(['intake', 'narrator', 'reflector'])
+
+/** Whether a thread is one of the session's own housekeeping agents. */
+export function isSystemAgent(definitionName: string | undefined): boolean {
+  return definitionName !== undefined && SYSTEM_DEFINITIONS.has(definitionName)
+}
+
 export function agentRole(definitionName: string | undefined): AgentRole {
   return (definitionName ? roles[definitionName] : undefined) ?? fallbackRole
 }

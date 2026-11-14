@@ -45,7 +45,7 @@ export function FileQuickOpen({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="top-[18%] max-w-xl translate-y-0 gap-0 overflow-hidden p-0">
+      <DialogContent instant className="top-[18%] max-w-xl translate-y-0 gap-0 overflow-hidden p-0">
         <DialogTitle className="sr-only">Go to file</DialogTitle>
         <DialogDescription className="sr-only">
           Type part of a file name, then use the arrow keys and Enter to open it.
