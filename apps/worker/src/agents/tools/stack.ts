@@ -38,6 +38,40 @@ export function describeStacks(status: StackStatus, published: SessionStacks) {
   }
 }
 
+/**
+ * Why `new_stack` must not run right now, or null when it is safe.
+ *
+ * Starting a stack seals the pending edits onto the current layer and resets the worktree to
+ * the base. When that layer has no PR, the edits vanish from the worktree with nothing pointing
+ * back at them, which reads as lost work.
+ */
+export function newStackBlocker(status: StackStatus, published: SessionStacks): string | null {
+  if (!status.pending) {
+    return null
+  }
+
+  const { currentStack: stack, currentLayer: layer } = status
+
+  const pull = published[stackKey(status.repo, stack)]?.layers.find(
+    (entry) => entry.layer === layer,
+  )?.pull
+
+  if (pull) {
+    return null
+  }
+
+  const files = status.layers.find((entry) => entry.layer === layer)?.files ?? []
+  const shown = files.slice(0, 5).join(', ')
+  const more = files.length > 5 ? `, and ${files.length - 5} more` : ''
+
+  return [
+    `Stack ${stack} layer ${layer} has unpublished edits and no PR yet (${shown}${more}).`,
+    'new_stack would move them out of the worktree, so nothing was changed.',
+    'Call propose_pull_request to publish them: the current layer is already a PR of its own, and the first PR of a session needs no stack_layer call.',
+    'Use new_stack after that, when you want a second, independent PR.',
+  ].join(' ')
+}
+
 export function createStackLayerTool(
   env: ShuttleEnv,
   runId: string,
@@ -47,9 +81,10 @@ export function createStackLayerTool(
     name: 'stack_layer',
     description: [
       'Manage PR stacks in the session worktree. A repo can hold several independent stacks; each layer of a stack becomes one PR based on the layer below it.',
+      'A session starts on stack 1 layer 1, so the first PR needs no call here.',
       '`status`: list every stack, its layers, and their PRs.',
       '`new`: add a layer on top of the current stack (a PR stacked on the current top).',
-      '`new_stack`: start an independent stack from the default branch. Its first layer is a standalone PR that does not include any other stack’s changes.',
+      '`new_stack`: start an independent stack from the default branch. Its first layer is a standalone PR that does not include any other stack’s changes. The worktree is reset to the default branch, so it is refused while the current layer has edits that are not in a PR yet.',
       '`checkout`: switch to `stack` + `layer` to edit it (seals pending edits and restacks upper layers).',
       'Never git branch, checkout, or rebase by hand.',
     ].join(' '),
@@ -105,6 +140,15 @@ export function createStackLayerTool(
         }
 
         case 'new_stack': {
+          const blocker = newStackBlocker(
+            await sandbox.stackStatus(runId, repo.name, repo.defaultBranch),
+            published,
+          )
+
+          if (blocker) {
+            return { error: blocker }
+          }
+
           const created = await sandbox.newStack(runId, repo.name, repo.defaultBranch)
 
           return asJson({
