@@ -29,6 +29,13 @@ function fold(events: readonly SessionEvent[]) {
   return events.reduce(sessionFeed.reduce, sessionFeed.initialState)
 }
 
+/** The feed in reading order: message ids for people, text for agents, kinds for the rest. */
+function order(feed: ReturnType<typeof fold>) {
+  return feed.items.map((item) =>
+    item.kind === 'user' ? item.messageId : item.kind === 'agent' ? item.text : item.kind,
+  )
+}
+
 describe('session feed', () => {
   test('opens with the goal from the root thread', () => {
     const feed = fold([event('runtime.thread.started', { input: { goal: 'Ship it' } })])
@@ -300,6 +307,92 @@ describe('session feed', () => {
     })
 
     expect(feed.publishedPulls).toEqual([])
+  })
+})
+
+describe('messages sent while an agent is mid-turn', () => {
+  const turnStarted = (turn: number) =>
+    event('runtime.effect.attempt.started', {
+      effectId: `thr_conductor:llm_turn_${turn}`,
+      attempt: 1,
+    })
+
+  const steer = (messageId: string, interrupt = false) =>
+    event(
+      'agent.steered',
+      { turn: 0, messageId, message: { role: 'user', content: messageId }, interrupt },
+      'thr_conductor',
+    )
+
+  const said = (messageId: string) => event('shuttle.user.said', { messageId, text: messageId })
+
+  // A turn is recorded in one go when it ends, after anything sent while it ran.
+  const turnRecorded = (turn: number, text: string) => [
+    event(
+      'shuttle.vendor.tool_started',
+      { turn, toolCall: { id: `call_${turn}`, name: 'bash', arguments: {} } },
+      'thr_conductor',
+    ),
+    event(
+      'shuttle.vendor.tool_finished',
+      { turn, toolCallId: `call_${turn}`, result: 'ok' },
+      'thr_conductor',
+    ),
+    event(
+      'agent.message',
+      { turn, message: { role: 'assistant', content: text } },
+      'thr_conductor',
+    ),
+    event('agent.turn.settled', { turn }, 'thr_conductor'),
+  ]
+
+  test('wait for the turn, then follow what it did', () => {
+    const running = fold([said('m1'), steer('m1'), turnStarted(1), said('m2'), steer('m2')])
+
+    expect(running.queued).toEqual({ m2: 'thr_conductor' })
+
+    const settled = [...turnRecorded(1, 'Server is up.')].reduce(sessionFeed.reduce, running)
+
+    expect(order(settled)).toEqual(['m1', 'tools', 'Server is up.', 'm2'])
+    expect(settled.queued).toEqual({})
+    expect(settled.openTurns).toEqual({})
+    // The tool card moved up a place, and its result still finds it.
+    expect(settled.toolIndex['call_1']).toBe(1)
+    expect(settled.items[1]).toMatchObject({ calls: [{ status: 'ok' }] })
+  })
+
+  test('a message to an agent between turns stays where it was sent', () => {
+    const feed = fold([
+      said('m1'),
+      steer('m1'),
+      turnStarted(1),
+      ...turnRecorded(1, 'Done.'),
+      said('m2'),
+      steer('m2'),
+      turnStarted(2),
+    ])
+
+    expect(feed.queued).toEqual({})
+    expect(order(feed)).toEqual(['m1', 'tools', 'Done.', 'm2'])
+  })
+
+  test('an interruption is read at once and does not wait', () => {
+    const feed = fold([turnStarted(1), said('m1'), steer('m1', true)])
+
+    expect(feed.queued).toEqual({})
+  })
+
+  test('a turn that never finishes lets its messages go when the agent is stopped', () => {
+    const feed = fold([
+      turnStarted(1),
+      said('m1'),
+      steer('m1'),
+      event('shuttle.user.said', { messageId: 'q1', text: 'are you there?' }),
+      event('runtime.thread.cancelled', {}, 'thr_conductor'),
+    ])
+
+    expect(feed.queued).toEqual({})
+    expect(order(feed)).toEqual(['q1', 'm1'])
   })
 })
 

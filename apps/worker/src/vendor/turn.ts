@@ -89,14 +89,20 @@ async function shortHash(text: string): Promise<string> {
     .join('')
 }
 
-function lastUserText(args: LlmCompleteArgs): string {
-  const last = args.messages.toReversed().find((message) => message.role === 'user')
+/**
+ * What the agent has not read yet: every message sent since its last reply. Messages that arrive
+ * while a turn runs wait for the next one, so a turn often has several.
+ */
+function unreadUserText(args: LlmCompleteArgs): string {
+  const lastReply = args.messages.findLastIndex((message) => message.role === 'assistant')
 
-  if (!last) {
-    return ''
-  }
-
-  return typeof last.content === 'string' ? last.content : JSON.stringify(last.content)
+  return args.messages
+    .slice(lastReply + 1)
+    .filter((message) => message.role === 'user')
+    .map((message) =>
+      typeof message.content === 'string' ? message.content : JSON.stringify(message.content),
+    )
+    .join('\n\n')
 }
 
 /** Shapes a vendor tool like one of Shuttle's own so the session view renders it the same way. */
@@ -210,7 +216,7 @@ export async function runVendorTurn(
       mode: 'turn',
       request: {
         harness,
-        prompt: lastUserText(args),
+        prompt: unreadUserText(args),
         cwd: deps.cwd,
         instructions: SANDBOX_INSTRUCTIONS,
         ...(deps.choice?.model ? { model: deps.choice.model } : {}),

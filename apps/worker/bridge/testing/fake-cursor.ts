@@ -5,7 +5,9 @@ import { join } from 'node:path'
 
 /**
  * A stand-in for the Cursor Agent CLI that prints just enough of its output for the bridge tests.
- * FAKE_CURSOR_MODE picks the behaviour: `turn` (default), `hang`, `unauthenticated`, `reject-login`.
+ * FAKE_CURSOR_MODE picks the behaviour: `turn` (default), `hang`, `unauthenticated`, `reject-login`,
+ * `echo-prompt` (replies with the prompt it was given), and `background-shell` (leaves a shell
+ * running, so it only finishes when told how long to wait for it).
  */
 
 const mode = process.env.FAKE_CURSOR_MODE ?? 'turn'
@@ -99,7 +101,28 @@ if (args[0] === 'login') {
     process.exit(1)
   }
 
-  if (mode === 'hang') {
+  if (mode === 'echo-prompt') {
+    print({ type: 'result', subtype: 'success', is_error: false, result: args.at(-1) })
+  } else if (mode === 'background-shell') {
+    print({
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'Server is up on 5173.' }] },
+      session_id: session,
+    })
+
+    const timeout = args.includes('--background-shell-timeout')
+      ? Number(args[args.indexOf('--background-shell-timeout') + 1])
+      : undefined
+
+    // The real CLI waits for its background shells before it reports a result.
+    if (timeout === undefined) {
+      process.on('SIGINT', () => process.exit(130))
+      setInterval(() => {}, 1_000)
+    } else {
+      print({ type: 'system', subtype: 'background_shell_timeout', aborted_count: 1 })
+      print({ type: 'result', subtype: 'success', is_error: false, result: 'Server is up.' })
+    }
+  } else if (mode === 'hang') {
     process.on('SIGINT', () => process.exit(130))
     setInterval(() => {}, 1_000)
   } else {

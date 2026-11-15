@@ -185,6 +185,13 @@ export interface SessionFeed {
   readonly questionIndex: Readonly<Record<string, number>>
   /** Holds a turn's thought until its message, tool call, or approval arrives. */
   readonly pendingThoughts: Readonly<Record<string, ThoughtInfo>>
+  /** Threads with a model turn in progress. */
+  readonly openTurns: Readonly<Record<string, true>>
+  /**
+   * Messages, by id, that reached an agent in the middle of a turn, with the thread they wait
+   * for. The agent reads them when that turn ends, so that is where they belong in the feed.
+   */
+  readonly queued: Readonly<Record<string, string>>
   /** PRs this session opened (from shuttle.pr.published). */
   readonly publishedPulls: readonly PublishedPull[]
   /** Inline review comments drafted during a review session. */
@@ -251,6 +258,8 @@ const initialFeed: SessionFeed = {
   toolIndex: {},
   questionIndex: {},
   pendingThoughts: {},
+  openTurns: {},
+  queued: {},
   vendorAgents: {},
 }
 
@@ -355,6 +364,57 @@ function flushPendingThought(feed: SessionFeed, threadId: string | null | undefi
     text: pending.text,
     durationMs: pending.durationMs,
   })
+}
+
+/** Looms runs each model turn of a thread as the effect `<threadId>:llm_turn_<n>`. */
+const MODEL_TURN_EFFECT = /^(.+):llm_turn_\d+$/
+
+function mapValues<T, U>(
+  record: Readonly<Record<string, T>>,
+  map: (value: T) => U,
+): Record<string, U> {
+  return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, map(value)]))
+}
+
+/**
+ * Ends a thread's turn. A turn is recorded when it ends, so messages sent while it ran would sit
+ * above what it did. The agent reads them next, so they move below it.
+ */
+function endTurn(feed: SessionFeed, threadId: string | null | undefined): SessionFeed {
+  if (!threadId || !feed.openTurns[threadId]) {
+    return feed
+  }
+
+  const ended: SessionFeed = { ...feed, openTurns: withoutKey(feed.openTurns, threadId) }
+
+  const waiting = new Set(
+    Object.entries(feed.queued).flatMap(([messageId, waitsFor]) =>
+      waitsFor === threadId ? [messageId] : [],
+    ),
+  )
+
+  if (waiting.size === 0) {
+    return ended
+  }
+
+  const isWaiting = (item: FeedItem) => item.kind === 'user' && waiting.has(item.messageId)
+  const items = [...feed.items.filter((item) => !isWaiting(item)), ...feed.items.filter(isWaiting)]
+  const position = new Map(items.map((item, index) => [item, index]))
+
+  const moved = (index: number) => {
+    const item = feed.items[index]
+    return (item && position.get(item)) ?? index
+  }
+
+  return {
+    ...ended,
+    items,
+    queued: Object.fromEntries(
+      Object.entries(feed.queued).filter(([messageId]) => !waiting.has(messageId)),
+    ),
+    toolIndex: mapValues(feed.toolIndex, moved),
+    questionIndex: mapValues(feed.questionIndex, moved),
+  }
 }
 
 function onToolCall(feed: SessionFeed, event: SessionEvent): SessionFeed {
@@ -642,13 +702,26 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
         interrupt: payload.interrupt === true,
       }
 
+      const waits = !delivery.interrupt && feed.openTurns[event.threadId] === true
+
       return {
         ...feed,
         deliveries: {
           ...feed.deliveries,
           [messageId]: [...(feed.deliveries[messageId] ?? []), delivery],
         },
+        ...(waits && feed.queued[messageId] === undefined
+          ? { queued: { ...feed.queued, [messageId]: event.threadId } }
+          : {}),
       }
+    }
+
+    case 'runtime.effect.attempt.started': {
+      const threadId = MODEL_TURN_EFFECT.exec(jsonText(payload.effectId) ?? '')?.[1]
+
+      return threadId && !feed.openTurns[threadId]
+        ? { ...feed, openTurns: { ...feed.openTurns, [threadId]: true } }
+        : feed
     }
 
     case 'shuttle.turn.thought': {
@@ -950,29 +1023,35 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
     case 'agent.turn.settled':
     case 'runtime.thread.completed':
     case 'runtime.thread.cancelled':
-      return flushPendingThought(feed, event.threadId)
+      return endTurn(flushPendingThought(feed, event.threadId), event.threadId)
 
     case 'runtime.thread.failed':
-      return appendItem(flushPendingThought(feed, event.threadId), {
-        kind: 'notice',
-        id: event.id,
-        seq: event.seq,
-        ts: event.ts,
-        tone: 'error',
-        text: jsonText(payload.error) ?? 'Thread failed',
-        threadId: event.threadId ?? undefined,
-      })
+      return endTurn(
+        appendItem(flushPendingThought(feed, event.threadId), {
+          kind: 'notice',
+          id: event.id,
+          seq: event.seq,
+          ts: event.ts,
+          tone: 'error',
+          text: jsonText(payload.error) ?? 'Thread failed',
+          threadId: event.threadId ?? undefined,
+        }),
+        event.threadId,
+      )
 
     case 'agent.turn.stopped':
-      return appendItem(flushPendingThought(feed, event.threadId), {
-        kind: 'notice',
-        id: event.id,
-        seq: event.seq,
-        ts: event.ts,
-        tone: 'info',
-        text: 'Stopped',
-        threadId: event.threadId ?? undefined,
-      })
+      return endTurn(
+        appendItem(flushPendingThought(feed, event.threadId), {
+          kind: 'notice',
+          id: event.id,
+          seq: event.seq,
+          ts: event.ts,
+          tone: 'info',
+          text: 'Stopped',
+          threadId: event.threadId ?? undefined,
+        }),
+        event.threadId,
+      )
 
     default:
       return feed

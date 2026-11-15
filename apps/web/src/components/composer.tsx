@@ -130,11 +130,12 @@ export function Composer({
   const [connections, setConnections] = useState<readonly Connection[] | null>(null)
   const [vendorChoices, setVendorChoices] = useState<VendorModelChoices>({})
   const [mention, setMention] = useState<Mention | null>(null)
-  const [sending, setSending] = useState(false)
   const [inputFocused, setInputFocused] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const syncedRunId = useRef<string | null>(null)
+  /** Messages go out one at a time, so they arrive in the order they were written. */
+  const outbox = useRef<Promise<void>>(Promise.resolve())
 
   useEffect(() => {
     if (syncedRunId.current === runId) {
@@ -179,38 +180,41 @@ export function Composer({
     target === AUTO ? undefined : targets.find((identity) => identity.threadId === target)
 
   const effectiveTarget = selectedTarget?.threadId ?? AUTO
-  const canSend = text.trim().length > 0 && !sending && !disabled
   const revealExamples = showExamples && inputFocused && text.length === 0 && !disabled
 
+  // Agents never block the composer: a message can always be written and sent, even while the
+  // one before it is still on its way.
   function submit(event?: FormEvent) {
     event?.preventDefault()
 
-    if (!canSend) {
+    if (disabled) {
       return
     }
 
     const typed = text.trim()
+
+    if (!typed) {
+      inputRef.current?.focus()
+      return
+    }
+
     const message = activeMention ? `@${activeMention} ${typed}` : typed
     // A message addressed to an agent is work for it, so it must not be answered as a question.
     const addressed = activeMention !== null || (hybrid && ADDRESSED.test(typed))
-    setSending(true)
+    const forceKind = addressed ? 'task' : kind === AUTO ? undefined : kind
+    const targetThread = effectiveTarget === AUTO ? undefined : effectiveTarget
     setError(null)
-    // Clear optimistically so rapid interjections feel instant; restore on failure.
     setText('')
+    inputRef.current?.focus()
 
-    void say(
-      runId,
-      message,
-      addressed ? 'task' : kind === AUTO ? undefined : kind,
-      effectiveTarget === AUTO ? undefined : effectiveTarget,
-    )
-      .catch((cause: unknown) => {
-        setText(typed)
-        setError(errorMessage(cause))
+    outbox.current = outbox.current
+      .then(async () => {
+        await say(runId, message, forceKind, targetThread)
       })
-      .finally(() => {
-        setSending(false)
-        inputRef.current?.focus()
+      .catch((cause: unknown) => {
+        // Hand the message back unless something new has been written since.
+        setText((current) => (current.trim() ? current : typed))
+        setError(errorMessage(cause))
       })
   }
 
@@ -361,9 +365,9 @@ export function Composer({
                 <TooltipTrigger asChild>
                   <Button
                     type="submit"
-                    variant={canSend ? 'brand' : 'secondary'}
+                    variant={disabled ? 'secondary' : 'brand'}
                     size="icon-sm"
-                    disabled={!canSend}
+                    disabled={disabled}
                     aria-label="Send message"
                     className="rounded-lg"
                   >

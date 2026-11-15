@@ -86,6 +86,31 @@ describe('cursor turn', () => {
     expect(events.at(-1)).toMatchObject({ type: 'turn_done', status: 'completed' })
   })
 
+  test('opens a new conversation with the standing instructions', async () => {
+    const events = await turn('echo-prompt', { instructions: 'Detach dev servers.' })
+
+    expect(events.at(-1)).toEqual({
+      type: 'turn_done',
+      status: 'completed',
+      text: '<shuttle_instructions>\nDetach dev servers.\n</shuttle_instructions>\n\nFix it',
+    })
+  })
+
+  test('a resumed conversation already has its instructions', async () => {
+    const events = await turn('echo-prompt', {
+      instructions: 'Detach dev servers.',
+      vendorThreadId: 'sess_old',
+    })
+
+    expect(events.at(-1)).toEqual({ type: 'turn_done', status: 'completed', text: 'Fix it' })
+  })
+
+  test('a shell left running in the background does not keep the turn open', async () => {
+    const events = await turn('background-shell')
+
+    expect(events.at(-1)).toEqual({ type: 'turn_done', status: 'completed', text: 'Server is up.' })
+  })
+
   test('reports a signed-out agent as a failed turn with its message', async () => {
     expect((await turn('unauthenticated')).at(-1)).toEqual({
       type: 'turn_done',

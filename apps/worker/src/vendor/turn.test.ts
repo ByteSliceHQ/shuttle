@@ -203,6 +203,28 @@ describe('runVendorTurn', () => {
     ])
   })
 
+  test('hands the agent every message sent while its last turn ran', async () => {
+    const { sandbox, started } = fakeSandbox([
+      [{ type: 'turn_done', status: 'completed', text: 'Done.' }],
+    ])
+
+    await runVendorTurn(
+      deps(sandbox),
+      args({
+        messages: [
+          { role: 'user', content: 'first task' },
+          { role: 'assistant', content: 'ok' },
+          { role: 'user', content: 'Rewrite it in TypeScript' },
+          { role: 'user', content: 'and add Vite' },
+        ],
+      }),
+    )
+
+    expect(started[0]?.request).toMatchObject({
+      prompt: 'Rewrite it in TypeScript\n\nand add Vite',
+    })
+  })
+
   test('a failed tool keeps its output and says how it ended, with paths inside the worktree', async () => {
     const controller = new AbortController()
     const seen: string[] = []

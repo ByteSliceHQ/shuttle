@@ -31,6 +31,25 @@ function cursorEnv(): NodeJS.ProcessEnv {
   return { ...process.env, NO_OPEN_BROWSER: '1' }
 }
 
+/**
+ * Seconds Cursor waits, once it has finished, for shells it left running in the background.
+ * Without a limit print mode never exits while a dev server it started is up, so the turn never
+ * ends and every message sent after it waits forever.
+ */
+export const CURSOR_BACKGROUND_SHELL_TIMEOUT_SECONDS = 5
+
+/**
+ * Cursor's print mode has no system prompt of its own, so standing instructions open the first
+ * message of a conversation. A resumed conversation already has them.
+ */
+function cursorPrompt(request: BridgeTurnRequest, resume: string | undefined): string {
+  if (resume || !request.instructions) {
+    return request.prompt
+  }
+
+  return `<shuttle_instructions>\n${request.instructions}\n</shuttle_instructions>\n\n${request.prompt}`
+}
+
 interface ContentBlock {
   readonly type?: string
   readonly text?: string
@@ -196,10 +215,12 @@ function runAttempt(
     '--output-format',
     'stream-json',
     '--stream-partial-output',
+    '--background-shell-timeout',
+    String(CURSOR_BACKGROUND_SHELL_TIMEOUT_SECONDS),
     ...(resume ? ['--resume', resume] : []),
     ...(request.model ? ['--model', request.model] : []),
     ...(request.cwd ? ['--workspace', request.cwd] : []),
-    request.prompt,
+    cursorPrompt(request, resume),
   ]
 
   return new Promise<Attempt>((resolve) => {
@@ -256,6 +277,10 @@ function runAttempt(
               vendorThreadId: line.session_id,
               ...(line.model ? { model: line.model } : {}),
             })
+          }
+
+          if (line.subtype === 'background_shell_timeout') {
+            process.stderr.write(`cursor stopped shells still running after its turn: ${raw}\n`)
           }
 
           break

@@ -302,12 +302,23 @@ export function Conversation({
         ? feed.items.filter((item) => !(item.kind === 'agent' && item.replyTo !== undefined))
         : feed.items
 
+    // A message waiting for an agent to finish its turn sits below that turn's live work.
+    const waiting = (item: FeedItem) => item.kind === 'user' && item.messageId in feed.queued
+
     return {
-      rows: [...projectTimeline(visibleItems, parents, openThreadId), ...liveRows],
+      rows: [
+        ...projectTimeline(
+          visibleItems.filter((item) => !waiting(item)),
+          parents,
+          openThreadId,
+        ),
+        ...liveRows,
+        ...(openThreadId === undefined ? visibleItems.filter(waiting) : []),
+      ],
       liveByToolCardId: attached,
       inlineNarratorByMessageId: narratorRepliesByMessageId,
     }
-  }, [feed.items, feed.narrators, streaming, parents, openThreadId])
+  }, [feed.items, feed.narrators, feed.queued, streaming, parents, openThreadId])
 
   const repeats = useMemo(() => repeatedMessages(feed.items), [feed.items])
 
@@ -798,6 +809,9 @@ function RouteChip({
       {targets.length > 0 ? (
         targets.map((delivery) => {
           const identity = identities.get(delivery.threadId)
+          const label = identity?.label ?? 'agent'
+          const waiting = context.feed.queued[messageId] === delivery.threadId
+
           return (
             <button
               key={delivery.threadId}
@@ -805,13 +819,19 @@ function RouteChip({
               onClick={() => onInspect(delivery.threadId)}
               className="text-muted-foreground hover:text-foreground hover:bg-accent inline-flex h-6 items-center gap-1 rounded-full border px-2 transition-colors duration-100"
               title={
-                delivery.interrupt ? 'Interrupted the current turn' : 'Queued for the next step'
+                delivery.interrupt
+                  ? 'Interrupted the current turn'
+                  : waiting
+                    ? `${label} reads this when it finishes its current turn`
+                    : 'Queued for the next step'
               }
             >
               <ArrowRight className="size-3" />
-              {identity?.label ?? 'agent'}
+              {label}
               {delivery.interrupt ? (
                 <span className="text-route-correction font-medium">interrupt</span>
+              ) : waiting ? (
+                <span className="opacity-70">· after this turn</span>
               ) : null}
             </button>
           )
