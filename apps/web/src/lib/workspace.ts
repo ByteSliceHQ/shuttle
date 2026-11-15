@@ -67,6 +67,7 @@ export type ArtifactTabKind =
   | 'terminal'
   | 'browser'
   | 'review'
+  | 'media'
 
 export interface ArtifactTab {
   readonly tabId: string

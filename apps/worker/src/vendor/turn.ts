@@ -1,10 +1,12 @@
 import type { AgentTurnResult, LlmCompleteArgs } from '@swirls/looms/agent'
 
 import type { BridgeEvent, BridgeToolKind } from '../../bridge/protocol'
+import type { ShareResult } from '../assets/sandbox'
 import type { CredentialPayload } from '../credentials/store'
 import type { SessionSandboxStub } from '../env'
 import type { VendorHarnessId } from '../harness'
 import { getStepObserver, getThinkingObserver, type VendorStep } from '../llm'
+import { SHARE_FILE_TOOL } from '../tools/share-file'
 import { vendorHarnessInfo } from './harnesses'
 import type { VendorModelChoice } from './models'
 
@@ -46,6 +48,10 @@ export interface VendorTurnDeps {
    * says whether the person has connected the agent.
    */
   readonly signInStaysInSandbox?: boolean
+  /** Added to the agent's standing instructions: how to show a file to the people in the session. */
+  readonly shareInstructions?: string
+  /** Shares the files the agent left to be shown, once its turn has ended. */
+  readonly collectShared?: () => Promise<readonly { path: string; result: ShareResult }[]>
   readonly sleep?: (ms: number) => Promise<void>
   readonly newRunKey?: () => string
 }
@@ -218,7 +224,9 @@ export async function runVendorTurn(
         harness,
         prompt: unreadUserText(args),
         cwd: deps.cwd,
-        instructions: SANDBOX_INSTRUCTIONS,
+        instructions: deps.shareInstructions
+          ? `${SANDBOX_INSTRUCTIONS}\n${deps.shareInstructions}`
+          : SANDBOX_INSTRUCTIONS,
         ...(deps.choice?.model ? { model: deps.choice.model } : {}),
         ...(deps.choice?.effort ? { effort: deps.choice.effort } : {}),
         ...(conversation.vendorThreadId ? { vendorThreadId: conversation.vendorThreadId } : {}),
@@ -422,6 +430,27 @@ export async function runVendorTurn(
   }
 
   await announce()
+
+  // Shown as a share_file call, so the session renders a vendor agent's files like a worker's.
+  try {
+    for (const { path, result } of (await deps.collectShared?.()) ?? []) {
+      const id = `share_${crypto.randomUUID()}`
+
+      await step({
+        type: 'tool_started',
+        toolCall: { id, name: SHARE_FILE_TOOL, arguments: { path } },
+      })
+
+      await step({
+        type: 'tool_finished',
+        toolCallId: id,
+        result: JSON.stringify(result.ok ? { ok: true, path, asset: result.asset } : result),
+        ...(result.ok ? {} : { error: result.error }),
+      })
+    }
+  } catch {
+    // Showing files is best effort; the turn's result still stands.
+  }
 
   const text = heldMessage?.trim() || done?.text.trim() || ''
 

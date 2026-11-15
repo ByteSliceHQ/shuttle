@@ -1,8 +1,8 @@
 import { cancel, deterministicThreadId, emit, spawn, type RuntimeEffect } from '@swirls/looms/core'
 
-import { attributed } from './attribution'
+import { attributedWithFiles } from './attribution'
 import { liveConductorThreadId } from './conductor'
-import { shuttleModule } from './scope'
+import { shuttleModule, type AttachmentRef } from './scope'
 import type { PendingRoute, SessionState } from './thread'
 
 export interface RouteResult {
@@ -21,13 +21,20 @@ function steerEvent(
   interrupt: boolean,
   messageId?: string,
   sponsorId?: string,
+  attachments?: readonly AttachmentRef[],
 ) {
   return {
     type: 'agent.steered' as const,
     payload: {
       turn: 0,
       ...(messageId ? { messageId } : {}),
-      message: { role: 'user' as const, content, ...(sponsorId ? { name: sponsorId } : {}) },
+      message: {
+        role: 'user' as const,
+        content,
+        ...(sponsorId ? { name: sponsorId } : {}),
+        // Sent to the model itself where it can read them. The text already says where each is.
+        ...(attachments?.length ? { attachments: [...attachments] } : {}),
+      },
       interrupt,
     },
     threadId,
@@ -42,7 +49,8 @@ export function routeForEffects(
   runId: string,
 ): RouteResult {
   const conductorThreadId = liveConductorThreadId(state.conductor)
-  const text = attributed(route, state.speakerIds)
+  const text = attributedWithFiles(route, state.speakerIds, runId)
+  const { attachments } = route
 
   const target =
     route.targetThreadId ??
@@ -72,6 +80,7 @@ export function routeForEffects(
             sessionRunId: runId,
             brief: state.briefText,
             workers: state.workerThreadIds,
+            ...(attachments?.length ? { attachments: [...attachments] } : {}),
           },
         }),
       )
@@ -108,7 +117,14 @@ export function routeForEffects(
       for (const threadId of recipients) {
         effects.push(
           emit(
-            steerEvent(threadId, `Brief v${nextVersion}: ${text}`, false, route.messageId),
+            steerEvent(
+              threadId,
+              `Brief v${nextVersion}: ${text}`,
+              false,
+              route.messageId,
+              undefined,
+              attachments,
+            ),
             `steer_brief_${route.messageId}_${threadId}`,
           ),
         )
@@ -124,7 +140,7 @@ export function routeForEffects(
 
       effects.push(
         emit(
-          steerEvent(target, text, true, route.messageId, route.author?.id),
+          steerEvent(target, text, true, route.messageId, route.author?.id, attachments),
           `steer_correction_${route.messageId}`,
         ),
       )
@@ -139,7 +155,14 @@ export function routeForEffects(
 
       effects.push(
         emit(
-          steerEvent(conductorThreadId, text, false, route.messageId, route.author?.id),
+          steerEvent(
+            conductorThreadId,
+            text,
+            false,
+            route.messageId,
+            route.author?.id,
+            attachments,
+          ),
           `steer_task_${route.messageId}`,
         ),
       )

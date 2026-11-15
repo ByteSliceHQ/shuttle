@@ -406,6 +406,22 @@ export class ContainerWorkspace implements Workspace {
     await host.writeFile(resolved, content)
   }
 
+  async readBytes(path: string, cwd?: string): Promise<Uint8Array> {
+    return (await this.host()).readBytes(resolvePath(path, cwd))
+  }
+
+  async writeBytes(path: string, content: Uint8Array, cwd?: string): Promise<void> {
+    const host = await this.host()
+    const resolved = resolvePath(path, cwd)
+    const parent = parentDirectory(resolved)
+
+    if (parent) {
+      await host.mkdir(parent)
+    }
+
+    await host.writeBytes(resolved, content)
+  }
+
   async editFile(path: string, oldText: string, newText: string, cwd?: string): Promise<number> {
     const host = await this.host()
     const resolved = resolvePath(path, cwd)

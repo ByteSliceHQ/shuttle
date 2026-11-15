@@ -63,6 +63,15 @@
     //   "database_id": "<id>",
     // },
   ],
+  // Media people attach to messages and media agents make. Local dev keeps the objects on disk
+  // under `.wrangler`; add `"remote": true` to read and write the real bucket instead. Create
+  // the bucket with `wrangler r2 bucket create shuttle-local`.
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "shuttle-local",
+    },
+  ],
   // For real Linux sandboxes (Docker required for `wrangler dev`).
   // Enables Terminal (PTY) and Browser (getTcpPort) artifact tabs.
   // durable_object policy uses a named `images` map; start with ctx.container.images.base.

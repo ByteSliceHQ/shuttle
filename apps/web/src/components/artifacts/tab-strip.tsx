@@ -3,6 +3,7 @@ import {
   Files,
   GitCompareArrows,
   Globe,
+  Images,
   ListTree,
   Plus,
   SquareTerminal,
@@ -29,6 +30,7 @@ const KIND_ICON: Record<ArtifactTabKind, ReactNode> = {
   terminal: <SquareTerminal />,
   browser: <Globe />,
   review: <GitCompareArrows />,
+  media: <Images />,
 }
 
 export function TabStrip({
@@ -158,6 +160,7 @@ export function TabStrip({
           />
           <LauncherItem kind="browser" label="Browser" icon={<Globe />} onOpen={onOpen} />
           <LauncherItem kind="review" label="Review" icon={<GitCompareArrows />} onOpen={onOpen} />
+          <LauncherItem kind="media" label="Media" icon={<Images />} onOpen={onOpen} />
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { defineTool } from '@swirls/looms/agent'
+import type { JsonValue } from '@swirls/looms/core'
 
 import {
   LSP_CLI_PATH,
@@ -8,6 +9,7 @@ import {
   toolDiagnostics,
   type ToolDiagnostics,
 } from '../../bridge/lsp/protocol'
+import { shareSandboxFile } from '../assets/sandbox'
 import type { ShuttleEnv } from '../env'
 import { sandboxStub } from '../env'
 import { shellQuote } from '../sandbox/exec-argv'
@@ -21,6 +23,7 @@ import {
 import type { SandboxBinding } from '../session/bind-sandbox'
 import { readSandboxBinding, sandboxNameForSession } from '../session/bind-sandbox'
 import { prepareSessionSandbox } from '../session/handoff'
+import { SHARE_FILE_TOOL } from './share-file'
 
 /** Longest a tool waits on `shuttle-lsp`: its own wait, plus starting the daemon and a server. */
 const DIAGNOSTICS_TIMEOUT_MS = LSP_DEFAULT_WAIT_MS + 7000
@@ -299,7 +302,42 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
     },
   })
 
-  return { readFile, writeFile, editFile, grep, bash, gitDiff }
+  const shareFile = defineTool({
+    name: SHARE_FILE_TOOL,
+    description:
+      "Show a file from the sandbox to the people in the session: an image, a video, an audio clip, a PDF or any other file up to 50 MB. It appears in the conversation and stays in the session's media. Use it for things worth looking at, such as a screenshot, a chart or a recording, not for source files.",
+    input: z.object({
+      path: z.string().describe('Path of the file in the sandbox'),
+      name: z.string().optional().describe('File name to show, when the name on disk is unhelpful'),
+    }),
+    handler: async ({ path, name }, ctx) => {
+      const { cwd } = await prepare()
+      const binding = await resolveBinding()
+
+      const result = await withAbort(
+        ctx.signal,
+        () =>
+          shareSandboxFile({
+            bucket: env.ASSETS,
+            sandbox: sandboxStub(env, binding.sandboxName),
+            runId,
+            path,
+            cwd,
+            ...(name ? { name } : {}),
+            sharedBy: ctx.threadId,
+          }),
+        onAbort,
+      )
+
+      const shared: JsonValue = result.ok
+        ? { ok: true, path, asset: { ...result.asset } }
+        : { ok: false, path, error: result.error }
+
+      return shared
+    },
+  })
+
+  return { readFile, writeFile, editFile, grep, bash, gitDiff, shareFile }
 }
 
 export function createReadOnlySandboxTools(

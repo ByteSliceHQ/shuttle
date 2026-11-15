@@ -3,6 +3,7 @@ import type { LiveFoldDefinition } from '@swirls/looms/react'
 
 import type { SessionEvent } from './event-catalog'
 import { jsonFields, jsonNumber, jsonText } from './json'
+import { mediaAssetsOf, sharedAssetOf, type MediaAsset, type SessionMedia } from './media'
 
 export const interjectionKinds = [
   'question',
@@ -67,6 +68,17 @@ export type FeedItem =
       readonly forced?: InterjectionKind
       /** Who sent it. Absent on the goal and on messages from before people signed in. */
       readonly author?: MessageAuthor
+      /** Files sent with the message. */
+      readonly attachments?: readonly MediaAsset[]
+    }
+  | {
+      /** Files an agent shared for the people in the session to see. */
+      readonly kind: 'media'
+      readonly id: string
+      readonly seq: number
+      readonly ts: number
+      readonly threadId: string
+      readonly assets: readonly MediaAsset[]
     }
   | {
       readonly kind: 'agent'
@@ -192,6 +204,8 @@ export interface SessionFeed {
    * for. The agent reads them when that turn ends, so that is where they belong in the feed.
    */
   readonly queued: Readonly<Record<string, string>>
+  /** Every file in the session, oldest first: those people attached and those agents shared. */
+  readonly media: readonly SessionMedia[]
   /** PRs this session opened (from shuttle.pr.published). */
   readonly publishedPulls: readonly PublishedPull[]
   /** Inline review comments drafted during a review session. */
@@ -244,6 +258,7 @@ export interface PlaybookLessonRef {
 }
 
 const initialFeed: SessionFeed = {
+  media: [],
   publishedPulls: [],
   draftReviewComments: [],
   items: [],
@@ -514,7 +529,60 @@ function onToolResult(feed: SessionFeed, event: SessionEvent): SessionFeed {
     ),
   }
 
-  return { ...feed, items }
+  const call = group.calls.find((candidate) => candidate.toolCallId === toolCallId)
+
+  const shared =
+    call?.name === SHARE_FILE_TOOL && !error ? sharedAssetOf(payload.result) : undefined
+
+  return shared
+    ? withSharedMedia({ ...feed, items }, event, group.threadId, shared)
+    : { ...feed, items }
+}
+
+/** The tool an agent calls to show a file. Its result carries the file. */
+const SHARE_FILE_TOOL = 'share_file'
+
+/** Shows a file an agent shared. Files shared one after another by one agent share a row. */
+function withSharedMedia(
+  feed: SessionFeed,
+  event: SessionEvent,
+  threadId: string,
+  asset: MediaAsset,
+): SessionFeed {
+  const media = [
+    ...feed.media,
+    { asset, source: 'agent' as const, seq: event.seq, ts: event.ts, threadId },
+  ]
+
+  // Each share is a tool call of its own, so the row for the previous file sits just behind the
+  // calls that shared the later ones.
+  const isShareCalls = (item: FeedItem) =>
+    item.kind === 'tools' &&
+    item.threadId === threadId &&
+    item.calls.every((call) => call.name === SHARE_FILE_TOOL)
+
+  const index = feed.items.findLastIndex((item) => !isShareCalls(item))
+  const previous = feed.items[index]
+
+  if (previous?.kind === 'media' && previous.threadId === threadId) {
+    const items = [...feed.items]
+
+    items[index] = { ...previous, assets: [...previous.assets, asset] }
+
+    return { ...feed, media, items }
+  }
+
+  return {
+    ...appendItem(feed, {
+      kind: 'media',
+      id: event.id,
+      seq: event.seq,
+      ts: event.ts,
+      threadId,
+      assets: [asset],
+    }),
+    media,
+  }
 }
 
 function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
@@ -549,13 +617,16 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
 
     case 'shuttle.user.said': {
       const messageId = jsonText(payload.messageId)
-      const text = jsonText(payload.text)
+      const text = jsonText(payload.text) ?? ''
+      const attachments = mediaAssetsOf(payload.attachments)
 
-      if (!messageId || !text) {
+      // A message may be files alone.
+      if (!messageId || (!text && attachments.length === 0)) {
         return feed
       }
 
       const forced = jsonText(payload.forceKind)
+      const author = messageAuthor(payload.author)
 
       return {
         ...appendItem(feed, {
@@ -567,9 +638,20 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
           text,
           goal: false,
           forced: isInterjectionKind(forced) ? forced : undefined,
-          ...messageAuthor(payload.author),
+          ...author,
+          ...(attachments.length > 0 ? { attachments } : {}),
         }),
         messageText: { ...feed.messageText, [messageId]: text },
+        media: [
+          ...feed.media,
+          ...attachments.map((asset) => ({
+            asset,
+            source: 'upload' as const,
+            seq: event.seq,
+            ts: event.ts,
+            ...(author.author ? { authorName: author.author.name } : {}),
+          })),
+        ],
       }
     }
 

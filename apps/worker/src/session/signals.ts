@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
 
-import { MessageAuthorSchema, shuttleModule } from './scope'
+import { AttachmentRefSchema, MessageAuthorSchema, shuttleModule } from './scope'
 
 const InterjectionKindSchema = Schema.Union([
   Schema.Literal('question'),
@@ -19,6 +19,7 @@ export const say = shuttleModule.signal({
     forceKind: Schema.optional(InterjectionKindSchema),
     targetThreadId: Schema.optional(Schema.String),
     author: Schema.optional(MessageAuthorSchema),
+    attachments: Schema.optional(Schema.Array(AttachmentRefSchema)),
   }),
   build: (input) =>
     shuttleModule.input('user.said', input, {

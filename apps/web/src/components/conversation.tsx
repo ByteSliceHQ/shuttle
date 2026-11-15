@@ -60,6 +60,7 @@ import type { ThreadNode } from '@swirls/looms/core'
 
 import { FollowList } from './follow-list'
 import { Markdown } from './markdown'
+import { MediaStrip } from './media'
 import { PullPublishCard } from './pull-publish-card'
 import { Button } from './ui/button'
 import {
@@ -87,7 +88,7 @@ type Row =
 
 /** Shows something in the artifacts pane, such as the workspace or a preview by port. */
 export type OpenArtifact = (
-  kind: 'files' | 'browser' | 'terminal' | 'review',
+  kind: 'files' | 'browser' | 'terminal' | 'review' | 'media',
   target?: string,
 ) => void
 
@@ -168,6 +169,7 @@ function rowSpeakerThreadId(row: Row | undefined): string | undefined {
     case 'thought':
     case 'tools':
     case 'question':
+    case 'media':
     case 'stream':
       return row.threadId
     case 'user':
@@ -478,6 +480,15 @@ const RowView = memo(function RowView({
       return <QuestionCard className={className} item={row} context={context} />
     case 'notice':
       return <Notice className={className} item={row} context={context} />
+    case 'media':
+      return (
+        <SharedMedia
+          className={className}
+          item={row}
+          showIdentity={previousThreadId !== row.threadId}
+          context={context}
+        />
+      )
     case 'delegation':
       return <DelegationCard className={className} row={row} context={context} />
     case 'stream':
@@ -540,16 +551,26 @@ function UserMessage({
           </span>
           <span className="message-time tabular-nums">{clockTime(item.ts)}</span>
         </div>
-        <div
-          className={cn(
-            'max-w-[85%] rounded-2xl rounded-tr-md px-3.5 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap',
-            item.goal
-              ? 'bg-brand/12 text-foreground ring-brand/25 ring-1 ring-inset'
-              : 'bg-secondary text-secondary-foreground',
-          )}
-        >
-          {item.text}
-        </div>
+        {item.text ? (
+          <div
+            className={cn(
+              'max-w-[85%] rounded-2xl rounded-tr-md px-3.5 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap',
+              item.goal
+                ? 'bg-brand/12 text-foreground ring-brand/25 ring-1 ring-inset'
+                : 'bg-secondary text-secondary-foreground',
+            )}
+          >
+            {item.text}
+          </div>
+        ) : null}
+        {item.attachments ? (
+          <MediaStrip
+            runId={context.runId}
+            assets={item.attachments}
+            align="end"
+            className="max-w-[85%]"
+          />
+        ) : null}
         {item.goal ? null : (
           <RouteChip
             runId={context.runId}
@@ -1128,6 +1149,53 @@ function AgentMessage({
       context={context}
       onInspect={context.onInspect}
     />
+  )
+}
+
+/** Files an agent shared, shown in the conversation under the agent's name. */
+function SharedMedia({
+  item,
+  showIdentity,
+  context,
+  className,
+}: {
+  item: Extract<FeedItem, { kind: 'media' }>
+  showIdentity: boolean
+  context: ConversationContext
+  className?: string
+}) {
+  const identity = context.identities.get(item.threadId)
+  const count = item.assets.length
+
+  return (
+    <div className={cn('flex flex-col gap-1.5 pl-10', className)}>
+      <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[11.5px]">
+        {showIdentity ? (
+          <button
+            type="button"
+            onClick={() => context.onInspect(item.threadId, item.seq)}
+            className={cn(
+              'shrink-0 font-medium whitespace-nowrap hover:underline',
+              identity?.role.tone,
+            )}
+          >
+            {identity?.label ?? 'Agent'}
+          </button>
+        ) : null}
+        <span>shared {count === 1 ? 'a file' : `${count} files`}</span>
+        <span className="message-time tabular-nums">{clockTime(item.ts)}</span>
+        {context.onOpenArtifact ? (
+          <button
+            type="button"
+            onClick={() => context.onOpenArtifact?.('media')}
+            className="hover:text-foreground ml-auto shrink-0 hover:underline"
+          >
+            All media
+          </button>
+        ) : null}
+      </div>
+      <MediaStrip runId={context.runId} assets={item.assets} />
+    </div>
   )
 }
 

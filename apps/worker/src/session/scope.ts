@@ -25,6 +25,16 @@ export const MessageAuthorSchema = Schema.Struct({ id: Schema.String, name: Sche
 
 export type MessageAuthor = Schema.Schema.Type<typeof MessageAuthorSchema>
 
+/** A file attached to a message. The bytes are in the session's media store under `id`. */
+export const AttachmentRefSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  mediaType: Schema.String,
+  size: Schema.Finite,
+})
+
+export type AttachmentRef = Schema.Schema.Type<typeof AttachmentRefSchema>
+
 export const shuttleCatalog = defineEventCatalog('shuttle', {
   'user.said': Schema.Struct({
     messageId: Schema.String,
@@ -33,6 +43,8 @@ export const shuttleCatalog = defineEventCatalog('shuttle', {
     targetThreadId: Schema.optional(Schema.String),
     /** Who sent the message. Set by the Worker from the sign-in, never by the browser. */
     author: Schema.optional(MessageAuthorSchema),
+    /** Files sent with the message. The Worker has checked that each is stored for this session. */
+    attachments: Schema.optional(Schema.Array(AttachmentRefSchema)),
   }),
   'intake.started': Schema.Struct({
     messageId: Schema.String,

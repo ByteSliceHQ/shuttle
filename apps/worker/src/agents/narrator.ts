@@ -5,6 +5,7 @@ import { defineAgent } from '@swirls/looms/agent'
 import type { ShuttleEnv } from '../env'
 import { createHistoryTools } from '../tools/history'
 import { createReadOnlySandboxTools } from '../tools/sandbox'
+import { AttachmentInputSchema } from './attachment-input'
 
 export function createNarratorAgent(
   env: ShuttleEnv,
@@ -24,6 +25,7 @@ export function createNarratorAgent(
       sessionRunId: z.string().optional(),
       brief: z.string().optional(),
       workers: z.array(z.string()).optional(),
+      attachments: z.array(AttachmentInputSchema).optional(),
     }),
     instructions: [
       'You are the Shuttle narrator: read-only eyes on an active coding session.',

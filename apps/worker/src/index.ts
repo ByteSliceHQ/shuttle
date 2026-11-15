@@ -36,6 +36,7 @@ import {
 } from './harness'
 import { loomsStub } from './looms-stub'
 import { shuttleModules } from './modules'
+import { handleAssetRoutes } from './routes/assets'
 import { handleConnectionRoutes } from './routes/connections'
 import { handleFirehoseRoutes } from './routes/firehose'
 import { handleGithubPublicRoutes, handleGithubRoutes } from './routes/github'
@@ -365,6 +366,7 @@ async function route(
     (await handleWorkspaceRoutes(request, env, actor, ctx)) ??
     (await handleGithubRoutes(request, env, actor)) ??
     (await handleSandboxRoutes(request, env, actor)) ??
+    (await handleAssetRoutes(request, env, actor)) ??
     (await handleShuttleRoutes(request, env, actor))
 
   if (handled) {

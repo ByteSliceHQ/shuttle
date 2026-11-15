@@ -27,6 +27,8 @@ export interface ShuttleEnv {
   readonly LOOMS_RUN: DurableObjectNamespaceLike<LoomsRunStub>
   readonly SANDBOX: DurableObjectNamespace<SessionSandbox>
   readonly EVENT_FIREHOSE: DurableObjectNamespace<EventFirehose>
+  /** Where uploaded and agent-made media is stored. Without it, attachments are unavailable. */
+  readonly ASSETS?: R2Bucket
   readonly REPLICA?: D1Database
   /** Accounts, organizations and sign-in sessions (Better Auth), plus tenancy tables. */
   readonly AUTH_DB?: D1Database
@@ -110,6 +112,12 @@ export interface SessionSandboxStub {
     cwd?: string,
   ): Promise<{ content: string; missing?: false } | { content: null; missing: true; error: string }>
   writeFile(path: string, content: string, cwd?: string): Promise<{ ok: true }>
+  readBytes(
+    path: string,
+    maxBytes: number,
+    cwd?: string,
+  ): Promise<{ bytes: Uint8Array | null; size: number | null }>
+  writeBytes(path: string, content: Uint8Array, cwd?: string): Promise<{ ok: true }>
   editFile(
     path: string,
     oldText: string,

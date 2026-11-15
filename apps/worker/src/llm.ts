@@ -8,7 +8,12 @@ import {
 } from 'ai'
 
 import type { AgentTurnResult, LlmAdapter, LlmCompleteArgs, LlmToolSpec } from '@swirls/looms/agent'
-import { toLoomsToolCalls, toModelMessages } from '@swirls/looms/ai-vercel'
+import {
+  resolveAttachments,
+  toLoomsToolCalls,
+  toModelMessages,
+  type AttachmentResolver,
+} from '@swirls/looms/ai-vercel'
 import { asJson, type JsonValue } from '@swirls/looms/core'
 
 import { stallGuard } from './llm-stall'
@@ -153,6 +158,8 @@ export function reasoningEffortFor(modelId: string): ReasoningEffort {
 export interface ReasoningLlmOptions {
   readonly model: LanguageModel
   readonly stream?: boolean
+  /** Reads the files attached to messages, for the ones the model is sent directly. */
+  readonly resolveAttachment?: AttachmentResolver
 }
 
 /**
@@ -164,7 +171,11 @@ export function createReasoningLlm(options: ReasoningLlmOptions): LlmAdapter {
 
   return {
     complete: async (args: LlmCompleteArgs): Promise<AgentTurnResult> => {
-      const messages = toModelMessages(args.messages)
+      const attachments = options.resolveAttachment
+        ? await resolveAttachments(args.messages, options.resolveAttachment)
+        : undefined
+
+      const messages = toModelMessages(args.messages, { attachments })
 
       const tools =
         args.toolSpecs && args.toolSpecs.length > 0 ? toAiTools(args.toolSpecs) : undefined

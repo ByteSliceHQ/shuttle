@@ -118,6 +118,8 @@ export async function say(
   text: string,
   forceKind?: InterjectionKind,
   targetThreadId?: string,
+  /** Ids of files already uploaded to this session, to send with the message. */
+  attachments: readonly string[] = [],
 ) {
   const messageId = crypto.randomUUID()
 
@@ -126,6 +128,7 @@ export async function say(
     text,
     ...(forceKind ? { forceKind } : {}),
     ...(targetThreadId ? { targetThreadId } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
   })
 
   if (!response.ok) {

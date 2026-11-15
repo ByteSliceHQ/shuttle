@@ -10,6 +10,7 @@ import {
   GitCompareArrows,
   GitPullRequest,
   Globe,
+  Images,
   PanelBottom,
   PanelRight,
   Search,
@@ -357,6 +358,13 @@ function SessionWorkspace({
       run: () => openArtifact('review'),
     },
     {
+      id: 'media',
+      label: 'Open media',
+      icon: <Images />,
+      keywords: 'images video audio files attachments assets generated',
+      run: () => openArtifact('media'),
+    },
+    {
       id: 'copy-run-id',
       label: 'Copy run ID',
       icon: <Copy />,
@@ -472,6 +480,8 @@ function SessionWorkspace({
       runId={runId}
       folderId={folderId}
       events={events}
+      media={feed.media}
+      identities={identities}
       controller={tabsController}
       onReveal={revealArtifacts}
     />

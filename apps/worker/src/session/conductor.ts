@@ -1,7 +1,8 @@
 import { deterministicThreadId } from '@swirls/looms/core'
 
 import { worktreeRepoPath } from '../sandbox/workspace'
-import { attributed } from './attribution'
+import { attributedWithFiles } from './attribution'
+import type { AttachmentRef } from './scope'
 import type { LinkedSessionRepo, PendingMessage } from './thread'
 
 export type ConductorEndReason = 'failed' | 'cancelled' | 'completed'
@@ -161,7 +162,9 @@ export function buildConductorInput(input: ConductorPromptInput): string {
   const queuedBlock =
     queued.length > 0
       ? `\n\nQueued user messages:\n${queued
-          .map((message) => `- ${attributed(message, input.speakerIds ?? [])}`)
+          .map(
+            (message) => `- ${attributedWithFiles(message, input.speakerIds ?? [], input.runId)}`,
+          )
           .join('\n')}`
       : ''
 
@@ -185,4 +188,11 @@ export function spawnReason(conductor: ConductorState): ConductorSpawnReason {
       return exhaustive
     }
   }
+}
+
+/** Files attached to the messages a conductor starts with, for its first message. */
+export function queuedAttachments(conductor: ConductorState): AttachmentRef[] {
+  return conductor.status === 'live'
+    ? []
+    : conductor.queued.flatMap((message) => [...(message.attachments ?? [])])
 }

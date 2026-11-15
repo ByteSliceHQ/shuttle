@@ -1,9 +1,11 @@
-import { ArrowUp, SlidersHorizontal, Sparkles, Target, X } from 'lucide-react'
+import { ArrowUp, Paperclip, SlidersHorizontal, Sparkles, Target, X } from 'lucide-react'
 import {
   useCallback,
   useEffect,
   useRef,
   useState,
+  type ClipboardEvent,
+  type DragEvent,
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
@@ -35,6 +37,7 @@ import { routeStyles } from '@/lib/routes'
 import { interjectionKinds, isInterjectionKind, type InterjectionKind } from '@/lib/session-feed'
 import { effectiveTeam } from '@/lib/team'
 
+import { AttachmentTray, releaseAttachments, useComposerAttachments } from './composer-attachments'
 import { ContextUsage } from './context-usage'
 import { HarnessSwitcher } from './harness-switcher'
 import { ModelSwitcher } from './model-switcher'
@@ -87,6 +90,11 @@ function teamMentions(team: Team): Mention[] {
   return mentions
 }
 
+/** Whether a drag is of files, and not of text or a tab being reordered. */
+function carriesFiles(event: DragEvent) {
+  return event.dataTransfer.types.includes('Files')
+}
+
 const STARTER_KINDS = ['question', 'idea', 'constraint', 'correction'] as const
 
 export function Composer({
@@ -133,6 +141,11 @@ export function Composer({
   const [inputFocused, setInputFocused] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const files = useComposerAttachments(runId)
+  /** Counts drag enters and leaves, which fire for every element the pointer crosses. */
+  const dragDepth = useRef(0)
+  const [dropping, setDropping] = useState(false)
   const syncedRunId = useRef<string | null>(null)
   /** Messages go out one at a time, so they arrive in the order they were written. */
   const outbox = useRef<Promise<void>>(Promise.resolve())
@@ -193,12 +206,19 @@ export function Composer({
 
     const typed = text.trim()
 
-    if (!typed) {
+    // A message may be files alone.
+    if (!typed && files.attachments.length === 0) {
       inputRef.current?.focus()
       return
     }
 
-    const message = activeMention ? `@${activeMention} ${typed}` : typed
+    if (files.attachments.some((attachment) => attachment.status === 'error')) {
+      setError('Remove the file that could not be uploaded, or attach it again.')
+      return
+    }
+
+    const sending = files.take()
+    const message = activeMention && typed ? `@${activeMention} ${typed}` : typed
     // A message addressed to an agent is work for it, so it must not be answered as a question.
     const addressed = activeMention !== null || (hybrid && ADDRESSED.test(typed))
     const forceKind = addressed ? 'task' : kind === AUTO ? undefined : kind
@@ -209,11 +229,23 @@ export function Composer({
 
     outbox.current = outbox.current
       .then(async () => {
-        await say(runId, message, forceKind, targetThread)
+        // Files still on their way finish first, so the message never arrives without them.
+        const uploaded = await Promise.all(sending.map((attachment) => attachment.uploaded))
+
+        await say(
+          runId,
+          message,
+          forceKind,
+          targetThread,
+          uploaded.map((asset) => asset.id),
+        )
+
+        releaseAttachments(sending)
       })
       .catch((cause: unknown) => {
         // Hand the message back unless something new has been written since.
         setText((current) => (current.trim() ? current : typed))
+        files.restore(sending)
         setError(errorMessage(cause))
       })
   }
@@ -223,6 +255,50 @@ export function Composer({
       event.preventDefault()
       submit()
     }
+  }
+
+  function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const pasted = [...event.clipboardData.files]
+
+    // A screenshot or copied file is attached. Pasted text is left to the textarea.
+    if (pasted.length > 0) {
+      event.preventDefault()
+      files.add(pasted)
+    }
+  }
+
+  function onDragEnter(event: DragEvent) {
+    if (disabled || !carriesFiles(event)) {
+      return
+    }
+
+    event.preventDefault()
+    dragDepth.current += 1
+    setDropping(true)
+  }
+
+  function onDragLeave(event: DragEvent) {
+    if (!carriesFiles(event)) {
+      return
+    }
+
+    dragDepth.current = Math.max(0, dragDepth.current - 1)
+
+    if (dragDepth.current === 0) {
+      setDropping(false)
+    }
+  }
+
+  function onDrop(event: DragEvent) {
+    if (disabled || !carriesFiles(event)) {
+      return
+    }
+
+    event.preventDefault()
+    dragDepth.current = 0
+    setDropping(false)
+    files.add([...event.dataTransfer.files])
+    inputRef.current?.focus()
   }
 
   function onHarnessChange(next: HarnessId) {
@@ -304,13 +380,46 @@ export function Composer({
 
         <form
           onSubmit={submit}
-          className="bg-card focus-within:border-ring/60 focus-within:ring-ring/20 rounded-xl border shadow-lg shadow-black/20 transition-[border-color,box-shadow] duration-150 focus-within:ring-[3px]"
+          onDragEnter={onDragEnter}
+          onDragOver={(event) => {
+            // Without this the browser opens a dropped file in place of the page.
+            if (carriesFiles(event)) {
+              event.preventDefault()
+            }
+          }}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
+          className={cn(
+            'bg-card focus-within:border-ring/60 focus-within:ring-ring/20 relative rounded-xl border shadow-lg shadow-black/20 transition-[border-color,box-shadow] duration-150 focus-within:ring-[3px]',
+            dropping && 'border-brand/70 ring-brand/25 ring-[3px]',
+          )}
         >
+          {dropping ? (
+            <div className="bg-card/90 text-foreground pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 rounded-xl text-[13px] font-medium">
+              <Paperclip className="size-4" />
+              Drop files to attach
+            </div>
+          ) : null}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            hidden
+            tabIndex={-1}
+            onChange={(event) => {
+              files.add([...(event.target.files ?? [])])
+              // Cleared so choosing the same file again still fires a change.
+              event.target.value = ''
+              inputRef.current?.focus()
+            }}
+          />
+          <AttachmentTray attachments={files.attachments} onRemove={files.remove} />
           <textarea
             ref={inputRef}
             value={text}
             onChange={(event) => setText(event.target.value)}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
             onFocus={() => setInputFocused(true)}
             onBlur={() => setInputFocused(false)}
             rows={1}
@@ -321,6 +430,22 @@ export function Composer({
           />
           <div className="flex items-center justify-between gap-1.5 px-2 pb-2">
             <div className="flex min-w-0 items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => fileInputRef.current?.click()}
+                    aria-label="Attach files"
+                    className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 ease-snappy inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-[background-color,color,transform] duration-150 outline-none focus-visible:ring-[3px] active:scale-[0.97] disabled:opacity-50"
+                  >
+                    <Paperclip className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" align="start">
+                  Attach images, video, audio or files
+                </TooltipContent>
+              </Tooltip>
               <SteerMenu
                 kind={kind}
                 onKindChange={setKind}
@@ -383,7 +508,11 @@ export function Composer({
             </div>
           </div>
         </form>
-        {error ? <p className="text-status-failed mt-2 text-xs">{error}</p> : null}
+        {error || files.rejection ? (
+          <p role="alert" className="text-status-failed mt-2 text-xs">
+            {error ?? files.rejection}
+          </p>
+        ) : null}
         {/* One line at any width: the model name truncates before anything wraps. */}
         {/* Inset so its first and last icons sit under the steer and send buttons. */}
         <div className="mt-1.5 flex items-center justify-between gap-2 px-1.5">

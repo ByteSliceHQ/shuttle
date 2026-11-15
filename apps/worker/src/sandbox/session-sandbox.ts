@@ -40,7 +40,7 @@ import { previewUnavailableResponse, proxyContainerPreview } from './preview-pro
 import { sessionRemote } from './repo-access'
 import { restoreSession, snapshotSession, type SessionSnapshot } from './session-sync'
 import { openContainerTerminal } from './terminal'
-import { worktreeRepoPath } from './workspace'
+import { resolvePath, worktreeRepoPath } from './workspace'
 import type {
   ChangesetResult,
   CheckoutRefInput,
@@ -376,6 +376,49 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
 
   async writeFile(path: string, content: string, cwd?: string): Promise<{ ok: true }> {
     await (await this.workspace()).writeFile(path, content, cwd)
+    return { ok: true }
+  }
+
+  /**
+   * A file's bytes, or `null` when it is missing or larger than `maxBytes`. The size is checked
+   * in the sandbox first so an oversized file is never read into the Worker.
+   */
+  async readBytes(
+    path: string,
+    maxBytes: number,
+    cwd?: string,
+  ): Promise<{ bytes: Uint8Array | null; size: number | null }> {
+    const workspace = await this.workspace()
+
+    if (this.mode() !== 'memory') {
+      const sized = await workspace.exec(`stat -c %s -- ${shellQuote(resolvePath(path, cwd))}`, {
+        timeoutMs: 15_000,
+      })
+
+      const size = Number(sized.stdout.trim())
+
+      if (sized.exitCode !== 0 || !Number.isFinite(size)) {
+        return { bytes: null, size: null }
+      }
+
+      if (size > maxBytes) {
+        return { bytes: null, size }
+      }
+    }
+
+    try {
+      const bytes = await workspace.readBytes(path, cwd)
+
+      return bytes.byteLength > maxBytes
+        ? { bytes: null, size: bytes.byteLength }
+        : { bytes, size: bytes.byteLength }
+    } catch {
+      return { bytes: null, size: null }
+    }
+  }
+
+  async writeBytes(path: string, content: Uint8Array, cwd?: string): Promise<{ ok: true }> {
+    await (await this.workspace()).writeBytes(path, content, cwd)
     return { ok: true }
   }
 

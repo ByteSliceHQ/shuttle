@@ -3,12 +3,15 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/panel'
+import type { AgentIdentity } from '@/lib/agents'
 import { cn } from '@/lib/cn'
 import type { SessionEvent } from '@/lib/event-catalog'
+import type { SessionMedia } from '@/lib/media'
 import type { SessionTabsController } from '@/lib/use-session-tabs'
 import type { ArtifactTab, ArtifactTabKind } from '@/lib/workspace'
 
 import { BrowserViewer } from './browser-viewer'
+import { MediaViewer } from './media-viewer'
 import { ReviewViewer } from './review-viewer'
 import { TabStrip } from './tab-strip'
 import { TerminalViewer } from './terminal-viewer'
@@ -24,12 +27,17 @@ export function ArtifactPane({
   runId,
   folderId,
   events,
+  media,
+  identities,
   controller,
   onReveal,
 }: {
   runId: string
   folderId?: string
   events: readonly SessionEvent[]
+  /** The session's files: what people attached and what agents shared. */
+  media: readonly SessionMedia[]
+  identities: ReadonlyMap<string, AgentIdentity>
   /** The session's tabs. The page owns them, since whether the pane shows depends on them. */
   controller: SessionTabsController
   /** Asks the page to show the pane, for a shortcut that opens a tab while it is closed. */
@@ -131,6 +139,8 @@ export function ArtifactPane({
                   folderId={folderId}
                   refreshEpoch={refreshEpoch}
                   searchToken={searchToken}
+                  media={media}
+                  identities={identities}
                   onRetarget={(title, target) => void retargetTab(tab.tabId, title, target)}
                 />
               </div>
@@ -148,6 +158,8 @@ function ArtifactViewer({
   folderId,
   refreshEpoch,
   searchToken,
+  media,
+  identities,
   onRetarget,
 }: {
   tab: ArtifactTab
@@ -155,6 +167,8 @@ function ArtifactViewer({
   folderId?: string
   refreshEpoch: number
   searchToken: number
+  media: readonly SessionMedia[]
+  identities: ReadonlyMap<string, AgentIdentity>
   onRetarget: (title: string, target: string) => void
 }) {
   switch (tab.kind) {
@@ -182,6 +196,8 @@ function ArtifactViewer({
       return <BrowserViewer runId={runId} target={tab.target} onRetarget={onRetarget} />
     case 'review':
       return <ReviewViewer runId={runId} folderId={folderId} />
+    case 'media':
+      return <MediaViewer runId={runId} media={media} identities={identities} />
 
     default: {
       const exhaustive: never = tab.kind

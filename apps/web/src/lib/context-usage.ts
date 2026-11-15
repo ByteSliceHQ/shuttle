@@ -163,6 +163,8 @@ function estimateFromFeed(feed: SessionFeed): Record<ContextCategoryId, number> 
         break
       }
 
+      case 'media':
+
       case 'notice': {
         break
       }

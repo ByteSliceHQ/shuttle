@@ -10,6 +10,8 @@ import { loomsStub } from '../looms-stub'
 import { readSponsor } from '../session/sponsor'
 import { DEFAULT_TEAM, frameTask, presetRoles, type DelegateMode, type Team } from '../team'
 import { orgOfRun } from '../tenancy/run-id'
+import { createSandboxTools } from '../tools/sandbox'
+import { AttachmentInputSchema } from './attachment-input'
 import { createProposePullRequestTool } from './tools/pulls'
 import { createStackLayerTool } from './tools/stack'
 import { createVendorMemberAgent } from './vendor-member'
@@ -23,6 +25,7 @@ export function createConductorAgent(
   const worker = createWorkerAgent(env, runId, storage)
   const proposePullRequest = createProposePullRequestTool()
   const stackLayer = createStackLayerTool(env, runId, storage)
+  const { shareFile } = createSandboxTools(env, runId, storage)
 
   const askUser = asEffectsTool({
     name: 'ask_user',
@@ -54,6 +57,7 @@ export function createConductorAgent(
     input: z.object({
       text: z.string(),
       repos: z.array(z.string()).optional().describe('Full names of linked repositories'),
+      attachments: z.array(AttachmentInputSchema).optional(),
     }),
     instructions: [
       'You are the Shuttle conductor for a coding session.',
@@ -85,11 +89,13 @@ export function createConductorAgent(
       'Never assume a second propose_pull_request alone opens a new PR; without stack_layer new or new_stack it updates the current layer.',
       'The sandbox has no GitHub credentials by design, so never ask workers to git push, git commit for publishing, or use gh.',
       'propose_pull_request returns once publishing finishes: each PR includes an outcome (opened/updated/unchanged), a discard by the user, or an error. Only report a PR as opened when outcome is opened; on an error, fix the cause and propose again.',
+      'People can attach images, video, audio, PDFs and other files to their messages. You are shown images and PDFs directly; every attachment is also saved in the sandbox at the path listed under the message. Workers and other agents only see what you tell them, so when a task depends on an attached file, describe what matters in it and give its sandbox path.',
+      'To show people a file from the sandbox (a screenshot, chart, recording, PDF), call share_file with its path, or ask the agent that made it to share it. Shared files appear in the conversation.',
       'Respect brief updates delivered as steer messages.',
       'When the user sends a new request as a steer, acknowledge it and act on it — do not ignore follow-up tasks.',
       'Summarize progress for the user after workers return.',
     ].join(' '),
-    tools: [askUser],
+    tools: [askUser, shareFile],
     // The team and the linked repositories decide which tools exist, and both can change
     // between turns: the developer edits the team from the agent picker mid-session.
     resolveTools: async ({ input }) => [

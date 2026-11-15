@@ -23,6 +23,8 @@ export function createWorkerAgent(env: ShuttleEnv, runId: string, storage?: Dura
       'Do not switch branches, create branches, or rebase — the conductor manages stacked PR layers. Edit whatever layer is currently checked out.',
       'When multiple repositories are linked, each repo is a sibling directory named after the repo.',
       'Use read_file, edit_file, write_file, grep, bash, and git_diff.',
+      'Files the user attached are saved in the sandbox at the paths the task names; read_file is for text, so inspect images and other media with bash tools.',
+      'When you make something worth looking at (a screenshot, a chart, a rendered image, a recording, a PDF), call share_file with its path so the people in the session see it.',
       'Never search outside /workspace. If an expected file is missing, report that back instead of hunting the filesystem.',
       'Container baseline tools: node, npm, python3, git, rg, curl, bash.',
       'Prefer project-local installs (npm install / pip in the worktree) over system packages.',
@@ -34,6 +36,14 @@ export function createWorkerAgent(env: ShuttleEnv, runId: string, storage?: Dura
       'When the brief is updated via a steer message, follow the new brief.',
       'When finished, summarize what you changed and call it done.',
     ].join(' '),
-    tools: [tools.readFile, tools.writeFile, tools.editFile, tools.grep, tools.bash, tools.gitDiff],
+    tools: [
+      tools.readFile,
+      tools.writeFile,
+      tools.editFile,
+      tools.grep,
+      tools.bash,
+      tools.gitDiff,
+      tools.shareFile,
+    ],
   })
 }

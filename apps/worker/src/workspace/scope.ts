@@ -40,6 +40,7 @@ export const TabKindSchema = Schema.Union([
   Schema.Literal('terminal'),
   Schema.Literal('browser'),
   Schema.Literal('review'),
+  Schema.Literal('media'),
 ])
 
 export const workspaceCatalog = defineEventCatalog('workspace', {
@@ -198,6 +199,7 @@ export type ArtifactTabKind =
   | 'terminal'
   | 'browser'
   | 'review'
+  | 'media'
 
 export type ArtifactTab = {
   readonly tabId: string

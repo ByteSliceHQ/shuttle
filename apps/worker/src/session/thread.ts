@@ -30,10 +30,11 @@ import {
   shouldSpawnConductor,
   spawnReason,
   type ConductorState,
+  queuedAttachments,
 } from './conductor'
 import { appendPrPublishEffects, withPrApprovalDecision } from './publish-effects'
 import { routeForEffects } from './route-effects'
-import { shuttleModule, type MessageAuthor } from './scope'
+import { shuttleModule, type AttachmentRef, type MessageAuthor } from './scope'
 import {
   withPrProposal,
   withPrPublishSettled,
@@ -52,6 +53,7 @@ export interface PendingMessage {
   readonly forceKind?: InterjectionKind
   readonly targetThreadId?: string
   readonly author?: MessageAuthor
+  readonly attachments?: readonly AttachmentRef[]
 }
 
 export interface ActiveIntake {
@@ -61,6 +63,7 @@ export interface ActiveIntake {
   readonly forceKind?: InterjectionKind
   readonly targetThreadId?: string
   readonly author?: MessageAuthor
+  readonly attachments?: readonly AttachmentRef[]
 }
 
 export interface PendingRoute {
@@ -69,6 +72,7 @@ export interface PendingRoute {
   readonly targetThreadId: string | null
   readonly text: string
   readonly author?: MessageAuthor
+  readonly attachments?: readonly AttachmentRef[]
 }
 
 export interface LinkedSessionRepo {
@@ -483,6 +487,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
                 forceKind: payload.forceKind,
                 targetThreadId: payload.targetThreadId,
                 ...(author ? { author } : {}),
+                ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
               },
             ],
             processedMessageIds: [...state.processedMessageIds, payload.messageId],
@@ -525,6 +530,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
               forceKind: pending.forceKind,
               targetThreadId: pending.targetThreadId,
               ...(pending.author ? { author: pending.author } : {}),
+              ...(pending.attachments ? { attachments: pending.attachments } : {}),
             },
           }
         }
@@ -547,6 +553,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
               targetThreadId: payload.targetThreadId,
               text: payload.text,
               ...(bypassed?.author ? { author: bypassed.author } : {}),
+              ...(bypassed?.attachments ? { attachments: bypassed.attachments } : {}),
             },
             mailboxEpoch: state.mailboxEpoch + 1,
           }
@@ -571,6 +578,9 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
                 targetThreadId: base.activeIntake.targetThreadId ?? null,
                 text: base.activeIntake.text,
                 ...(base.activeIntake.author ? { author: base.activeIntake.author } : {}),
+                ...(base.activeIntake.attachments
+                  ? { attachments: base.activeIntake.attachments }
+                  : {}),
               },
             }
           }
@@ -651,6 +661,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
                     messageId: route.messageId,
                     text: route.text,
                     ...(route.author ? { author: route.author } : {}),
+                    ...(route.attachments ? { attachments: route.attachments } : {}),
                   })
                 : state.conductor,
           }
@@ -786,6 +797,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
       if (!state.pull && shouldSpawnConductor(state.conductor)) {
         const { generation } = state.conductor
         const childThreadId = conductorChildThreadId(ctx.threadId, generation)
+        const startingFiles = queuedAttachments(state.conductor)
 
         effects.push(
           emit(
@@ -825,6 +837,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
                 speakerIds: state.speakerIds,
               }),
               repos: state.repos.map((repo) => repo.fullName),
+              ...(startingFiles.length > 0 ? { attachments: startingFiles } : {}),
             },
           }),
         )

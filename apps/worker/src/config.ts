@@ -2,7 +2,7 @@ import { createTypeSafeAi } from '@ai-sdk/typesafe-ai'
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 
 import type { LlmAdapter, LlmCompleteArgs } from '@swirls/looms/agent'
-import { vercelEvaluator } from '@swirls/looms/ai-vercel'
+import { vercelEvaluator, type AttachmentResolver } from '@swirls/looms/ai-vercel'
 import type {
   EvaluatorAdapter,
   EvaluatorEvaluateArgs,
@@ -13,6 +13,8 @@ import { d1ReplicaDatabase, sqliteReplica } from '@swirls/looms/projectors/repli
 
 import { classifyHeuristic, parseIntakeMessage } from './agents/intake'
 import { vendorHarnessOfModel } from './agents/vendor-member'
+import { collectSharedFiles, shareInstructions, stageAttachments } from './assets/sandbox'
+import { getAsset } from './assets/store'
 import { shuttleAttributes } from './attributes'
 import { sandboxStub, type ShuttleEnv } from './env'
 import { createFirehoseProjector } from './firehose/projector'
@@ -36,6 +38,70 @@ import { vendorHarnessInfo } from './vendor/harnesses'
 import { readVendorModelChoice } from './vendor/models'
 import { runVendorTurn } from './vendor/turn'
 import { createWorkspaceActivityProjector } from './workspace/activity'
+
+/** Largest image and document sent to a model itself. Larger ones are named with their path. */
+const MAX_MODEL_IMAGE_BYTES = 5 * 1024 * 1024
+const MAX_MODEL_DOCUMENT_BYTES = 20 * 1024 * 1024
+const MODEL_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+
+/**
+ * Reads an attached file for a model call: images and PDFs within the size models accept.
+ * Anything else is left to its sandbox path, which the message text names.
+ */
+function modelAttachmentResolver(bucket: R2Bucket, runId: string): AttachmentResolver {
+  return async (attachment) => {
+    const limit = MODEL_IMAGE_TYPES.has(attachment.mediaType)
+      ? MAX_MODEL_IMAGE_BYTES
+      : attachment.mediaType === 'application/pdf'
+        ? MAX_MODEL_DOCUMENT_BYTES
+        : 0
+
+    if (limit === 0 || (attachment.size ?? 0) > limit) {
+      return null
+    }
+
+    const found = await getAsset(bucket, runId, attachment.id)
+
+    return found && found.ref.size <= limit
+      ? new Uint8Array(await found.object.arrayBuffer())
+      : null
+  }
+}
+
+/** Copies the files attached to `messages` into the session's sandbox. Never fails a turn. */
+async function stageMessageAttachments(
+  env: ShuttleEnv,
+  storage: DurableObjectStorage,
+  runId: string,
+  boundSandboxName: string,
+  messages: LlmCompleteArgs['messages'],
+): Promise<void> {
+  const attachments = messages.flatMap((message) =>
+    (message.attachments ?? []).map((attachment) => ({
+      id: attachment.id,
+      name: attachment.name ?? attachment.id,
+    })),
+  )
+
+  if (!env.ASSETS || attachments.length === 0) {
+    return
+  }
+
+  try {
+    const sandboxName = await sandboxNameForSession(env, storage, runId, boundSandboxName)
+
+    await stageAttachments({
+      bucket: env.ASSETS,
+      sandbox: sandboxStub(env, sandboxName),
+      sandboxName,
+      storage,
+      runId,
+      attachments,
+    })
+  } catch {
+    // The turn still runs; the agent finds the path missing and says so.
+  }
+}
 
 export const DEFAULT_LLM_MODEL = 'anthropic/claude-sonnet-5.5'
 export const DEFAULT_JEV_MODEL = 'jev-latest'
@@ -87,7 +153,7 @@ export function resolveLlm(
   storage?: DurableObjectStorage,
   runId?: string,
 ): LlmAdapter {
-  const openRouter = resolveOpenRouterLlm(env, storage)
+  const openRouter = resolveOpenRouterLlm(env, storage, runId)
 
   if (!storage || !runId) {
     return openRouter
@@ -103,6 +169,10 @@ export function resolveLlm(
       if (!binding) {
         return openRouter.complete(args)
       }
+
+      // Every agent can open an attached file by path, so the files are in the sandbox before
+      // the turn that first mentions them.
+      await stageMessageAttachments(env, storage, runId, binding.sandboxName, args.messages)
 
       // Worked out on every turn, including the ones OpenRouter runs: a conductor on OpenRouter
       // may hand its work to a vendor agent, which then runs on this person's sign-in.
@@ -186,6 +256,14 @@ export function resolveLlm(
           // A session Shuttle started itself, which nobody has spoken in, has no one's.
           ...(sponsorId ? { billedTo: sponsorId } : {}),
           signInStaysInSandbox: sandboxesArePersonal(env),
+          shareInstructions: shareInstructions(runId),
+          collectShared: () =>
+            collectSharedFiles({
+              bucket: env.ASSETS,
+              sandbox,
+              runId,
+              sharedBy: getTurnThread(args.signal) ?? harness,
+            }),
           credentials: {
             get: async (id) => (sponsorId ? credentials.getCredential(sponsorId, id) : null),
             put: async (id, payload) => {
@@ -201,7 +279,11 @@ export function resolveLlm(
   }
 }
 
-function resolveOpenRouterLlm(env: ShuttleEnv, storage?: DurableObjectStorage): LlmAdapter {
+function resolveOpenRouterLlm(
+  env: ShuttleEnv,
+  storage?: DurableObjectStorage,
+  runId?: string,
+): LlmAdapter {
   const apiKey = env.OPENROUTER_API_KEY
 
   if (!apiKey) {
@@ -212,6 +294,9 @@ function resolveOpenRouterLlm(env: ShuttleEnv, storage?: DurableObjectStorage): 
   const fallback = defaultLlmModel(env)
   /** Models that rejected OpenRouter reasoning params stay on the plain chat path. */
   const plainChatModels = new Set<string>()
+
+  const resolveAttachment =
+    env.ASSETS && runId ? modelAttachmentResolver(env.ASSETS, runId) : undefined
 
   return {
     complete: async (args: LlmCompleteArgs) => {
@@ -229,7 +314,7 @@ function resolveOpenRouterLlm(env: ShuttleEnv, storage?: DurableObjectStorage): 
             usage: { include: true },
           })
 
-      const llm = createReasoningLlm({ model, stream: true })
+      const llm = createReasoningLlm({ model, stream: true, resolveAttachment })
 
       try {
         return await llm.complete(args)
@@ -243,6 +328,7 @@ function resolveOpenRouterLlm(env: ShuttleEnv, storage?: DurableObjectStorage): 
         return createReasoningLlm({
           model: openrouter.chat(modelId, { usage: { include: true } }),
           stream: true,
+          resolveAttachment,
         }).complete(args)
       }
     },

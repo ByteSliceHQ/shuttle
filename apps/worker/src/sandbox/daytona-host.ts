@@ -136,6 +136,18 @@ export function daytonaHost(sandbox: DaytonaSandboxLike): SandboxHost {
       await sandbox.fs.uploadFile(Buffer.from(content, 'utf8'), path)
     },
 
+    async readBytes(path) {
+      try {
+        return new Uint8Array(await sandbox.fs.downloadFile(path))
+      } catch (cause) {
+        throw new Error(`ENOENT: no such file or directory, open '${path}'`, { cause })
+      }
+    },
+
+    async writeBytes(path, content) {
+      await sandbox.fs.uploadFile(Buffer.from(content), path)
+    },
+
     async mkdir(path) {
       const made = await run(['mkdir', '-p', path])
 

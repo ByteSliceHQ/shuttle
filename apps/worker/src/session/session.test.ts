@@ -241,6 +241,62 @@ describe('shuttle session routing', () => {
     }
   })
 
+  test('a message keeps its attached files on the way to the conductor', async () => {
+    const lines: { text: string; attachments: readonly { id: string }[] }[] = []
+
+    const stubConductor = defineAgent({
+      name: 'conductor',
+      input: TextInput,
+      instructions: 'Conduct.',
+      conversational: true,
+      maxTurns: 500,
+      runTurn: ({ messages }) => {
+        const last = messages.findLast((message) => message.role === 'user')
+
+        lines.push({ text: last?.content ?? '', attachments: last?.attachments ?? [] })
+
+        return { message: { role: 'assistant', content: 'ok' }, done: true }
+      },
+    })
+
+    const looms = createSessionLooms(stubConductor)
+
+    const screenshot = {
+      id: 'ast_0123456789abcdef0123456789abcdef',
+      name: 'overflow.png',
+      mediaType: 'image/png',
+      size: 4096,
+    }
+
+    try {
+      const { runId } = await startCodingSession(looms)
+
+      await waitFor(() => lines.length > 0)
+
+      await looms.signal(runId, [
+        say({
+          messageId: 'task-files',
+          text: 'fix this overflow',
+          forceKind: 'task',
+          attachments: [screenshot],
+        }),
+      ])
+
+      await waitFor(() => lines.some((line) => line.text.includes('fix this overflow')))
+
+      const line = lines.find((entry) => entry.text.includes('fix this overflow'))
+
+      // The model is sent the file, and the text says where every agent can open it.
+      expect(line?.attachments).toEqual([screenshot])
+
+      expect(line?.text).toContain(
+        `- overflow.png (image/png, 4 KB): /workspace/.shuttle/${runId}/attachments/01234567-overflow.png`,
+      )
+    } finally {
+      await looms.stop()
+    }
+  })
+
   test('agents learn who a message is from once several people speak, and who the work is for', async () => {
     const turns: { text: string; sponsor: string | null }[] = []
 

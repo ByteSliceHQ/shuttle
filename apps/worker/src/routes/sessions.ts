@@ -1,5 +1,6 @@
 import { ACTOR_HEADER } from '@swirls/looms/runtime'
 
+import { MAX_ATTACHMENTS, headAsset, isAssetId, type AssetRef } from '../assets/store'
 import { getAuth } from '../auth/auth'
 import {
   codeStorageClient,
@@ -252,14 +253,45 @@ async function sessionSay(
     text?: unknown
     forceKind?: unknown
     targetThreadId?: unknown
+    attachments?: unknown
   } | null
 
   const messageId = typeof body?.messageId === 'string' ? body.messageId.trim() : ''
   const text = typeof body?.text === 'string' ? body.text : ''
   const forceKind = INTERJECTION_KINDS.find((kind) => kind === body?.forceKind)
+  const attachmentIds = body?.attachments ?? []
 
-  if (!messageId || messageId.length > 128 || !text.trim()) {
+  if (
+    !Array.isArray(attachmentIds) ||
+    attachmentIds.length > MAX_ATTACHMENTS ||
+    !attachmentIds.every(isAssetId)
+  ) {
+    return Response.json(
+      { error: `attachments must be up to ${MAX_ATTACHMENTS} uploaded file ids` },
+      { status: 400 },
+    )
+  }
+
+  // A message may be files alone.
+  if (!messageId || messageId.length > 128 || (!text.trim() && attachmentIds.length === 0)) {
     return Response.json({ error: 'messageId and text are required' }, { status: 400 })
+  }
+
+  // The browser names files by id only. What each one is comes from the store, which also
+  // proves it was uploaded to this session.
+  const attachments: AssetRef[] = []
+
+  for (const id of new Set(attachmentIds)) {
+    const asset = env.ASSETS ? await headAsset(env.ASSETS, runId, id) : null
+
+    if (!asset) {
+      return Response.json(
+        { error: 'An attached file is no longer available. Attach it again.' },
+        { status: 400 },
+      )
+    }
+
+    attachments.push(asset)
   }
 
   if (body?.forceKind !== undefined && !forceKind) {
@@ -272,6 +304,7 @@ async function sessionSay(
     ...(forceKind ? { forceKind } : {}),
     ...(typeof body?.targetThreadId === 'string' ? { targetThreadId: body.targetThreadId } : {}),
     author: { id: actor.userId, name: actor.name || actor.email },
+    ...(attachments.length > 0 ? { attachments } : {}),
   })
 
   await loomsStub(env.LOOMS_RUN, runId).signal([

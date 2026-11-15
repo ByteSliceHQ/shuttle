@@ -111,6 +111,10 @@ export interface Workspace {
   ): Promise<{ root: string }>
   readFile(path: string, cwd?: string): Promise<string>
   writeFile(path: string, content: string, cwd?: string): Promise<void>
+  /** A file's bytes, for media and other files that are not text. */
+  readBytes(path: string, cwd?: string): Promise<Uint8Array>
+  /** Writes bytes, creating the file's directory when it is missing. */
+  writeBytes(path: string, content: Uint8Array, cwd?: string): Promise<void>
   editFile(path: string, oldText: string, newText: string, cwd?: string): Promise<number>
   grep(pattern: string, path?: string, cwd?: string): Promise<string>
   listFiles(root: string): Promise<string[]>

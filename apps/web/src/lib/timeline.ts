@@ -127,7 +127,10 @@ export function projectTimeline(
       continue
     }
 
-    if (threadSpeaks(threadId, parents, openThreadId) || (top && item.kind === 'question')) {
+    // Questions need an answer and shared files are meant to be seen, whoever they came from.
+    const surfaced = top && (item.kind === 'question' || item.kind === 'media')
+
+    if (threadSpeaks(threadId, parents, openThreadId) || surfaced) {
       if (item.kind === 'thought' && (item.durationMs ?? 0) < BRIEF_THOUGHT_MS) {
         continue
       }

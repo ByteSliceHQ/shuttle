@@ -16,6 +16,7 @@ describe('conductor tools', () => {
   test('offers PR tools when repositories are linked', async () => {
     expect(await toolNames({ text: 'Fix login', repos: ['acme/glue'] })).toEqual([
       'ask_user',
+      'share_file',
       'delegate',
       'stack_layer',
       'propose_pull_request',
@@ -25,6 +26,7 @@ describe('conductor tools', () => {
   test('hides PR tools when no repositories are linked', async () => {
     expect(await toolNames({ text: 'Build a todo app', repos: [] })).toEqual([
       'ask_user',
+      'share_file',
       'delegate',
     ])
   })

@@ -36,6 +36,10 @@ function order(feed: ReturnType<typeof fold>) {
   )
 }
 
+function shareCall(id: string) {
+  return { turn: 1, toolCall: { id, name: 'share_file', arguments: {} } }
+}
+
 describe('session feed', () => {
   test('opens with the goal from the root thread', () => {
     const feed = fold([event('runtime.thread.started', { input: { goal: 'Ship it' } })])
@@ -44,6 +48,84 @@ describe('session feed', () => {
     expect(feed.items[0]).toMatchObject({ kind: 'user', goal: true, text: 'Ship it' })
     expect(feed.brief).toHaveLength(1)
     expect(feed.brief[0]).toMatchObject({ version: 1, text: 'Ship it' })
+  })
+
+  test('shows attached files on their message and shared files where the agent shared them', () => {
+    const screenshot = { id: 'ast_a', name: 'bug.png', mediaType: 'image/png', size: 2048 }
+
+    const chart = {
+      id: 'ast_b',
+      name: 'chart.png',
+      mediaType: 'image/png',
+      size: 4096,
+      kind: 'image',
+    }
+
+    const demo = {
+      id: 'ast_c',
+      name: 'demo.mp4',
+      mediaType: 'video/mp4',
+      size: 9000,
+      kind: 'video',
+    }
+
+    const feed = fold([
+      // A message may be files alone.
+      event('shuttle.user.said', {
+        messageId: 'm1',
+        text: '',
+        author: { id: 'ada', name: 'Ada' },
+        attachments: [screenshot],
+      }),
+      event('agent.tool_call.requested', shareCall('tc1'), 'thr_worker'),
+      event(
+        'agent.tool.result',
+        {
+          turn: 1,
+          toolCallId: 'tc1',
+          name: 'share_file',
+          result: { ok: true, asset: chart },
+          error: null,
+        },
+        'thr_worker',
+      ),
+      // A vendor agent's result arrives as JSON text.
+      event('shuttle.vendor.tool_started', shareCall('tc2'), 'thr_worker'),
+      event(
+        'shuttle.vendor.tool_finished',
+        { turn: 1, toolCallId: 'tc2', result: JSON.stringify({ ok: true, asset: demo }) },
+        'thr_worker',
+      ),
+      // A share that failed shows nothing.
+      event('agent.tool_call.requested', shareCall('tc3'), 'thr_worker'),
+      event(
+        'agent.tool.result',
+        {
+          turn: 1,
+          toolCallId: 'tc3',
+          name: 'share_file',
+          result: { ok: false, error: 'missing' },
+          error: null,
+        },
+        'thr_worker',
+      ),
+    ])
+
+    expect(feed.items[0]).toMatchObject({ kind: 'user', text: '', attachments: [screenshot] })
+
+    const shared = feed.items.filter((item) => item.kind === 'media')
+
+    expect(shared).toHaveLength(1)
+    expect(shared[0]?.assets.map((asset) => asset.name)).toEqual(['chart.png', 'demo.mp4'])
+
+    expect(feed.media.map((entry) => [entry.asset.name, entry.source])).toEqual([
+      ['bug.png', 'upload'],
+      ['chart.png', 'agent'],
+      ['demo.mp4', 'agent'],
+    ])
+
+    expect(feed.media[0]?.authorName).toBe('Ada')
+    expect(feed.media[1]?.threadId).toBe('thr_worker')
   })
 
   test('a message keeps its author, and the agent records whose subscription it ran on', () => {

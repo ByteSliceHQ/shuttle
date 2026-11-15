@@ -24,7 +24,19 @@ Cloudflare Worker that hosts Shuttle sessions on Looms Durable Objects.
    (`wrangler d1 create looms-shuttle-replica`), and uncomment the `REPLICA` entry in
    `wrangler.jsonc` with its id.
 
-3. For real Linux sandboxes (terminal + browser preview ports), install Docker,
+3. Create the R2 bucket that holds session media: files people attach to messages and files
+   agents share (`wrangler r2 bucket create shuttle-local`, or point the `ASSETS` entry in
+   `wrangler.jsonc` at a bucket of your own). Local dev keeps the objects on disk under
+   `.wrangler`; add `"remote": true` to the entry to use the real bucket. Without the binding,
+   attaching and sharing files is turned off and everything else works.
+
+   Each file is stored under its session and served only to people who can open that session,
+   through `GET /sessions/:id/assets/:assetId`. Agents get attached files two ways: images and
+   PDFs are sent to the model itself, and every file is copied into the sandbox at the path the
+   message lists, so any agent can open it. An agent shows a file with the `share_file` tool; a
+   vendor agent (Codex, Claude Code, Cursor) copies it into `/workspace/.shuttle/<run>/share`.
+
+4. For real Linux sandboxes (terminal + browser preview ports), install Docker,
    set `SHUTTLE_WORKSPACE_MODE=container` in `.dev.vars`, and enable the
    `containers` block in `wrangler.jsonc` (`scheduling_policy: "durable_object"`
    with a named `images.base.dockerfile`). Code starts instances via
@@ -38,7 +50,7 @@ Cloudflare Worker that hosts Shuttle sessions on Looms Durable Objects.
    `npm install`, etc.). After Dockerfile changes, restart `wrangler` so it
    rebuilds the image — container disk is ephemeral and resets on recreate.
 
-4. Set secrets:
+5. Set secrets:
 
    ```bash
    wrangler secret put OPENROUTER_API_KEY
@@ -51,7 +63,7 @@ Cloudflare Worker that hosts Shuttle sessions on Looms Durable Objects.
    (intake routing). Without it, intake falls back to local heuristics.
    Optional `JEV_MODEL` (default `jev-latest`) selects the Jev model id.
 
-5. (Optional) Create a **personal** GitHub App for folder repo linking and PRs
+6. (Optional) Create a **personal** GitHub App for folder repo linking and PRs
    (do not share a production App — local `bun run dev` overwrites its webhook
    URL every start):
 
@@ -88,7 +100,7 @@ Cloudflare Worker that hosts Shuttle sessions on Looms Durable Objects.
      `GITHUB_WEBHOOK_SECRET` blank to let `bun run dev` fill them. Keep
      `SHUTTLE_WEB_URL` pointed at the web UI so setup redirects home.
 
-6. Deploy:
+7. Deploy:
 
    ```bash
    bun run deploy

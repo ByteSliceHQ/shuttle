@@ -20,6 +20,10 @@ export interface SandboxHost {
   /** The file's text. Rejects when the file does not exist. */
   readFile(path: string): Promise<string>
   writeFile(path: string, content: string): Promise<void>
+  /** The file's bytes, for files that are not text. Rejects when the file does not exist. */
+  readBytes(path: string): Promise<Uint8Array>
+  /** Writes bytes to a file whose directory already exists. */
+  writeBytes(path: string, content: Uint8Array): Promise<void>
   /** Creates the directory and any missing parents. */
   mkdir(path: string): Promise<void>
 }
@@ -64,6 +68,27 @@ export function cloudflareHost(container: DurableContainer): SandboxHost {
     readFile: async (path) => (await files.readFile(path)).text(),
     writeFile: async (path, content) => {
       await files.writeFile(path, content)
+    },
+    // The container's file API is for text. A process's output and input are bytes.
+    readBytes: async (path) => {
+      const output = await (await container.exec(['cat', '--', path])).output()
+
+      if ((output.exitCode ?? 0) !== 0) {
+        throw new Error(`ENOENT: no such file or directory, open '${path}'`)
+      }
+
+      return new Uint8Array(output.stdout)
+    },
+    writeBytes: async (path, content) => {
+      const stdin = new Blob([content as Uint8Array<ArrayBuffer>]).stream()
+
+      const output = await (
+        await container.exec(['bash', '-c', 'cat > "$1"', 'bash', path], { stdin })
+      ).output()
+
+      if ((output.exitCode ?? 0) !== 0) {
+        throw new Error(`could not write ${path}`)
+      }
     },
     mkdir: async (path) => {
       await files.mkdir(path, { recursive: true })

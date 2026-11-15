@@ -39,6 +39,8 @@ const BASE_SHA_PREFIX = 'meta:baseSha:'
  */
 export class MemoryWorkspace implements Workspace {
   private readonly files = new Map<string, string | null>()
+  /** Files that are not text. Kept for this instance only: the memory workspace stores text. */
+  private readonly binaries = new Map<string, Uint8Array>()
   private readonly dirty = new Set<string>()
   private readonly baseShas = new Map<string, string>()
   /** Per worktree key `${runId}/${repo}` → current layer and layer count per stack. */
@@ -356,6 +358,17 @@ export class MemoryWorkspace implements Workspace {
     this.files.set(resolved, content)
     this.dirty.add(resolved)
     await this.flush()
+  }
+
+  async readBytes(path: string, cwd?: string): Promise<Uint8Array> {
+    const binary = this.binaries.get(resolvePath(path, cwd))
+
+    return binary ?? new TextEncoder().encode(await this.readFile(path, cwd))
+  }
+
+  async writeBytes(path: string, content: Uint8Array, cwd?: string): Promise<void> {
+    this.throwIfAborted()
+    this.binaries.set(resolvePath(path, cwd), content)
   }
 
   async editFile(path: string, oldText: string, newText: string, cwd?: string): Promise<number> {
