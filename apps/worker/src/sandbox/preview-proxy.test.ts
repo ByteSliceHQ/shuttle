@@ -58,4 +58,20 @@ describe('preview proxy helpers', () => {
     expect(response.headers.get('retry-after')).toBe('2')
     expect(await response.text()).toContain('5173')
   })
+
+  test('documents get a page that names the port and nothing about where the sandbox runs', async () => {
+    const response = previewUnavailableResponse(
+      new Request('http://x/', { headers: { accept: 'text/html', 'sec-fetch-dest': 'iframe' } }),
+      8000,
+    )
+
+    const page = await response.text()
+
+    expect(response.status).toBe(503)
+    expect(response.headers.get('content-type')).toMatch(/text\/html/)
+    expect(response.headers.get('x-preview-unavailable')).toBe('1')
+    expect(page).toContain('Nothing is running on port 8000')
+    expect(page.toLowerCase()).not.toContain('daytona')
+    expect(page).not.toContain('<pre>')
+  })
 })

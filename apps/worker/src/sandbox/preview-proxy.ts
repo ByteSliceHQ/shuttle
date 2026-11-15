@@ -49,20 +49,52 @@ export function asHeadResponse(response: Response): Response {
   })
 }
 
+/** Marks a response as the page below, so the page can tell when the port starts answering. */
+export const PREVIEW_UNAVAILABLE_HEADER = 'x-preview-unavailable'
+
+const UNAVAILABLE_STYLE = [
+  ':root{color-scheme:light dark;--bg:#fff;--fg:#18181b;--muted:#6b6b76;--line:#e4e4e7}',
+  '@media (prefers-color-scheme:dark){:root{--bg:#0e0e11;--fg:#ededf0;--muted:#9a9aa6;--line:#26262c}}',
+  '*{box-sizing:border-box}',
+  'body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--fg);font:14px/1.55 ui-sans-serif,system-ui,sans-serif}',
+  'main{max-width:26rem;text-align:center}',
+  '.port{display:inline-block;margin-bottom:16px;padding:2px 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font:12px ui-monospace,monospace}',
+  'h1{margin:0 0 8px;font-size:17px;font-weight:600;text-wrap:balance}',
+  'p{margin:0 0 6px;color:var(--muted);text-wrap:balance}',
+  'code{font:12px ui-monospace,monospace;color:var(--fg)}',
+  '.wait{margin-top:18px;font-size:12px}',
+  '.dot{display:inline-block;width:6px;height:6px;margin-right:6px;border-radius:50%;background:currentColor;animation:pulse 1.4s ease-in-out infinite}',
+  '@keyframes pulse{0%,100%{opacity:.25}50%{opacity:1}}',
+  'pre{margin:16px 0 0;white-space:pre-wrap;text-align:left;color:var(--muted);font:11px ui-monospace,monospace;opacity:.8}',
+].join('')
+
+/** Reloads the page once the port stops answering with the page itself. */
+const UNAVAILABLE_SCRIPT = [
+  '(function(){var t=setInterval(function(){',
+  "fetch(location.href,{cache:'no-store',headers:{accept:'text/plain'}}).then(function(r){",
+  `if(!r.headers.get('${PREVIEW_UNAVAILABLE_HEADER}')){clearInterval(t);location.reload()}`,
+  '}).catch(function(){})},2000)})()',
+].join('')
+
+/**
+ * What a preview shows when nothing in the sandbox answers on `port`. `detail` is shown as given,
+ * so it must not be an upstream's own error text.
+ */
 export function previewUnavailableResponse(
   request: Request,
   port: number,
-  detail: string,
+  detail?: string,
 ): Response {
   const headers = new Headers({
     'retry-after': '2',
     'cache-control': 'no-store',
+    [PREVIEW_UNAVAILABLE_HEADER]: '1',
   })
 
   if (!wantsHtmlErrorPage(request)) {
     headers.set('content-type', 'text/plain; charset=utf-8')
     return new Response(
-      `Port ${port} is not accepting connections in the sandbox container.\n${detail}\n`,
+      `Port ${port} is not accepting connections in the sandbox.\n${detail ? `${detail}\n` : ''}`,
       { status: 503, headers },
     )
   }
@@ -71,13 +103,17 @@ export function previewUnavailableResponse(
 
   return new Response(
     [
-      `<!doctype html><meta charset="utf-8"><title>Port ${port} unavailable</title>`,
-      `<body style="font-family:system-ui;max-width:36rem;margin:2rem auto;line-height:1.5">`,
-      `<h1>Nothing is listening on port ${port}</h1>`,
-      `<p>The sandbox container is running, but no process accepted connections on this port.</p>`,
-      `<p>If an agent started a server earlier, it may have restarted mid-load — reload once the server is listening on <code>0.0.0.0:${port}</code>.</p>`,
-      `<pre style="white-space:pre-wrap;opacity:.7">${escapeHtml(detail)}</pre>`,
-      `</body>`,
+      `<!doctype html><html lang="en"><meta charset="utf-8">`,
+      `<meta name="viewport" content="width=device-width,initial-scale=1">`,
+      `<title>Port ${port} unavailable</title><style>${UNAVAILABLE_STYLE}</style>`,
+      `<body><main>`,
+      `<div class="port">:${port}</div>`,
+      `<h1>Nothing is running on port ${port}</h1>`,
+      `<p>Start a server on this port in the sandbox and it will show up here.</p>`,
+      `<p>If one is already running, make sure it listens on <code>0.0.0.0:${port}</code>.</p>`,
+      `<p class="wait"><span class="dot"></span>Waiting for port ${port}</p>`,
+      detail ? `<pre>${escapeHtml(detail)}</pre>` : '',
+      `</main><script>${UNAVAILABLE_SCRIPT}</script></body></html>`,
     ].join(''),
     { status: 503, headers },
   )

@@ -2,7 +2,12 @@ import { describe, expect, test } from 'bun:test'
 
 import { DaytonaConflictError } from '@daytona/sdk'
 
-import { ensureStarted, sandboxNotRunning, type StartableSandbox } from './daytona'
+import {
+  ensureStarted,
+  isDaytonaOwnError,
+  sandboxNotRunning,
+  type StartableSandbox,
+} from './daytona'
 
 /** A sandbox that moves through `states` each time it is looked at, and records what is asked. */
 function sandboxIn(states: readonly string[], startFailures = 0) {
@@ -118,5 +123,40 @@ describe('sandboxNotRunning', () => {
     expect(sandboxNotRunning(new Error('exit 1'))).toBe(false)
     expect(sandboxNotRunning('{"statusCode":502,"message":"proxy upstream error"}')).toBe(false)
     expect(sandboxNotRunning(undefined)).toBe(false)
+  })
+})
+
+describe('isDaytonaOwnError', () => {
+  const json = { 'content-type': 'application/json' }
+
+  test("recognizes Daytona's answer for a port nothing listens on", async () => {
+    const response = new Response(
+      '{"statusCode":502,"message":"proxy upstream error","source":"DAYTONA_DAEMON","path":"/","method":"GET"}',
+      { status: 502, headers: json },
+    )
+
+    expect(await isDaytonaOwnError(response)).toBe(true)
+    // The body is still there for whoever sends the response on.
+    expect(await response.text()).toContain('proxy upstream error')
+  })
+
+  test("leaves the sandbox's own answers alone", async () => {
+    expect(
+      await isDaytonaOwnError(
+        new Response('{"error":"bad gateway"}', { status: 502, headers: json }),
+      ),
+    ).toBe(false)
+
+    expect(
+      await isDaytonaOwnError(new Response('{"source":"DAYTONA_DAEMON"}', { headers: json })),
+    ).toBe(false)
+
+    expect(await isDaytonaOwnError(new Response('<h1>Bad gateway</h1>', { status: 502 }))).toBe(
+      false,
+    )
+
+    expect(await isDaytonaOwnError(new Response('{not json', { status: 500, headers: json }))).toBe(
+      false,
+    )
   })
 })

@@ -24,6 +24,7 @@ import {
 import { ContainerWorkspace } from './container-workspace'
 import {
   connectDaytonaSandbox,
+  isDaytonaOwnError,
   openDaytonaTerminal,
   peekDaytonaSandbox,
   proxyDaytonaPreview,
@@ -35,7 +36,7 @@ import { cloudflareHost, type SandboxHost } from './host'
 import { MemoryWorkspace } from './memory-workspace'
 import { isDemoRepo, orgOfSandbox } from './names'
 import { parsePreviewHost } from './preview-host'
-import { proxyContainerPreview } from './preview-proxy'
+import { previewUnavailableResponse, proxyContainerPreview } from './preview-proxy'
 import { sessionRemote } from './repo-access'
 import { restoreSession, snapshotSession, type SessionSnapshot } from './session-sync'
 import { openContainerTerminal } from './terminal'
@@ -183,12 +184,31 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
     ) {
       void again?.cancel().catch(() => {})
 
-      return response
+      return this.daytonaAnswer(request, port, response)
     }
 
     this.daytona = null
 
-    return proxyDaytonaPreview(request, await this.daytonaSandbox(), port, again)
+    return this.daytonaAnswer(
+      request,
+      port,
+      await proxyDaytonaPreview(request, await this.daytonaSandbox(), port, again),
+    )
+  }
+
+  /** A preview response, with Daytona's own errors replaced by ours so they never reach a person. */
+  private async daytonaAnswer(
+    request: Request,
+    port: number,
+    response: Response,
+  ): Promise<Response> {
+    if (!(await isDaytonaOwnError(response))) {
+      return response
+    }
+
+    void response.body?.cancel().catch(() => {})
+
+    return previewUnavailableResponse(request, port)
   }
 
   /** The machine this sandbox runs on. Not available in memory mode. */

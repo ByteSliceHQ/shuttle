@@ -79,6 +79,31 @@ export function sandboxNotRunning(failure: unknown): boolean {
   return text.includes(NOT_RUNNING)
 }
 
+/** The largest body worth reading to see whether an error is Daytona's own. */
+const OWN_ERROR_MAX_BYTES = 4096
+
+/**
+ * Whether a preview response is Daytona's own error rather than an answer from the sandbox, as
+ * when nothing listens on the port. Daytona signs these with a `source` naming itself.
+ */
+export async function isDaytonaOwnError(response: Response): Promise<boolean> {
+  if (response.status < 400 || !response.headers.get('content-type')?.includes('json')) {
+    return false
+  }
+
+  if (Number(response.headers.get('content-length') ?? 0) > OWN_ERROR_MAX_BYTES) {
+    return false
+  }
+
+  try {
+    const body = (await response.clone().json()) as { source?: unknown } | null
+
+    return typeof body?.source === 'string' && body.source.startsWith('DAYTONA')
+  } catch {
+    return false
+  }
+}
+
 /**
  * Brings a sandbox to `started` from whatever state it is in.
  *
