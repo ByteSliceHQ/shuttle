@@ -47,6 +47,7 @@ const SECTION_HINTS: Record<ModelSection, string> = {
   openrouter: 'Conductor and workers',
   codex: 'Your subscription',
   'claude-code': 'Your subscription',
+  cursor: 'Your subscription',
 }
 
 /** Model lists already fetched, so the trigger can name a model without waiting on each mount. */

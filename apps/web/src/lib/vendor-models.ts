@@ -10,6 +10,7 @@ export const SECTION_LABELS: Record<ModelSection, string> = {
   openrouter: 'Shuttle',
   codex: 'Codex',
   'claude-code': 'Claude Code',
+  cursor: 'Cursor',
 }
 
 /**
@@ -25,6 +26,7 @@ export function modelSections(harness: HarnessId, team: Team): ModelSection[] {
     'openrouter',
     ...(team.codex ? (['codex'] as const) : []),
     ...(team.claudeCode ? (['claude-code'] as const) : []),
+    ...(team.cursor ? (['cursor'] as const) : []),
   ]
 }
 

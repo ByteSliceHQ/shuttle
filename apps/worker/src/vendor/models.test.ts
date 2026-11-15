@@ -84,6 +84,6 @@ describe('vendor model lists', () => {
   test('every supported agent has a built-in list', () => {
     expect(builtInVendorModels('codex').length).toBeGreaterThan(0)
     expect(builtInVendorModels('claude-code').map((model) => model.id)).toContain('opus')
-    expect(builtInVendorModels('cursor')).toEqual([])
+    expect(builtInVendorModels('cursor').map((model) => model.id)).toContain('composer-2.5')
   })
 })

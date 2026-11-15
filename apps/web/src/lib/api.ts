@@ -223,7 +223,7 @@ export async function setLlmModel(runId: string, model: string): Promise<{ model
   return (await response.json()) as { model: string }
 }
 
-export type HarnessId = 'shuttle' | 'codex' | 'claude-code'
+export type HarnessId = 'shuttle' | 'codex' | 'claude-code' | 'cursor'
 
 export interface Connection {
   readonly harness: Exclude<HarnessId, 'shuttle'>
@@ -243,10 +243,17 @@ export interface Team {
   readonly workers: boolean
   readonly codex: boolean
   readonly claudeCode: boolean
+  readonly cursor: boolean
   readonly preset: TeamPreset
 }
 
-export const DEFAULT_TEAM: Team = { workers: true, codex: false, claudeCode: false, preset: 'none' }
+export const DEFAULT_TEAM: Team = {
+  workers: true,
+  codex: false,
+  claudeCode: false,
+  cursor: false,
+  preset: 'none',
+}
 
 export interface ConnectionsState {
   /** The harness new sessions start on. */

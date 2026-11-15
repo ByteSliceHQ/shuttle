@@ -10,6 +10,7 @@ describe('vendor member agents', () => {
     expect(codex.conversational).toBe(false)
     expect(vendorHarnessOfModel(codex.model)).toBe('codex')
     expect(vendorHarnessOfModel(createVendorMemberAgent('claude-code').model)).toBe('claude-code')
+    expect(vendorHarnessOfModel(createVendorMemberAgent('cursor').model)).toBe('cursor')
   })
 
   test('ordinary model ids are not vendor agents', () => {

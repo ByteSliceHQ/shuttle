@@ -35,7 +35,18 @@ describe('parseTeam', () => {
       workers: false,
       codex: true,
       claudeCode: true,
+      cursor: false,
       preset: 'codex-builds-claude-reviews',
+    })
+  })
+
+  test('reads a team that includes Cursor', () => {
+    expect(parseTeam({ workers: true, cursor: true })).toEqual({
+      workers: true,
+      codex: false,
+      claudeCode: false,
+      cursor: true,
+      preset: 'none',
     })
   })
 
@@ -62,6 +73,7 @@ describe('onTeam', () => {
     expect(onTeam(team, 'codex')).toBe(true)
     expect(onTeam(team, 'claude-code')).toBe(false)
     expect(onTeam(team, 'cursor')).toBe(false)
+    expect(onTeam({ ...DEFAULT_TEAM, cursor: true }, 'cursor')).toBe(true)
   })
 })
 

@@ -198,6 +198,7 @@ function summarizeShuttle(event: SessionEvent): EventSummary | undefined {
           payload.workers === true ? 'workers' : null,
           payload.codex === true ? 'codex' : null,
           payload.claudeCode === true ? 'claude-code' : null,
+          payload.cursor === true ? 'cursor' : null,
         ]
           .filter(Boolean)
           .join(', '),

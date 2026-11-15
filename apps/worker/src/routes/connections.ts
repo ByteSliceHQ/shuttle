@@ -289,6 +289,32 @@ async function vendorModels(
   return cached?.models ?? builtInVendorModels(harness)
 }
 
+/** Daytona (and some containers) can report the bridge gone before its event file is visible. */
+async function readLoginAftermath(
+  loginId: string,
+  offset: number,
+  sandbox: ReturnType<typeof sandboxStub>,
+): Promise<{ page: Awaited<ReturnType<typeof sandbox.readAgentEvents>>; log: string }> {
+  let page = await sandbox.readAgentEvents(loginId, offset)
+  let log = ''
+
+  for (let attempt = 0; attempt < 5 && page.events.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    page = await sandbox.readAgentEvents(loginId, offset)
+    log = (await sandbox.readAgentLog(loginId).catch(() => ({ log: '' }))).log
+
+    if (page.events.length > 0 || log.trim()) {
+      break
+    }
+  }
+
+  if (!log.trim()) {
+    log = (await sandbox.readAgentLog(loginId).catch(() => ({ log: '' }))).log
+  }
+
+  return { page, log }
+}
+
 async function followLogin(
   harness: VendorHarnessId,
   loginId: string,
@@ -301,33 +327,38 @@ async function followLogin(
     keepInSandbox: boolean
   },
 ): Promise<Response> {
-  const page = await deps.sandbox.readAgentEvents(
-    loginId,
-    Number.isFinite(offset) && offset > 0 ? offset : 0,
-  )
+  const startOffset = Number.isFinite(offset) && offset > 0 ? offset : 0
+  let page = await deps.sandbox.readAgentEvents(loginId, startOffset)
 
-  const end = page.events.find(isTerminalBridgeEvent) as
+  let end = page.events.find(isTerminalBridgeEvent) as
     | Extract<BridgeEvent, { type: 'login_done' }>
     | undefined
 
-  if (!end?.success) {
-    // A sign-in that has said nothing may never say anything: the process behind it can die
-    // before it starts, and then waiting would last forever.
-    if (!end && page.events.length === 0) {
-      const { state } = await deps.sandbox.agentRunState(loginId)
+  // A bridge that fails immediately can exit before the sandbox filesystem shows its events.
+  // Wait briefly so we surface the real login_done error instead of an empty log.
+  if (!end && page.events.length === 0) {
+    const { state } = await deps.sandbox.agentRunState(loginId)
 
-      if (state === 'exited' || state === 'missing') {
-        const { log } = await deps.sandbox.readAgentLog(loginId).catch(() => ({ log: '' }))
+    if (state === 'exited' || state === 'missing') {
+      const aftermath = await readLoginAftermath(loginId, startOffset, deps.sandbox)
+      page = aftermath.page
 
+      end = page.events.find(isTerminalBridgeEvent) as
+        | Extract<BridgeEvent, { type: 'login_done' }>
+        | undefined
+
+      if (!end) {
         return json({
           ...page,
           done: true,
           connected: false,
-          error: explainDeadRun(vendorHarnessInfo(harness).label, log),
+          error: explainDeadRun(vendorHarnessInfo(harness).label, aftermath.log),
         })
       }
     }
+  }
 
+  if (!end?.success) {
     return json({ ...page, connected: false })
   }
 

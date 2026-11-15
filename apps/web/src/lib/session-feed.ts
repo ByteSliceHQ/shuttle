@@ -682,6 +682,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
         payload.workers === true ? 'Shuttle workers' : null,
         payload.codex === true ? 'Codex' : null,
         payload.claudeCode === true ? 'Claude Code' : null,
+        payload.cursor === true ? 'Cursor' : null,
       ].filter(Boolean)
 
       return appendItem(feed, {

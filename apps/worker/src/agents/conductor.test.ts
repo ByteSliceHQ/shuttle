@@ -40,11 +40,9 @@ describe('delegate tools', () => {
   test('one tool per team member', () => {
     expect(tools({}).map((tool) => tool.name)).toEqual(['delegate'])
 
-    expect(tools({ codex: true, claudeCode: true }).map((tool) => tool.name)).toEqual([
-      'delegate',
-      'delegate_codex',
-      'delegate_claude',
-    ])
+    expect(tools({ codex: true, claudeCode: true, cursor: true }).map((tool) => tool.name)).toEqual(
+      ['delegate', 'delegate_codex', 'delegate_claude', 'delegate_cursor'],
+    )
 
     expect(tools({ workers: false, codex: true }).map((tool) => tool.name)).toEqual([
       'delegate_codex',
@@ -53,8 +51,10 @@ describe('delegate tools', () => {
 
   test('each tool spawns its own agent', () => {
     expect(
-      tools({ codex: true, claudeCode: true }).map((tool) => `${tool.childKind}:${tool.childName}`),
-    ).toEqual(['agent:worker', 'agent:codex', 'agent:claude-code'])
+      tools({ codex: true, claudeCode: true, cursor: true }).map(
+        (tool) => `${tool.childKind}:${tool.childName}`,
+      ),
+    ).toEqual(['agent:worker', 'agent:codex', 'agent:claude-code', 'agent:cursor'])
   })
 
   test("a preset puts each agent's role on its tool", () => {

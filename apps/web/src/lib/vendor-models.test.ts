@@ -13,6 +13,7 @@ const team = (change: Partial<Team> = {}): Team => ({
   workers: true,
   codex: false,
   claudeCode: false,
+  cursor: false,
   preset: 'none',
   ...change,
 })
@@ -36,11 +37,9 @@ describe('modelSections', () => {
   test('a Shuttle session offers its own models, then each vendor agent on the team', () => {
     expect(modelSections('shuttle', team())).toEqual(['openrouter'])
 
-    expect(modelSections('shuttle', team({ codex: true, claudeCode: true }))).toEqual([
-      'openrouter',
-      'codex',
-      'claude-code',
-    ])
+    expect(modelSections('shuttle', team({ codex: true, claudeCode: true, cursor: true }))).toEqual(
+      ['openrouter', 'codex', 'claude-code', 'cursor'],
+    )
   })
 })
 

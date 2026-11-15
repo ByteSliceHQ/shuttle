@@ -12,6 +12,7 @@ import {
 import type { AgentIdentity } from '@/lib/agents'
 import {
   DEFAULT_TEAM,
+  fetchConnections,
   fetchSessionTeam,
   fetchSessionVendorModels,
   say,
@@ -21,6 +22,7 @@ import {
   setSessionHarness,
   setSessionTeam,
   setSessionVendorModel,
+  type Connection,
   type HarnessId,
   type Team,
   type VendorHarnessId,
@@ -31,6 +33,7 @@ import { cn, errorMessage } from '@/lib/cn'
 import { readStoredLlmModel, writeStoredLlmModel, type OpenRouterModelId } from '@/lib/llm-models'
 import { routeStyles } from '@/lib/routes'
 import { interjectionKinds, isInterjectionKind, type InterjectionKind } from '@/lib/session-feed'
+import { effectiveTeam } from '@/lib/team'
 
 import { ContextUsage } from './context-usage'
 import { HarnessSwitcher } from './harness-switcher'
@@ -51,15 +54,16 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip'
 const AUTO = 'auto'
 const STEERABLE = new Set(['conductor', 'worker'])
 /** Team members a message can be addressed to, as `@<mention>` for the conductor to route. */
-type Mention = 'worker' | 'codex' | 'claude'
+type Mention = 'worker' | 'codex' | 'claude' | 'cursor'
 
 const MENTION_LABELS: Record<Mention, string> = {
   worker: 'Shuttle worker',
   codex: 'Codex',
   claude: 'Claude Code',
+  cursor: 'Cursor',
 }
 
-const ADDRESSED = /^@(worker|codex|claude)\b/i
+const ADDRESSED = /^@(worker|codex|claude|cursor)\b/i
 
 function teamMentions(team: Team): Mention[] {
   const mentions: Mention[] = []
@@ -74,6 +78,10 @@ function teamMentions(team: Team): Mention[] {
 
   if (team.claudeCode) {
     mentions.push('claude')
+  }
+
+  if (team.cursor) {
+    mentions.push('cursor')
   }
 
   return mentions
@@ -119,6 +127,7 @@ export function Composer({
 
   const [model, setModel] = useState<OpenRouterModelId>(() => readStoredLlmModel())
   const [team, setTeam] = useState<Team>(DEFAULT_TEAM)
+  const [connections, setConnections] = useState<readonly Connection[] | null>(null)
   const [vendorChoices, setVendorChoices] = useState<VendorModelChoices>({})
   const [mention, setMention] = useState<Mention | null>(null)
   const [sending, setSending] = useState(false)
@@ -144,6 +153,11 @@ export function Composer({
       () => {},
     )
 
+    void fetchConnections().then(
+      (result) => setConnections(result.connections),
+      () => {},
+    )
+
     void fetchSessionVendorModels(runId).then(
       (result) => setVendorChoices(result.choices),
       () => {},
@@ -151,7 +165,9 @@ export function Composer({
   }, [runId])
 
   // Only a Shuttle session has a team to address, and only its members can be.
-  const mentions = harness === 'shuttle' ? teamMentions(team) : []
+  // A saved team can name an agent that is not connected. It will not run, so it is not offered.
+  const activeTeam = connections ? effectiveTeam(team, connections) : team
+  const mentions = harness === 'shuttle' ? teamMentions(activeTeam) : []
   const hybrid = mentions.some((member) => member !== 'worker')
   const activeMention = mention && hybrid && mentions.includes(mention) ? mention : null
 
@@ -378,7 +394,7 @@ export function Composer({
             />
             <ModelSwitcher
               harness={harness}
-              team={team}
+              team={activeTeam}
               value={model}
               onChange={onModelChange}
               vendorChoices={vendorChoices}

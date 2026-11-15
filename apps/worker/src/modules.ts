@@ -46,6 +46,7 @@ export function shuttleModules(
         // Vendor agents the conductor can delegate to in a hybrid session.
         createVendorMemberAgent('codex'),
         createVendorMemberAgent('claude-code'),
+        createVendorMemberAgent('cursor'),
         narrator,
         reflector,
         reviewer,

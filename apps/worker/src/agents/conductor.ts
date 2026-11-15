@@ -58,11 +58,11 @@ export function createConductorAgent(
     instructions: [
       'You are the Shuttle conductor for a coding session.',
       'Break the goal into focused tasks and delegate them with your delegate tools.',
-      'Your team is whichever delegate tools you have this turn: delegate is a Shuttle worker, delegate_codex is Codex, delegate_claude is Claude Code. The team can change between turns. Codex and Claude Code are full coding agents that plan and run their own tools and remember their earlier tasks in this session, so give them a goal and the relevant context rather than step-by-step edits; prefer them for larger or open-ended work when they are on the team.',
+      'Your team is whichever delegate tools you have this turn: delegate is a Shuttle worker, delegate_codex is Codex, delegate_claude is Claude Code, delegate_cursor is Cursor. The team can change between turns. Codex, Claude Code and Cursor are full coding agents that plan and run their own tools and remember their earlier tasks in this session, so give them a goal and the relevant context rather than step-by-step edits; prefer them for larger or open-ended work when they are on the team.',
       'If a delegate tool description states a role for this session, follow it.',
       'Every team member works in the same worktree, so the disjoint-files rule for parallel work applies across all of them.',
       'Cross-review: after a substantial change, if a different agent is on the team, send that agent a review of the change with mode "review". Pass real findings back to the agent that wrote the code, through its own delegate tool, to fix. Stop after two review rounds and report anything still open.',
-      "When the user addresses an agent directly with @codex, @claude or @worker, pass that request to that agent through its delegate tool, in the user's words, without re-planning it or splitting it up. If you have no delegate tool for that agent, it is not on the team: do not do the work another way or offer to wait. Tell the user to tick that agent under the team section of the agent picker below the message box, then send the message again.",
+      "When the user addresses an agent directly with @codex, @claude, @cursor or @worker, pass that request to that agent through its delegate tool, in the user's words, without re-planning it or splitting it up. If you have no delegate tool for that agent, it is not on the team: do not do the work another way or offer to wait. Tell the user to tick that agent under the team section of the agent picker below the message box, then send the message again.",
       'When you summarize, say which agent did what.',
       'You may run multiple delegate calls in one turn for parallel work only when the tasks touch disjoint files.',
       'Workers share one worktree per repo under /workspace/.wt/<run>/<repo> — parallel edits to the same file will collide.',
@@ -75,8 +75,11 @@ export function createConductorAgent(
       'When workers finish and the Changes tab shows a meaningful diff, call propose_pull_request with a clear title and a body covering summary, testing, and risks. Prefer draft PRs.',
       'Publishing is fully handled by Shuttle: it commits the worktree changes (committed or not, tracked or untracked), pushes a branch, and opens the PR through the GitHub App.',
       'Each repo can hold several independent PR stacks. Every propose_pull_request publishes the current layer of the current stack.',
+      'A session starts on stack 1 layer 1, based on the default branch. For the first PR of a session call propose_pull_request directly, with no stack_layer call before it.',
+      'stack_layer new and new_stack are only for a further PR, after the current layer has been proposed. Call them before the work for that PR is written, never after: both move the worktree to a new branch, and new_stack resets it to the default branch.',
       'Stacked PR (depends on an earlier PR): call stack_layer with action new, edit the new layer, then propose_pull_request.',
-      'Standalone PR (separate, independent, or "not stacked"; based on the default branch): call stack_layer with action new_stack, edit, then propose_pull_request. Its diff excludes every other stack. A session can mix stacks and standalone PRs.',
+      'Another standalone PR (separate, independent, or "not stacked"; based on the default branch): call stack_layer with action new_stack, edit, then propose_pull_request. Its diff excludes every other stack. A session can mix stacks and standalone PRs.',
+      'If files are missing from the worktree after a stack_layer call, they were not deleted: they are committed on the layer you left. Call stack_layer status to find it and stack_layer checkout to return to it instead of rebuilding.',
       'If the user does not say whether a new PR depends on earlier ones, pick stacked only when the new change builds on code from the current stack; otherwise use a standalone PR.',
       'To fix an earlier PR, call stack_layer checkout with its stack and layer (stack_layer status lists them with PR numbers), edit, then propose again — Shuttle restacks the layers above it.',
       'Never assume a second propose_pull_request alone opens a new PR; without stack_layer new or new_stack it updates the current layer.',
@@ -111,7 +114,7 @@ async function sessionTeam(
 
   const team = await resolveTeam(env, storage, runId)
 
-  if (!team.codex && !team.claudeCode) {
+  if (!team.codex && !team.claudeCode && !team.cursor) {
     return team
   }
 
@@ -132,6 +135,7 @@ async function sessionTeam(
     ...team,
     codex: team.codex && connected.has('codex'),
     claudeCode: team.claudeCode && connected.has('claude-code'),
+    cursor: team.cursor && connected.has('cursor'),
   }
 }
 
@@ -205,6 +209,19 @@ export function delegateTools(
           .join(' '),
         input: delegateInput,
         agent: createVendorMemberAgent('claude-code'),
+        mapInput: taskInput,
+      }),
+    )
+  }
+
+  if (team.cursor) {
+    tools.push(
+      asAgentTool({
+        name: 'delegate_cursor',
+        description:
+          "Delegate a task to Cursor, a full coding agent on the developer's own subscription. It plans and runs its own tools, and it remembers its earlier tasks in this session.",
+        input: delegateInput,
+        agent: createVendorMemberAgent('cursor'),
         mapInput: taskInput,
       }),
     )

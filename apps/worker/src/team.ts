@@ -18,11 +18,18 @@ export interface Team {
   readonly workers: boolean
   readonly codex: boolean
   readonly claudeCode: boolean
+  readonly cursor: boolean
   /** Standing roles for the agents, or `none` to let the conductor decide. */
   readonly preset: PresetId
 }
 
-export const DEFAULT_TEAM: Team = { workers: true, codex: false, claudeCode: false, preset: 'none' }
+export const DEFAULT_TEAM: Team = {
+  workers: true,
+  codex: false,
+  claudeCode: false,
+  cursor: false,
+  preset: 'none',
+}
 export const TEAM_STORAGE_KEY = 'shuttle:team'
 
 /** How a task is framed for the agent that receives it. */
@@ -44,14 +51,19 @@ export function parseTeam(value: unknown): Team | null {
   const fields = value as Record<string, unknown>
   const codex = fields.codex === true
   const claudeCode = fields.claudeCode === true
-  const workers = fields.workers !== false || (!codex && !claudeCode)
+  const cursor = fields.cursor === true
+  const workers = fields.workers !== false || (!codex && !claudeCode && !cursor)
   const preset = isPreset(fields.preset) && codex && claudeCode ? fields.preset : 'none'
 
-  return { workers, codex, claudeCode, preset }
+  return { workers, codex, claudeCode, cursor, preset }
 }
 
 export function onTeam(team: Team, harness: VendorHarnessId): boolean {
-  return (harness === 'codex' && team.codex) || (harness === 'claude-code' && team.claudeCode)
+  return (
+    (harness === 'codex' && team.codex) ||
+    (harness === 'claude-code' && team.claudeCode) ||
+    (harness === 'cursor' && team.cursor)
+  )
 }
 
 type TeamStorage = Pick<DurableObjectStorage, 'get' | 'put'>

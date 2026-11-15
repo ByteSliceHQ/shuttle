@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { runClaudeLogin, runClaudeTurn } from './claude.ts'
 import { listCodexModels, runCodexLogin, runCodexTurn } from './codex.ts'
+import { listCursorModels, runCursorLogin, runCursorTurn } from './cursor.ts'
 import { collectHomeFiles, seedHomeFiles } from './home.ts'
 import {
   BRIDGE_EVENTS_FILE,
@@ -89,6 +90,10 @@ async function runTurn(request: BridgeTurnRequest, emit: BridgeEmit, signal: Abo
     return runClaudeTurn(request, emit, signal)
   }
 
+  if (request.harness === 'cursor') {
+    return runCursorTurn(request, emit, signal)
+  }
+
   emit({
     type: 'turn_done',
     status: 'failed',
@@ -109,6 +114,10 @@ async function runLogin(
 
   if (request.harness === 'claude-code') {
     return runClaudeLogin(emit, signal, readInput)
+  }
+
+  if (request.harness === 'cursor') {
+    return runCursorLogin(emit, signal)
   }
 
   emit({
@@ -142,14 +151,20 @@ async function main(): Promise<void> {
   }
 
   if (mode === 'models') {
-    // Only Codex can list its models. The rest have a fixed list kept by the Worker.
-    if (argument('harness') !== 'codex') {
-      console.error('models: only the codex harness lists its models')
-      process.exitCode = 2
+    const harness = argument('harness')
+
+    if (harness === 'codex') {
+      await print(JSON.stringify({ models: await listCodexModels() }))
       return
     }
 
-    await print(JSON.stringify({ models: await listCodexModels() }))
+    if (harness === 'cursor') {
+      await print(JSON.stringify({ models: await listCursorModels() }))
+      return
+    }
+
+    console.error('models: only the codex and cursor harnesses list their models')
+    process.exitCode = 2
     return
   }
 

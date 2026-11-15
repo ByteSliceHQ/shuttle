@@ -26,8 +26,12 @@ RUN npm install -g --no-fund --no-audit \
     @openai/codex@${CODEX_VERSION} \
     @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
   && npm cache clean --force
-# Cursor publishes its CLI through this installer only; it installs to /root/.local/bin.
-RUN curl -fsS https://cursor.com/install | bash
+# Cursor publishes its CLI through this installer only; it installs to ~/.local/bin. Link it into
+# /usr/local/bin so Daytona sandboxes (non-root) can still find `agent`.
+RUN curl -fsS https://cursor.com/install | bash \
+  && ln -sf /root/.local/bin/agent /usr/local/bin/agent \
+  && ln -sf /root/.local/bin/cursor-agent /usr/local/bin/cursor-agent \
+  && agent --version
 ENV PATH="/root/.local/bin:${PATH}"
 
 # Language servers for shuttle-lsp, which reports type errors back to agents as they edit.

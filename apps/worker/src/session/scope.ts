@@ -212,6 +212,8 @@ export const shuttleCatalog = defineEventCatalog('shuttle', {
     workers: Schema.Boolean,
     codex: Schema.Boolean,
     claudeCode: Schema.Boolean,
+    // Optional so team-change events recorded before Cursor was a teammate still validate.
+    cursor: Schema.optional(Schema.Boolean),
     preset: Schema.String,
   }),
   'vendor.turn_started': Schema.Struct({

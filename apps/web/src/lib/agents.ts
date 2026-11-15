@@ -52,6 +52,12 @@ const roles: Record<string, AgentRole> = {
     tone: 'text-route-question',
     blurb: 'Claude Code on your subscription, taking tasks from the conductor.',
   },
+  cursor: {
+    label: 'Cursor',
+    icon: Bot,
+    tone: 'text-route-idea',
+    blurb: 'Cursor on your subscription, taking tasks from the conductor.',
+  },
   narrator: {
     label: 'Narrator',
     icon: MessageCircleQuestion,

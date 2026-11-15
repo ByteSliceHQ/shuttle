@@ -90,18 +90,42 @@ const CODEX_FALLBACK_MODELS: readonly VendorModel[] = [
   },
 ]
 
+/**
+ * Shown for Cursor only when its own list cannot be fetched. Cursor's list is the source of
+ * truth; see `listCursorModels` in the bridge.
+ */
+const CURSOR_FALLBACK_MODELS: readonly VendorModel[] = [
+  {
+    id: 'composer-2.5',
+    label: 'Composer 2.5',
+    description: "Cursor's coding model for everyday agent work.",
+    efforts: [],
+    isDefault: true,
+  },
+  {
+    id: 'auto',
+    label: 'Auto',
+    description: 'Lets Cursor pick a model for the task.',
+    efforts: [],
+  },
+]
+
 /** The models to offer when the agent cannot be asked for its own list. */
 export function builtInVendorModels(harness: VendorHarnessId): readonly VendorModel[] {
   if (harness === 'claude-code') {
     return CLAUDE_MODELS
   }
 
-  return harness === 'codex' ? CODEX_FALLBACK_MODELS : []
+  if (harness === 'codex') {
+    return CODEX_FALLBACK_MODELS
+  }
+
+  return harness === 'cursor' ? CURSOR_FALLBACK_MODELS : []
 }
 
 /** Whether the agent can report its own models, which then replace the built-in list. */
 export function listsOwnModels(harness: VendorHarnessId): boolean {
-  return harness === 'codex'
+  return harness === 'codex' || harness === 'cursor'
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

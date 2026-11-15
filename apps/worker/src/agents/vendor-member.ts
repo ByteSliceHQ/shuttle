@@ -18,15 +18,15 @@ export function vendorHarnessOfModel(model: string | undefined): VendorHarnessId
 
   const harness = model.slice('vendor:'.length)
 
-  return harness === 'codex' || harness === 'claude-code' ? harness : null
+  return harness === 'codex' || harness === 'claude-code' || harness === 'cursor' ? harness : null
 }
 
 /**
- * A vendor agent (Codex, Claude Code) as a member of the session's team. The conductor delegates
- * to it the way it does to a worker; each of its turns runs on the vendor agent in the sandbox,
- * which does its own planning and tool use and replies with what it did.
+ * A vendor agent (Codex, Claude Code, Cursor) as a member of the session's team. The conductor
+ * delegates to it the way it does to a worker; each of its turns runs on the vendor agent in the
+ * sandbox, which does its own planning and tool use and replies with what it did.
  */
-export function createVendorMemberAgent(harness: 'codex' | 'claude-code') {
+export function createVendorMemberAgent(harness: 'codex' | 'claude-code' | 'cursor') {
   const label = vendorHarnessInfo(harness).label
 
   return defineAgent({

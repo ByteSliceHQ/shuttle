@@ -6,11 +6,13 @@ import {
   DEFAULT_TEAM,
   fetchConnections,
   setSessionDefaults,
+  type Connection,
   type ConnectionsState,
   type HarnessId,
   type Team,
   type TeamPreset,
 } from '@/lib/api'
+import { effectiveTeam, withTeamChange } from '@/lib/team'
 
 import {
   DropdownMenu,
@@ -37,17 +39,30 @@ const PRESETS = Object.keys(PRESET_LABELS) as TeamPreset[]
 
 /** What the picker shows for a Shuttle session, naming the vendor agents on its team. */
 function teamLabel(team: Team | undefined): string {
-  const members = [team?.codex ? 'Codex' : null, team?.claudeCode ? 'Claude' : null].filter(Boolean)
+  const members = [
+    team?.codex ? 'Codex' : null,
+    team?.claudeCode ? 'Claude' : null,
+    team?.cursor ? 'Cursor' : null,
+  ].filter(Boolean)
 
   return members.length > 0 ? `${SHUTTLE_LABEL} + ${members.join(' + ')}` : SHUTTLE_LABEL
 }
 
-/** A team always has someone to do the work, and a preset needs both agents it names. */
-function withTeamChange(team: Team, change: Partial<Team>): Team {
-  const next = { ...team, ...change }
-  const workers = next.workers || (!next.codex && !next.claudeCode)
+function teamKey(harness: Connection['harness']): 'codex' | 'claudeCode' | 'cursor' {
+  switch (harness) {
+    case 'codex':
+      return 'codex'
+    case 'claude-code':
+      return 'claudeCode'
+    case 'cursor':
+      return 'cursor'
 
-  return { ...next, workers, preset: next.codex && next.claudeCode ? next.preset : 'none' }
+    default: {
+      const exhaustive: never = harness
+
+      return exhaustive
+    }
+  }
 }
 
 /** Picks which agent runs the session: Shuttle's own loop, or a connected subscription. */
@@ -78,15 +93,17 @@ export function HarnessSwitcher({
 
   const connections = state?.connections ?? []
   const label = connections.find((entry) => entry.harness === value)?.label ?? SHUTTLE_LABEL
+  // Until the connections load, show the team as saved rather than flash an empty one.
+  const shown = team && state ? effectiveTeam(team, connections) : team
 
   return (
     <DropdownMenu onOpenChange={(open) => (open ? reload() : undefined)}>
       <DropdownMenuTrigger
         disabled={disabled}
         aria-label="Agent"
-        className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 data-[state=open]:bg-accent data-[state=open]:text-foreground ease-snappy flex h-7 min-w-0 shrink-0 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap transition-[background-color,color,transform] duration-150 outline-none focus-visible:ring-[3px] active:scale-[0.97] disabled:opacity-50"
+        className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 data-[state=open]:bg-accent data-[state=open]:text-foreground ease-snappy flex h-7 min-w-0 shrink items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap transition-[background-color,color,transform] duration-150 outline-none focus-visible:ring-[3px] active:scale-[0.97] disabled:opacity-50"
       >
-        <span className="truncate">{value === 'shuttle' ? teamLabel(team) : label}</span>
+        <span className="truncate">{value === 'shuttle' ? teamLabel(shown) : label}</span>
         <ChevronDown className="size-3 shrink-0 opacity-60" />
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -115,32 +132,32 @@ export function HarnessSwitcher({
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
-        {value === 'shuttle' && team && onTeamChange ? (
+        {value === 'shuttle' && shown && onTeamChange ? (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuLabel>Shuttle&apos;s team</DropdownMenuLabel>
             <DropdownMenuCheckboxItem
-              checked={team.workers}
+              checked={shown.workers}
               // Keep the menu open: a team is usually set with a few clicks.
               onSelect={(event) => event.preventDefault()}
               onCheckedChange={(checked) =>
-                onTeamChange(withTeamChange(team, { workers: checked }))
+                onTeamChange(withTeamChange(shown, { workers: checked }))
               }
             >
               Shuttle workers
               <span className="text-muted-foreground ml-auto text-[10px]">OpenRouter</span>
             </DropdownMenuCheckboxItem>
             {connections.map((connection) => {
-              const key = connection.harness === 'codex' ? 'codex' : 'claudeCode'
+              const key = teamKey(connection.harness)
 
               return (
                 <DropdownMenuCheckboxItem
                   key={connection.harness}
-                  checked={team[key] && connection.connected}
+                  checked={shown[key]}
                   disabled={!connection.connected}
                   onSelect={(event) => event.preventDefault()}
                   onCheckedChange={(checked) =>
-                    onTeamChange(withTeamChange(team, { [key]: checked }))
+                    onTeamChange(withTeamChange(shown, { [key]: checked }))
                   }
                 >
                   {connection.label}
@@ -150,14 +167,14 @@ export function HarnessSwitcher({
                 </DropdownMenuCheckboxItem>
               )
             })}
-            {team.codex && team.claudeCode ? (
+            {shown.codex && shown.claudeCode ? (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel>Roles</DropdownMenuLabel>
                 <DropdownMenuRadioGroup
-                  value={team.preset}
+                  value={shown.preset}
                   onValueChange={(preset) =>
-                    onTeamChange(withTeamChange(team, { preset: preset as TeamPreset }))
+                    onTeamChange(withTeamChange(shown, { preset: preset as TeamPreset }))
                   }
                 >
                   {PRESETS.map((preset) => (
@@ -206,7 +223,7 @@ export function useDefaultHarness(): {
     fetchConnections().then(
       (state) => {
         setHarness(state.defaultHarness)
-        setTeam(state.defaultTeam)
+        setTeam(effectiveTeam(state.defaultTeam, state.connections))
       },
       () => {},
     )

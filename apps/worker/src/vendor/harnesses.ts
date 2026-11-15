@@ -20,7 +20,13 @@ const HARNESSES: Record<string, VendorHarnessInfo> = {
     credentialFiles: ['.claude/.credentials.json'],
     supported: true,
   },
-  cursor: { label: 'Cursor', credentialFiles: [], supported: false },
+  cursor: {
+    label: 'Cursor',
+    // On Linux the CLI writes the account login here after `agent login` (see Cursor auth docs /
+    // Sessionboxer). `cli-config.json` under `.cursor` is settings, not the sign-in.
+    credentialFiles: ['.config/cursor/auth.json'],
+    supported: true,
+  },
 }
 
 export function vendorHarnessInfo(harness: VendorHarnessId): VendorHarnessInfo {
@@ -28,4 +34,8 @@ export function vendorHarnessInfo(harness: VendorHarnessId): VendorHarnessInfo {
 }
 
 /** The harnesses offered on the Connections page, in display order. */
-export const CONNECTABLE_HARNESSES = ['codex', 'claude-code'] as const satisfies VendorHarnessId[]
+export const CONNECTABLE_HARNESSES = [
+  'codex',
+  'claude-code',
+  'cursor',
+] as const satisfies VendorHarnessId[]
