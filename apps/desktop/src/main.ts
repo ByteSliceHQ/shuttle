@@ -23,6 +23,14 @@ import { Store } from './store'
  * Storage) happens in the deployment; the one credential kept here is this machine's own token.
  */
 
+/**
+ * The app's name decides where its data lives and what its keychain entry is called, so it is
+ * set before anything reads either. A copy run from the repository gets a name of its own:
+ * macOS ties a keychain entry to the app that made it, and asks for the login password when a
+ * differently signed app reaches for it.
+ */
+app.setName(app.isPackaged ? 'Shuttle' : 'Shuttle Dev')
+
 /** What this build was packaged to use. Empty when run from the repository. */
 const PACKAGED = readPackagedConfig(process.resourcesPath)
 
