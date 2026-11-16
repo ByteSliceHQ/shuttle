@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { EmptyState } from '@/components/ui/panel'
-import { fetchPreviewLabel, resolveBrowserTarget } from '@/lib/sandbox'
+import { fetchPreviewAddress, type PreviewAddress, resolveBrowserTarget } from '@/lib/sandbox'
 import { tabTitleForKind } from '@/lib/session-tabs'
 
 export function BrowserViewer({
@@ -16,16 +16,16 @@ export function BrowserViewer({
   target: string
   onRetarget: (title: string, nextTarget: string) => void
 }) {
-  // The label that leads to this session's sandbox in a preview hostname.
-  const [previewLabel, setPreviewLabel] = useState<string>()
+  // Where this session's sandbox answers previews.
+  const [preview, setPreview] = useState<PreviewAddress>()
 
   useEffect(() => {
     let current = true
 
-    fetchPreviewLabel(runId).then(
-      (label) => {
+    fetchPreviewAddress(runId).then(
+      (address) => {
         if (current) {
-          setPreviewLabel(label)
+          setPreview(address)
         }
       },
       () => {},
@@ -49,7 +49,10 @@ export function BrowserViewer({
     setDraft(target)
   }
 
-  const src = useMemo(() => resolveBrowserTarget(target, previewLabel), [target, previewLabel])
+  const src = useMemo(
+    () => resolveBrowserTarget(target, preview?.label, preview?.host),
+    [target, preview],
+  )
 
   function navigate(next: string) {
     const resolved = next.trim()

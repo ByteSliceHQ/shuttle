@@ -47,7 +47,7 @@ import { handleSandboxRoutes } from './routes/sandbox'
 import { handleShuttleRoutes } from './routes/sessions'
 import { handleWorkspaceRoutes } from './routes/workspace'
 import { sandboxesArePersonal } from './sandbox/names'
-import { parsePreviewHost } from './sandbox/preview-host'
+import { isOwnHost, parsePreviewHost } from './sandbox/preview-host'
 import { SessionSandbox } from './sandbox/session-sandbox'
 import {
   readSandboxBinding,
@@ -368,6 +368,10 @@ export default {
     }
 
     const url = new URL(request.url)
+
+    if (!isOwnHost(url.hostname, env.SHUTTLE_WEB_URL)) {
+      return new Response('Not Found', { status: 404 })
+    }
 
     // A deployment serves the web app itself. In development Vite does, and `WEB` is absent.
     if (env.WEB && isWebAppRequest(request)) {

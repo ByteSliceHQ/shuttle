@@ -73,8 +73,12 @@ export async function handleSandboxRoutes(
       return Response.json({ error: 'Previews are unavailable' }, { status: 503 })
     }
 
-    // The label for this session's preview hostname; see `tenancy/previews.ts`.
-    return Response.json({ label: await previewKeyFor(env.AUTH_DB, runId) })
+    // The label for this session's preview hostname (see `tenancy/previews.ts`), and the domain
+    // the deployment serves previews under.
+    return Response.json({
+      label: await previewKeyFor(env.AUTH_DB, runId),
+      ...(env.SHUTTLE_PREVIEW_HOST ? { host: env.SHUTTLE_PREVIEW_HOST } : {}),
+    })
   }
 
   const personal = sandboxesArePersonal(env)

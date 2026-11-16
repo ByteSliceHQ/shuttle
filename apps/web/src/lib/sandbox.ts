@@ -367,16 +367,25 @@ export async function fetchSandboxPlace(runId: string): Promise<SandboxPlace> {
   return (await response.json()) as SandboxPlace
 }
 
-/** The label that leads to a session's sandbox in a preview hostname. Only people who can open
- * the session can ask for it. */
-export async function fetchPreviewLabel(runId: string): Promise<string> {
+/** Where a session's previews are served. */
+export interface PreviewAddress {
+  /** The label that leads to the session's sandbox in a preview hostname. */
+  readonly label: string
+  /** The domain previews hang off, when the deployment names one. */
+  readonly host?: string
+}
+
+/** Only people who can open the session can ask for its preview address. */
+export async function fetchPreviewAddress(runId: string): Promise<PreviewAddress> {
   const response = await fetch(`${sandboxBase(runId)}/preview`)
 
   if (!response.ok) {
     throw new Error(`Failed to load the preview address: ${response.status}`)
   }
 
-  return ((await response.json()) as { label: string }).label
+  const { label, host } = (await response.json()) as { label: string; host?: string }
+
+  return { label, ...(host ? { host } : {}) }
 }
 
 /** Preview host for sandbox ports: `p3000-<label>.localhost:8790` locally. */
@@ -394,7 +403,10 @@ export function previewUrl(port: number, folderId: string, previewHost?: string)
   const loopback = host.includes('localhost') || host.endsWith('.local') || isLoopbackAddress(host)
   const baseHost = loopback ? 'localhost' : host
 
-  return `http://p${port}-${sanitizeFolderLabel(folderId)}.${baseHost}${workerPort}`
+  // A page served over https cannot frame an http one, and a deployment only answers https.
+  const secure = !loopback && typeof window !== 'undefined' && window.location.protocol === 'https:'
+
+  return `${secure ? 'https' : 'http'}://p${port}-${sanitizeFolderLabel(folderId)}.${baseHost}${workerPort}`
 }
 
 function isLoopbackAddress(host: string): boolean {

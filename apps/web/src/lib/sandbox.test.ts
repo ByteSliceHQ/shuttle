@@ -55,4 +55,21 @@ describe('previewUrl', () => {
       `p3000-${folderId}.preview.example.com`,
     )
   })
+
+  test('follows the page onto https, and stays on http on this machine', () => {
+    const scope = globalThis as { window?: unknown }
+    const before = scope.window
+
+    scope.window = { location: { protocol: 'https:', hostname: 'app.shuttle.example', port: '' } }
+
+    try {
+      expect(previewUrl(3000, folderId, 'shuttle.example')).toBe(
+        `https://p3000-${folderId}.shuttle.example`,
+      )
+
+      expect(new URL(previewUrl(3000, folderId, 'localhost')).protocol).toBe('http:')
+    } finally {
+      scope.window = before
+    }
+  })
 })
