@@ -11,6 +11,7 @@ import {
   moveSession,
   type LocalMachine,
   type SandboxPlace,
+  peekSandboxPlace,
 } from '@/lib/sandbox'
 
 const PROVIDERS: Record<string, string> = {
@@ -74,7 +75,7 @@ function Row({
 export function SessionPlace({ runId, working }: { runId: string; working: boolean }) {
   const app = desktop()
   const [open, setOpen] = useState(false)
-  const [place, setPlace] = useState<SandboxPlace | null>(null)
+  const [place, setPlace] = useState<SandboxPlace | null>(() => peekSandboxPlace(runId) ?? null)
   const [machine, setMachine] = useState<LocalMachine | null>(null)
   const [runner, setRunner] = useState<DesktopRunnerStatus | null>(null)
   const [moving, setMoving] = useState<'local' | 'cloud' | null>(null)

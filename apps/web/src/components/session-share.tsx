@@ -9,6 +9,7 @@ import {
   updateSessionAccess,
   type SessionAccess,
   type SessionVisibility,
+  peekSessionAccess,
 } from '@/lib/api'
 import { authClient } from '@/lib/auth-client'
 import { cn, errorMessage } from '@/lib/cn'
@@ -59,7 +60,7 @@ export function SessionShare({ runId }: { runId: string }) {
   const tenant = useTenant()
   const orgPeople = useOrgPeople()
   const [open, setOpen] = useState(false)
-  const [access, setAccess] = useState<SessionAccess | null>(null)
+  const [access, setAccess] = useState<SessionAccess | null>(() => peekSessionAccess(runId) ?? null)
   const [members, setMembers] = useState<readonly OrgMember[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 

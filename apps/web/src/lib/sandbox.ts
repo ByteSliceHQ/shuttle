@@ -1,3 +1,5 @@
+import { cachedFetch, peekCached, putCached } from './cached'
+
 export interface SandboxFileEntry {
   readonly path: string
   readonly kind: 'file' | 'dir'
@@ -354,10 +356,19 @@ export async function moveSession(
     throw new Error(body?.error ?? `Could not move the session: ${response.status}`)
   }
 
-  return body
+  return putCached(`place:${runId}`, body)
 }
 
-export async function fetchSandboxPlace(runId: string): Promise<SandboxPlace> {
+/** Where the session was when last asked, for a view to start from while it asks again. */
+export function peekSandboxPlace(runId: string): SandboxPlace | undefined {
+  return peekCached<SandboxPlace>(`place:${runId}`)
+}
+
+export function fetchSandboxPlace(runId: string): Promise<SandboxPlace> {
+  return cachedFetch(`place:${runId}`, () => loadSandboxPlace(runId))
+}
+
+async function loadSandboxPlace(runId: string): Promise<SandboxPlace> {
   const response = await fetch(`${sandboxBase(runId)}/place`)
 
   if (!response.ok) {

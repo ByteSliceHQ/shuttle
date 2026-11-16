@@ -1,5 +1,8 @@
+import { cachedFetch, invalidateCached, peekCached, putCached } from './cached'
 import { desktop } from './desktop'
 import type { InterjectionKind } from './session-feed'
+
+const CONNECTIONS_KEY = 'connections'
 
 /**
  * What to tell someone when a request fails: what they were trying to do, and the Worker's own
@@ -342,7 +345,7 @@ async function connectionsRequest<T>(
   return body
 }
 
-export function fetchConnections(): Promise<ConnectionsState> {
+function loadConnections(): Promise<ConnectionsState> {
   return connectionsRequest('', undefined, 'both')
 }
 
@@ -355,6 +358,8 @@ export function setSessionDefaults(defaults: {
   harness?: HarnessId
   team?: Team
 }): Promise<{ defaultHarness: HarnessId; defaultTeam: Team }> {
+  invalidateCached(CONNECTIONS_KEY)
+
   return connectionsRequest('/default', { method: 'PUT', body: JSON.stringify(defaults) })
 }
 
@@ -399,10 +404,12 @@ export function cancelLogin(
 }
 
 export function disconnectHarness(harness: string, place: SignInPlace): Promise<unknown> {
+  invalidateCached(CONNECTIONS_KEY)
+
   return connectionsRequest(`/${harness}`, { method: 'DELETE' }, place)
 }
 
-export async function fetchSessionHarness(runId: string): Promise<{ harness: HarnessId }> {
+async function loadSessionHarness(runId: string): Promise<{ harness: HarnessId }> {
   const response = await fetch(`/sessions/${encodeURIComponent(runId)}/harness`, {
     headers: { accept: 'application/json' },
   })
@@ -428,10 +435,14 @@ export async function setSessionHarness(
     throw await requestFailure('Failed to switch agent', response)
   }
 
-  return (await response.json()) as { harness: HarnessId }
+  const saved = (await response.json()) as { harness: HarnessId }
+
+  putCached(`harness:${runId}`, saved)
+
+  return saved
 }
 
-export async function fetchSessionTeam(runId: string): Promise<{ team: Team }> {
+async function loadSessionTeam(runId: string): Promise<{ team: Team }> {
   const response = await fetch(`/sessions/${encodeURIComponent(runId)}/team`, {
     headers: { accept: 'application/json' },
   })
@@ -454,7 +465,11 @@ export async function setSessionTeam(runId: string, team: Team): Promise<{ team:
     throw await requestFailure('Failed to change the team', response)
   }
 
-  return (await response.json()) as { team: Team }
+  const saved = (await response.json()) as { team: Team }
+
+  putCached(`team:${runId}`, saved)
+
+  return saved
 }
 
 export type VendorHarnessId = Exclude<HarnessId, 'shuttle'>
@@ -485,9 +500,7 @@ export function fetchVendorModels(
   return connectionsRequest(`/${encodeURIComponent(harness)}/models`)
 }
 
-export async function fetchSessionVendorModels(
-  runId: string,
-): Promise<{ choices: VendorModelChoices }> {
+async function loadSessionVendorModels(runId: string): Promise<{ choices: VendorModelChoices }> {
   const response = await fetch(`/sessions/${encodeURIComponent(runId)}/vendor-models`)
 
   if (!response.ok) {
@@ -512,7 +525,11 @@ export async function setSessionVendorModel(
     throw await requestFailure('Failed to set agent model', response)
   }
 
-  return (await response.json()) as { choices: VendorModelChoices }
+  const saved = (await response.json()) as { choices: VendorModelChoices }
+
+  putCached(`vendor-models:${runId}`, saved)
+
+  return saved
 }
 
 export type SessionVisibility = 'private' | 'public'
@@ -528,7 +545,7 @@ export interface SessionAccess {
   readonly canShare: boolean
 }
 
-export async function fetchSessionAccess(runId: string): Promise<SessionAccess> {
+async function loadSessionAccess(runId: string): Promise<SessionAccess> {
   const response = await fetch(`/sessions/${encodeURIComponent(runId)}/access`)
 
   if (!response.ok) {
@@ -555,5 +572,70 @@ export async function updateSessionAccess(
     throw new Error(body?.error ?? `Failed to change who can open the session: ${response.status}`)
   }
 
-  return (await response.json()) as SessionAccess
+  const saved = (await response.json()) as SessionAccess
+
+  putCached(`access:${runId}`, saved)
+
+  return saved
+}
+
+/** `SessionHarness` as last read or written, for a view to start from while it asks again. */
+export function peekSessionHarness(runId: string): { harness: HarnessId } | undefined {
+  return peekCached<{ harness: HarnessId }>(`harness:${runId}`)
+}
+
+export function fetchSessionHarness(runId: string): Promise<{ harness: HarnessId }> {
+  return cachedFetch(`harness:${runId}`, () => loadSessionHarness(runId))
+}
+
+/** `SessionTeam` as last read or written, for a view to start from while it asks again. */
+export function peekSessionTeam(runId: string): { team: Team } | undefined {
+  return peekCached<{ team: Team }>(`team:${runId}`)
+}
+
+export function fetchSessionTeam(runId: string): Promise<{ team: Team }> {
+  return cachedFetch(`team:${runId}`, () => loadSessionTeam(runId))
+}
+
+/** `SessionVendorModels` as last read or written, for a view to start from while it asks again. */
+export function peekSessionVendorModels(
+  runId: string,
+): { choices: VendorModelChoices } | undefined {
+  return peekCached<{ choices: VendorModelChoices }>(`vendor-models:${runId}`)
+}
+
+export function fetchSessionVendorModels(runId: string): Promise<{ choices: VendorModelChoices }> {
+  return cachedFetch(`vendor-models:${runId}`, () => loadSessionVendorModels(runId))
+}
+
+/** `SessionAccess` as last read or written, for a view to start from while it asks again. */
+export function peekSessionAccess(runId: string): SessionAccess | undefined {
+  return peekCached<SessionAccess>(`access:${runId}`)
+}
+
+export function fetchSessionAccess(runId: string): Promise<SessionAccess> {
+  return cachedFetch(`access:${runId}`, () => loadSessionAccess(runId))
+}
+
+/** `Connections` as last read or written, for a view to start from while it asks again. */
+export function peekConnections(): ConnectionsState | undefined {
+  return peekCached<ConnectionsState>(CONNECTIONS_KEY)
+}
+
+export function fetchConnections(): Promise<ConnectionsState> {
+  return cachedFetch(CONNECTIONS_KEY, () => loadConnections())
+}
+
+const ignore = () => {}
+
+/**
+ * Starts the reads a session's page opens with, without waiting for them. Each lands in the
+ * cache the page starts from, and a read that fails is simply made again by the page.
+ */
+export function primeSession(runId: string): void {
+  fetchSessionHarness(runId).catch(ignore)
+  fetchSessionTeam(runId).catch(ignore)
+  fetchSessionVendorModels(runId).catch(ignore)
+  fetchSessionAccess(runId).catch(ignore)
+  fetchConnections().catch(ignore)
 }

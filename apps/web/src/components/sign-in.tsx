@@ -11,10 +11,11 @@ import {
   type Connection,
   type ConnectionsState,
   type SignInPlace,
+  peekConnections,
 } from '@/lib/api'
 import { errorMessage } from '@/lib/cn'
 import { desktop, type DesktopRunnerStatus } from '@/lib/desktop'
-import { fetchSandboxPlace, moveSession } from '@/lib/sandbox'
+import { fetchSandboxPlace, moveSession, peekSandboxPlace, type SandboxPlace } from '@/lib/sandbox'
 
 import { Button } from './ui/button'
 import { Input } from './ui/input'
@@ -254,7 +255,7 @@ export function useConnections(): {
   state: ConnectionsState | null
   reload: () => Promise<void>
 } {
-  const [state, setState] = useState<ConnectionsState | null>(null)
+  const [state, setState] = useState<ConnectionsState | null>(() => peekConnections() ?? null)
 
   const reload = useCallback(
     () =>
@@ -404,6 +405,16 @@ export function useAgentGate(
   }
 }
 
+function signInPlaceOf(place: SandboxPlace): SignInPlace | null {
+  const app = desktop()
+
+  if (place.sandbox.location === 'cloud') {
+    return 'cloud'
+  }
+
+  return app && place.sandbox.deviceId === app.deviceId ? 'local' : null
+}
+
 /** Fired on `window` when a session moves, with its run id, so views of it can catch up. */
 export const SESSION_MOVED_EVENT = 'shuttle:session-moved'
 
@@ -415,21 +426,15 @@ export function useSessionRunsAt(runId: string): {
   place: SignInPlace | null
   moveToCloud: () => Promise<void>
 } {
-  const [place, setPlace] = useState<SignInPlace | null>(null)
+  const [place, setPlace] = useState<SignInPlace | null>(() => {
+    const known = peekSandboxPlace(runId)
+
+    return known ? signInPlaceOf(known) : null
+  })
 
   const refresh = useCallback(() => {
     fetchSandboxPlace(runId).then(
-      (next) => {
-        const app = desktop()
-
-        setPlace(
-          next.sandbox.location === 'cloud'
-            ? 'cloud'
-            : app && next.sandbox.deviceId === app.deviceId
-              ? 'local'
-              : null,
-        )
-      },
+      (next) => setPlace(signInPlaceOf(next)),
       () => {},
     )
   }, [runId])

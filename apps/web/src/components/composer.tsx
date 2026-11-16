@@ -28,6 +28,8 @@ import {
   type VendorHarnessId,
   type VendorModelChoice,
   type VendorModelChoices,
+  peekSessionTeam,
+  peekSessionVendorModels,
 } from '@/lib/api'
 import { cn, errorMessage } from '@/lib/cn'
 import { readStoredLlmModel, writeStoredLlmModel, type OpenRouterModelId } from '@/lib/llm-models'
@@ -135,8 +137,13 @@ export function Composer({
   }
 
   const [model, setModel] = useState<OpenRouterModelId>(() => readStoredLlmModel())
-  const [team, setTeam] = useState<Team>(DEFAULT_TEAM)
-  const [vendorChoices, setVendorChoices] = useState<VendorModelChoices>({})
+  // What the session had when it was last open shows at once; the read below corrects it.
+  const [team, setTeam] = useState<Team>(() => peekSessionTeam(runId)?.team ?? DEFAULT_TEAM)
+
+  const [vendorChoices, setVendorChoices] = useState<VendorModelChoices>(
+    () => peekSessionVendorModels(runId)?.choices ?? {},
+  )
+
   const [mention, setMention] = useState<Mention | null>(null)
   const [inputFocused, setInputFocused] = useState(false)
   const [error, setError] = useState<string | null>(null)

@@ -13,6 +13,7 @@ import {
   type SignInPlace,
   type Team,
   type TeamPreset,
+  peekConnections,
 } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { canRunAt, effectiveTeam, withTeamChange } from '@/lib/team'
@@ -110,7 +111,7 @@ export function HarnessSwitcher({
   /** Where the session runs, so the picker says whether each agent is signed in there. */
   place?: SignInPlace | null
 }) {
-  const [state, setState] = useState<ConnectionsState | null>(null)
+  const [state, setState] = useState<ConnectionsState | null>(() => peekConnections() ?? null)
 
   const reload = useCallback(() => {
     fetchConnections().then(setState, () => setState(null))

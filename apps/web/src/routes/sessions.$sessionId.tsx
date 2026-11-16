@@ -45,7 +45,13 @@ import { Kbd, PanelHeader, PanelTitle } from '@/components/ui/panel'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { agentIdentities, withVendorAgents } from '@/lib/agents'
-import { fetchSessionHarness, stopThread, type HarnessId } from '@/lib/api'
+import {
+  fetchSessionHarness,
+  peekSessionHarness,
+  primeSession,
+  stopThread,
+  type HarnessId,
+} from '@/lib/api'
 import { cn, shortId } from '@/lib/cn'
 import { possessive, useOrgPeople } from '@/lib/org-people'
 import {
@@ -103,6 +109,11 @@ export const Route = createFileRoute('/sessions/$sessionId')({
     ...(typeof search.thread === 'string' && search.thread ? { thread: search.thread } : {}),
     ...(typeof search.view === 'string' && search.view ? { view: search.view } : {}),
   }),
+  // Pointing at a session's link is enough to start reading what its page opens with, so the
+  // page has it by the time it is on screen. Nothing waits on these.
+  loader: ({ params }) => {
+    primeSession(params.sessionId)
+  },
   component: SessionPage,
 })
 
@@ -402,7 +413,9 @@ function SessionWorkspace({
 
   // Which agent runs the session is known before its first step, so the thread carries the
   // agent's name from the start and never shows as Shuttle's conductor first.
-  const [harness, setHarness] = useState<HarnessId>('shuttle')
+  const [harness, setHarness] = useState<HarnessId>(
+    () => peekSessionHarness(runId)?.harness ?? 'shuttle',
+  )
 
   useEffect(() => {
     fetchSessionHarness(runId).then(
