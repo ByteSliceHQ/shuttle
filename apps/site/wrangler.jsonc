@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "shuttle-site",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "workers_dev": false,
+  "routes": [{ "pattern": "shuttle.codes", "custom_domain": true }],
+  // The page itself. Anything that is not a file here goes to the Worker.
+  "assets": { "directory": "./public", "binding": "ASSETS" },
+  // Built desktop apps, uploaded by hand: see README.md.
+  "r2_buckets": [{ "binding": "RELEASES", "bucket_name": "shuttle-releases" }],
+  "vars": {
+    // What /download/mac sends people to. Change it when a new build is uploaded.
+    "LATEST_MAC": "Shuttle-0.0.1-arm64.dmg",
+  },
+}
