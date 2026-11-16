@@ -90,9 +90,12 @@ export async function fetchSessions(): Promise<{ sessions: IndexedSession[] }> {
   }
 }
 
-/** Named Looms signals take their input wrapped as `{ input }`. */
+/**
+ * Named Looms signals take their input wrapped as `{ input }`. `respond=async` has the run answer
+ * once the signal is on its log, since the page follows what happens next on the event stream.
+ */
 async function signal(runId: string, name: string, input: object, failure: string) {
-  const response = await postJson(`/runs/${runId}/signals/${name}`, { input })
+  const response = await postJson(`/runs/${runId}/signals/${name}?respond=async`, { input })
 
   if (!response.ok) {
     throw new Error(`${failure}: ${response.status} ${await response.text()}`)
@@ -133,14 +136,14 @@ export async function requestPullRequest(
 
 export async function say(
   runId: string,
+  /** Chosen by the sender, so the message can be shown before the session confirms it. */
+  messageId: string,
   text: string,
   forceKind?: InterjectionKind,
   targetThreadId?: string,
   /** Ids of files already uploaded to this session, to send with the message. */
   attachments: readonly string[] = [],
 ) {
-  const messageId = crypto.randomUUID()
-
   const response = await postJson(`/sessions/${encodeURIComponent(runId)}/say`, {
     messageId,
     text,
@@ -152,8 +155,6 @@ export async function say(
   if (!response.ok) {
     throw await requestFailure('Failed to send message', response)
   }
-
-  return { messageId }
 }
 
 /** Stops one agent thread in a session, and every thread beneath it. */

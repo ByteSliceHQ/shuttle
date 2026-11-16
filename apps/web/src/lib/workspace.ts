@@ -593,7 +593,7 @@ export async function startWorkspaceSession(input: {
 }
 
 export async function signalWorkspace(runId: string, name: string, input: object) {
-  const response = await postJson(`/runs/${runId}/signals/${name}`, { input })
+  const response = await postJson(`/runs/${runId}/signals/${name}?respond=async`, { input })
 
   if (!response.ok) {
     throw new Error(`Workspace signal failed: ${response.status} ${await response.text()}`)

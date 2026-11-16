@@ -78,11 +78,15 @@ function activeSessionRunId(pathname: string): string | null {
   return match?.[1] ? decodeURIComponent(match[1]) : null
 }
 
+const SESSION_RETAIN_MS = 5 * 60_000
+
 export function AppSidebarShell({ children }: { children: React.ReactNode }) {
   return (
     // SSE holds one of the browser's six HTTP/1.1 connections per origin for each run store;
     // across a few tabs that starves route chunks and API calls. WebSockets have their own pool.
-    <LoomsProvider endpoint="" transport="websocket">
+    // A session stays connected for a while after it is left, so going back to it shows it at
+    // once instead of downloading its log again.
+    <LoomsProvider endpoint="" transport="websocket" retainMs={SESSION_RETAIN_MS}>
       <WorkspaceProvider>
         <div className="flex h-dvh min-h-0">
           <AppSidebar />

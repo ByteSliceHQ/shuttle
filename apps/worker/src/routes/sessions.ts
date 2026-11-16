@@ -313,9 +313,12 @@ async function sessionSay(
     ...(attachments.length > 0 ? { attachments } : {}),
   })
 
-  await loomsStub(env.LOOMS_RUN, runId).signal([
-    { ...message, origin: { type: 'external', actorId: actor.userId } },
-  ])
+  // Answered once the message is on the log. The browser shows it from the event stream, and
+  // waiting for the turn it starts would hold this request, and the next message, for minutes.
+  await loomsStub(env.LOOMS_RUN, runId).signal(
+    [{ ...message, origin: { type: 'external', actorId: actor.userId } }],
+    { wake: 'schedule' },
+  )
 
   return Response.json({ messageId })
 }

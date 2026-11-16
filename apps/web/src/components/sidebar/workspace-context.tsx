@@ -278,7 +278,12 @@ function WorkspaceSubscription({
   onTabs: (tabs: SessionTabsState) => void
   onStalled: (message: string) => void
 }) {
-  const store = useRunStore(runId, { includeEphemeral: false })
+  // The snapshot covers the log up to its tail, so only what follows is downloaded.
+  const store = useRunStore(runId, {
+    includeEphemeral: false,
+    fromSeq: seed ? seed.tail + 1 : undefined,
+  })
+
   const events = useRunEvents(store)
   const summary = useRunSummary(store)
   const hydrated = Boolean(seed) || summary.startedAt !== undefined

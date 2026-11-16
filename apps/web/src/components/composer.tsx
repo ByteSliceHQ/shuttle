@@ -34,6 +34,8 @@ import { readStoredLlmModel, writeStoredLlmModel, type OpenRouterModelId } from 
 import { routeStyles } from '@/lib/routes'
 import { interjectionKinds, isInterjectionKind, type InterjectionKind } from '@/lib/session-feed'
 import { effectiveTeam } from '@/lib/team'
+import { useTenant } from '@/lib/tenant'
+import { useRunStore } from '@swirls/looms/react'
 
 import { AttachmentTray, releaseAttachments, useComposerAttachments } from './composer-attachments'
 import { ContextUsage } from './context-usage'
@@ -141,6 +143,8 @@ export function Composer({
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const files = useComposerAttachments(runId)
+  const store = useRunStore(runId)
+  const me = useTenant().user
   /** Counts drag enters and leaves, which fire for every element the pointer crosses. */
   const dragDepth = useRef(0)
   const [dropping, setDropping] = useState(false)
@@ -231,12 +235,38 @@ export function Composer({
         // Files still on their way finish first, so the message never arrives without them.
         const uploaded = await Promise.all(sending.map((attachment) => attachment.uploaded))
 
-        await say(
-          runId,
-          message,
-          forceKind,
-          targetThread,
-          uploaded.map((asset) => asset.id),
+        const messageId = crypto.randomUUID()
+
+        // The message shows in the conversation at once, as the session will record it. If the
+        // send fails it is taken back out and handed back to the message box below.
+        await store.commit(
+          {
+            type: 'shuttle.user.said',
+            payload: {
+              messageId,
+              text: message,
+              ...(forceKind ? { forceKind } : {}),
+              ...(targetThread ? { targetThreadId: targetThread } : {}),
+              author: { id: me.id, name: me.name || me.email },
+              ...(uploaded.length > 0
+                ? { attachments: uploaded.map((asset) => ({ ...asset })) }
+                : {}),
+            },
+          },
+          {
+            optimistic: true,
+            // The key the session's `say` signal records the message under.
+            idempotencyKey: `shuttle-say:${messageId}`,
+            send: () =>
+              say(
+                runId,
+                messageId,
+                message,
+                forceKind,
+                targetThread,
+                uploaded.map((asset) => asset.id),
+              ),
+          },
         )
 
         releaseAttachments(sending)
