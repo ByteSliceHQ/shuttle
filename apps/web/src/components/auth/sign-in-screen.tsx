@@ -1,6 +1,7 @@
-import { GitBranch, Orbit } from 'lucide-react'
+import { GitBranch } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 
+import { ShuttleMark } from '@/components/shuttle-mark'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { authClient } from '@/lib/auth-client'
@@ -73,8 +74,8 @@ export function SignInScreen({
     <div className="flex min-h-dvh items-center justify-center px-6 py-12">
       <div className="stagger flex w-full max-w-sm flex-col gap-6">
         <div className="flex flex-col gap-3">
-          <span className="bg-brand/15 text-brand ring-brand/25 flex size-9 items-center justify-center rounded-lg ring-1 ring-inset">
-            <Orbit className="size-5" />
+          <span className="bg-brand/15 text-foreground ring-brand/25 flex size-9 items-center justify-center rounded-lg ring-1 ring-inset">
+            <ShuttleMark className="size-5" />
           </span>
           <div>
             <h1 className="text-xl font-semibold tracking-tight">

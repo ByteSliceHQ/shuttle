@@ -119,6 +119,12 @@ if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   void app.whenReady().then(() => {
+    // A packaged app carries its icon in the bundle. Run from source, the Dock would show
+    // Electron's.
+    if (!app.isPackaged) {
+      app.dock?.setIcon(join(APP_ROOT, 'assets/icon.png'))
+    }
+
     const store = new Store(join(app.getPath('userData'), 'state.json'))
 
     if (!store.get('deviceId')) {

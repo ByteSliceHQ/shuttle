@@ -55,6 +55,7 @@
     "asar": true,
     "npmRebuild": false,
     "mac": {
+      "icon": "assets/icon.icns",
       "category": "public.app-category.developer-tools",
       "target": [
         {

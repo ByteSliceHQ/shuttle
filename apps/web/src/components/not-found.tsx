@@ -34,7 +34,7 @@ export function NotFound({
 
   return (
     <div className="flex h-full flex-col items-center justify-center overflow-y-auto px-6 py-12 text-center">
-      <LostShuttle className="mb-8 w-72 max-w-full shrink-0 sm:w-80" />
+      <DroppedStitch className="mb-8 w-32 max-w-full shrink-0 sm:w-36" />
       <div className="stagger flex max-w-sm flex-col items-center">
         <p className="text-muted-foreground font-mono text-[11px] tracking-[0.2em] uppercase">
           {eyebrow}
@@ -72,64 +72,39 @@ export function RouteNotFound() {
   )
 }
 
-function LostShuttle({ className }: { className?: string }) {
+/** The logo with one pick dropped out of the weave: its place is empty and the bar lies below. */
+function DroppedStitch({ className }: { className?: string }) {
   return (
-    <svg
-      viewBox="0 24 250 112"
-      fill="none"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-      className={cn('overflow-visible', className)}
-    >
-      <ellipse cx="92" cy="126" rx="52" ry="4" className="fill-foreground/5" />
-      <path
-        d="M14 80h14M4 94h18M14 108h10"
-        strokeWidth="1.5"
-        className="lost-trail stroke-muted-foreground/40"
-      />
-      <g transform="rotate(-6 90 92)">
-        <g className="lost-shuttle">
-          <path
-            d="M28 92C52 72 128 72 152 92C128 112 52 112 28 92Z"
-            strokeWidth="1.5"
-            className="fill-card stroke-muted-foreground"
-          />
-          <path d="M28 92L42 84.5Q38 92 42 99.5Z" className="fill-muted-foreground/60" />
-          <path d="M152 92L138 84.5Q142 92 138 99.5Z" className="fill-muted-foreground/60" />
-          <path
-            d="M50 83C72 78 108 78 130 83M50 101C72 106 108 106 130 101"
-            strokeWidth="1"
-            className="stroke-muted-foreground/30"
-          />
-          <rect
-            x="70"
-            y="85"
-            width="40"
-            height="14"
-            rx="7"
-            strokeWidth="1.25"
-            className="fill-background stroke-muted-foreground"
-          />
-          <rect
-            x="76"
-            y="88.5"
-            width="28"
-            height="7"
-            rx="3.5"
-            strokeWidth="1"
-            className="fill-brand/20 stroke-brand"
-          />
-          <path d="M83 89v6M90 89v6M97 89v6" strokeWidth="1" className="stroke-brand/60" />
+    <svg viewBox="-4 2 56 62" aria-hidden className={cn('overflow-visible', className)}>
+      <ellipse cx="19" cy="62" rx="13" ry="1.2" className="fill-foreground/5" />
+      <g className="lost-cloth">
+        <g className="fill-foreground/85">
+          <rect x="11.5" y="5" width="9" height="20.5" rx="2.25" />
+          <rect x="11.5" y="38.5" width="9" height="4.5" rx="2.25" />
+          <rect x="27.5" y="5" width="9" height="4.5" rx="2.25" />
+          <rect x="27.5" y="22.5" width="9" height="20.5" rx="2.25" />
         </g>
+        <g className="fill-brand">
+          <rect x="5" y="11.5" width="4.5" height="9" rx="2.25" />
+          <rect x="22.5" y="11.5" width="20.5" height="9" rx="2.25" />
+          <rect x="38.5" y="27.5" width="4.5" height="9" rx="2.25" />
+        </g>
+        <rect
+          x="5.5"
+          y="28"
+          width="19.5"
+          height="8"
+          rx="1.75"
+          fill="none"
+          strokeWidth="0.75"
+          strokeDasharray="1.5 2"
+          strokeLinecap="round"
+          className="stroke-brand/50"
+        />
       </g>
-      <path
-        d="M152 85.5C170 82 176 92 186 80C194 70 186 52 196 42C206 30 230 32 234 48C238 62 222 66 216 74C212 79 212 84 212 90"
-        pathLength={1}
-        strokeWidth="2"
-        className="lost-thread stroke-brand"
-      />
-      <circle cx="212" cy="104" r="3.5" className="lost-knot fill-brand" />
+      <g transform="translate(8 52) rotate(-14)">
+        <rect width="20.5" height="9" rx="2.25" className="lost-pick fill-brand" />
+      </g>
     </svg>
   )
 }

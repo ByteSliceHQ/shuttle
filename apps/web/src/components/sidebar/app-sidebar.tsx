@@ -4,7 +4,6 @@ import {
   BookOpen,
   FolderPlus,
   GitBranch,
-  Orbit,
   PanelLeftClose,
   PanelLeftOpen,
   Plug,
@@ -15,6 +14,7 @@ import {
 import { useEffect, useEffectEvent, useMemo, useState } from 'react'
 
 import { AccountMenu } from '@/components/auth/account-menu'
+import { ShuttleMark } from '@/components/shuttle-mark'
 import { ActivityDot } from '@/components/sidebar/activity-dot'
 import { FixtureToggle } from '@/components/sidebar/fixture-toggle'
 import { FolderGroup } from '@/components/sidebar/folder-group'
@@ -366,8 +366,8 @@ function SidebarPanel({
           to="/"
           className="focus-visible:ring-ring/50 flex min-w-0 flex-1 items-center gap-2 rounded-md outline-none focus-visible:ring-2"
         >
-          <span className="bg-brand/15 text-brand ring-brand/25 flex size-6 shrink-0 items-center justify-center rounded-md ring-1 ring-inset">
-            <Orbit className="size-3.5" />
+          <span className="bg-brand/15 text-foreground ring-brand/25 flex size-6 shrink-0 items-center justify-center rounded-md ring-1 ring-inset">
+            <ShuttleMark className="size-3.5" />
           </span>
           <span className="truncate text-[13px] font-semibold tracking-tight">Shuttle</span>
         </Link>

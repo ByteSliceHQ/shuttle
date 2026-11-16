@@ -3,7 +3,9 @@
   --ink: #18171a;
   --soft: #66625a;
   --rule: #d8d2c6;
-  --thread: #c2412a;
+  --thread: #0065b4;
+  /* The thread where it sits on ink: the app's own blue. */
+  --thread-lit: #5db2f7;
   --sans: 'Familjen Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   --gutter: clamp(20px, 5vw, 72px);
@@ -61,17 +63,25 @@ main,
   text-decoration: none;
 }
 
+/* The logo: two weft threads woven through two warp threads, on an ink tile. */
 .mark svg {
-  width: 41px;
-  height: 12px;
+  width: 24px;
+  height: 24px;
 }
 
-.mark path {
+.mark .tile,
+.bobbin .tile {
   fill: var(--ink);
 }
 
-.mark rect {
+.mark .warp,
+.bobbin .warp {
   fill: var(--paper);
+}
+
+.mark .weft,
+.bobbin .weft {
+  fill: var(--thread-lit);
 }
 
 .top nav {
@@ -232,19 +242,11 @@ a:focus-visible {
   position: absolute;
   top: 0;
   left: 0;
-  width: 48px;
-  height: 14px;
-  margin-top: 1px;
+  width: 16px;
+  height: 16px;
+  margin-top: -0.5px;
   transform: translate(0, 0);
   transition: transform 900ms cubic-bezier(0.6, 0, 0.2, 1);
-}
-
-.bobbin path {
-  fill: var(--ink);
-}
-
-.bobbin rect {
-  fill: var(--thread);
 }
 
 .log {

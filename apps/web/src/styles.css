@@ -359,46 +359,29 @@
   animation: fade-in 900ms steps(2, jump-none) infinite alternate;
 }
 
-/* The 404 shuttle lands and its thread unspools; rare enough to earn the extra time. */
-@keyframes shuttle-land {
+/* The 404 logo settles and its dropped pick falls out; rare enough to earn the extra time. */
+@keyframes cloth-in {
   from {
     opacity: 0;
-    transform: translate(-14px, -8px) rotate(-10deg);
+    transform: translateY(6px);
   }
 }
 
-@keyframes thread-draw {
-  from {
-    stroke-dashoffset: 1;
-  }
-}
-
-@keyframes knot-in {
+@keyframes pick-drop {
   from {
     opacity: 0;
-    transform: scale(0.4);
+    transform: translate(3px, -16px) rotate(14deg);
   }
 }
 
-.lost-shuttle {
+.lost-cloth {
+  animation: cloth-in 450ms var(--ease-snappy) both;
+}
+
+.lost-pick {
   transform-box: fill-box;
   transform-origin: center;
-  animation: shuttle-land 450ms var(--ease-snappy) both;
-}
-
-.lost-trail {
-  animation: fade-in 300ms var(--ease-snappy) 150ms both;
-}
-
-.lost-thread {
-  stroke-dasharray: 1;
-  animation: thread-draw 900ms var(--ease-snappy) 250ms both;
-}
-
-.lost-knot {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: knot-in 250ms var(--ease-snappy) 900ms both;
+  animation: pick-drop 500ms var(--ease-snappy) 300ms both;
 }
 
 /*
@@ -423,10 +406,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .lost-shuttle,
-  .lost-trail,
-  .lost-thread,
-  .lost-knot {
+  .lost-cloth,
+  .lost-pick {
     animation: none;
   }
 
