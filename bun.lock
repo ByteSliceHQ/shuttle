@@ -54,7 +54,7 @@
         "@fontsource-variable/inter": "^5.3.0",
         "@fontsource-variable/jetbrains-mono": "^5.3.0",
         "@pierre/diffs": "1.6.4",
-        "@swirls/looms": "^0.15.0",
+        "@swirls/looms": "^0.16.0",
         "@tanstack/react-router": "^1.170.32",
         "@tanstack/react-virtual": "^3.14.26",
         "@xterm/addon-fit": "^0.11.0",
@@ -95,7 +95,7 @@
         "@openrouter/ai-sdk-provider": "^3.0.0",
         "@pierre/sdk": "^0.1.2",
         "@shuttle/runner-protocol": "workspace:*",
-        "@swirls/looms": "^0.15.0",
+        "@swirls/looms": "^0.16.0",
         "ai": "^7.0.0",
         "better-auth": "^1.7.23",
         "effect": "4.0.0-rc.112",
@@ -842,7 +842,7 @@
 
     "@superradcompany/microsandbox-darwin-arm64": ["@superradcompany/microsandbox-darwin-arm64@0.7.15", "", { "os": "darwin", "cpu": "arm64" }, "sha512-dmg7UvPhk1Nr4CIrSvNRVhSrNMkTPEaAZ70v4JND/KTDZ4YHxsIXrrnh6OJ8DeV2Bq30UWWBuGCnWwxB4h/u9g=="],
 
-    "@swirls/looms": ["@swirls/looms@0.15.0", "", { "dependencies": { "@effect/platform-bun": "4.0.0-rc.112", "@effect/platform-node-shared": "4.0.0-rc.112", "@noble/hashes": "^2.0.1", "@s2-dev/streamstore": "^0.23.0", "@standard-schema/spec": "^1.1.0", "@tanstack/react-virtual": "^3.14.11", "clsx": "^2.1.1", "cmdk": "^1.1.1", "effect": "4.0.0-rc.112", "lucide-react": "^1.43.0", "radix-ui": "^1.6.7", "react-resizable-panels": "^4.13.3", "tailwind-merge": "^3.6.0" }, "peerDependencies": { "@cloudflare/workers-types": "^5.20260914.1", "ai": "^7.0.0", "drizzle-orm": "^0.44.0", "postgres": "^3.4.0", "react": "^19.0.0", "react-dom": "^19.0.0" }, "optionalPeers": ["@cloudflare/workers-types", "ai", "drizzle-orm", "postgres", "react", "react-dom"], "bin": { "looms": "dist/cli/cli.js" } }, "sha512-2c37+Ed/EVu3pXRglJpXUCAvnluO13sddu+umWtl46F/oU4cX94rluHxBCNK5JULx3yXrJh/sduAKaAntze9zw=="],
+    "@swirls/looms": ["@swirls/looms@0.16.0", "", { "dependencies": { "@effect/platform-bun": "4.0.0-rc.112", "@effect/platform-node-shared": "4.0.0-rc.112", "@noble/hashes": "^2.0.1", "@s2-dev/streamstore": "^0.23.0", "@standard-schema/spec": "^1.1.0", "@tanstack/react-virtual": "^3.14.11", "clsx": "^2.1.1", "cmdk": "^1.1.1", "effect": "4.0.0-rc.112", "lucide-react": "^1.43.0", "radix-ui": "^1.6.7", "react-resizable-panels": "^4.13.3", "tailwind-merge": "^3.6.0" }, "peerDependencies": { "@cloudflare/workers-types": "^5.20260914.1", "ai": "^7.0.0", "drizzle-orm": "^0.44.0", "postgres": "^3.4.0", "react": "^19.0.0", "react-dom": "^19.0.0" }, "optionalPeers": ["@cloudflare/workers-types", "ai", "drizzle-orm", "postgres", "react", "react-dom"], "bin": { "looms": "dist/cli/cli.js" } }, "sha512-vE8rVfkA9x8DkdsbATee1HJar6F1S8oWmD2uR+afvRiQQCPcQiSp8WzgF9OLa/1bdkhObr+RDzBAGzbvkJEQ8Q=="],
 
     "@szmarczak/http-timer": ["@szmarczak/http-timer@4.0.6", "", { "dependencies": { "defer-to-connect": "^2.0.0" } }, "sha512-4BAffykYOgO+5nzBWYwE3W90sBgLJoUPRWWcL8wlyiM8IB8ipJz3UMJ9KXQd1RKQXpKp8Tutn80HZtWsu2u76w=="],
 

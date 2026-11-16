@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { authClient } from '@/lib/auth-client'
+import { forgetEventCache } from '@/lib/event-cache'
 import { invitationLink, useTenant } from '@/lib/tenant'
 
 /** Everything on the page belongs to one organization, so changing it starts the app again. */
@@ -49,6 +50,8 @@ export function AccountMenu() {
 
   async function signOut() {
     await authClient.signOut()
+    // Sessions kept on this device for quick opening go with the sign-in.
+    forgetEventCache(tenant.user.id)
     restart()
   }
 

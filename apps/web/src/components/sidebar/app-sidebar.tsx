@@ -33,6 +33,7 @@ import { Kbd } from '@/components/ui/panel'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/cn'
+import { eventCacheFor } from '@/lib/event-cache'
 import {
   attentionPullCount,
   authoredPullCounts,
@@ -49,6 +50,7 @@ import {
 } from '@/lib/seen-sessions'
 import { resolveFolderIndicator, resolveSessionIndicator } from '@/lib/session-activity'
 import { useTenant } from '@/lib/tenant'
+import { storeTimings } from '@/lib/timing'
 import { useMediaQuery } from '@/lib/use-media-query'
 import { useNow } from '@/lib/use-now'
 import {
@@ -81,12 +83,20 @@ function activeSessionRunId(pathname: string): string | null {
 const SESSION_RETAIN_MS = 5 * 60_000
 
 export function AppSidebarShell({ children }: { children: React.ReactNode }) {
+  const userId = useTenant().user.id
+
   return (
     // SSE holds one of the browser's six HTTP/1.1 connections per origin for each run store;
     // across a few tabs that starves route chunks and API calls. WebSockets have their own pool.
     // A session stays connected for a while after it is left, so going back to it shows it at
     // once instead of downloading its log again.
-    <LoomsProvider endpoint="" transport="websocket" retainMs={SESSION_RETAIN_MS}>
+    <LoomsProvider
+      endpoint=""
+      transport="websocket"
+      retainMs={SESSION_RETAIN_MS}
+      cache={eventCacheFor(userId)}
+      observer={storeTimings}
+    >
       <WorkspaceProvider>
         <div className="flex h-dvh min-h-0">
           <AppSidebar />

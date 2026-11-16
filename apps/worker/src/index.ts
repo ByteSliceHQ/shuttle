@@ -45,6 +45,7 @@ import { handleGithubPublicRoutes, handleGithubRoutes } from './routes/github'
 import { handleRunnerRoutes, handleRunnerTokenRoutes } from './routes/runners'
 import { handleSandboxRoutes } from './routes/sandbox'
 import { handleShuttleRoutes } from './routes/sessions'
+import { handleTimingRoutes } from './routes/timings'
 import { handleWorkspaceRoutes } from './routes/workspace'
 import { sandboxesArePersonal } from './sandbox/names'
 import { isOwnHost, parsePreviewHost } from './sandbox/preview-host'
@@ -70,6 +71,7 @@ import { readSessionAccess, writeSessionAccess, type SessionAccess } from './ten
 import { authorizeLoomsRoute, authorizeRun, runIdOfPath } from './tenancy/gate'
 import { runOfPreviewKey } from './tenancy/previews'
 import { orgOfRun } from './tenancy/run-id'
+import { runTimingObserver } from './timing'
 import { CONNECTABLE_HARNESSES } from './vendor/harnesses'
 import {
   readVendorCatalogue,
@@ -104,6 +106,7 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
       // Only the Worker reaches this object, and it has already decided the request. It says who
       // the request acts as, and that is recorded on the events the request sends.
       authorize: forwardedActorAuth(),
+      observer: runTimingObserver(runId),
     }
   }
 
@@ -461,6 +464,7 @@ async function route(
   }
 
   const handled =
+    (await handleTimingRoutes(request, actor)) ??
     (await handleFirehoseRoutes(request, env, actor)) ??
     (await handleConnectionRoutes(request, env, actor)) ??
     (await handleWorkspaceRoutes(request, env, actor, ctx)) ??
