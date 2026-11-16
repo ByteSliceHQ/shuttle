@@ -1,3 +1,4 @@
+import { desktop } from './desktop'
 import type { InterjectionKind } from './session-feed'
 
 /**
@@ -231,8 +232,21 @@ export type HarnessId = 'shuttle' | 'codex' | 'claude-code' | 'cursor'
 export interface Connection {
   readonly harness: Exclude<HarnessId, 'shuttle'>
   readonly label: string
+  /** Signed in somewhere: in the cloud, on this machine, or both. */
   readonly connected: boolean
+  /** Signed in in the viewer's cloud sandbox. */
+  readonly cloud: boolean
+  /** Signed in on this machine. Null outside the desktop app, where there is no machine. */
+  readonly local: boolean | null
   readonly updatedAt: number | null
+}
+
+/** Where a session runs, and so which sign-in it uses. */
+export type SignInPlace = 'local' | 'cloud'
+
+/** Whether the agent is signed in at `place`. Null when that cannot be known from here. */
+export function signedInAt(connection: Connection, place: SignInPlace): boolean | null {
+  return place === 'cloud' ? connection.cloud : connection.local
 }
 
 export type TeamPreset =
@@ -259,8 +273,8 @@ export const DEFAULT_TEAM: Team = {
 }
 
 export interface ConnectionsState {
-  /** Where these sign-ins are: the viewer's cloud sandbox, or the machine the app runs on. */
-  readonly place?: 'local' | 'cloud'
+  /** Whether `local` was asked, which it is from the desktop app. */
+  readonly machine: boolean
   /** The harness new sessions start on. */
   readonly defaultHarness: HarnessId
   /** The team new Shuttle sessions start with. */
@@ -281,21 +295,23 @@ export type LoginEvent =
     }
   | { readonly type: 'login_done'; readonly success: boolean; readonly error?: string }
 
-/** The machine sign-ins are managed on, when it is not the cloud. Set by the desktop app's panel. */
-let connectionsDevice: string | null = null
+/**
+ * Calls the connections API. From the desktop app the listing covers this machine as well as
+ * the cloud, and a sign-in or disconnect at `local` happens in this machine's sandbox.
+ */
+async function connectionsRequest<T>(
+  path: string,
+  init?: RequestInit,
+  place: SignInPlace | 'both' = 'cloud',
+): Promise<T> {
+  const deviceId = place === 'cloud' ? null : (desktop()?.deviceId ?? null)
 
-/** Points the sign-in calls below at one of the viewer's machines, or back at the cloud. */
-export function setConnectionsDevice(deviceId: string | null): void {
-  connectionsDevice = deviceId
-}
-
-async function connectionsRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/workspace/connections${path}`, {
     ...init,
     headers: {
       accept: 'application/json',
       'content-type': 'application/json',
-      ...(connectionsDevice ? { 'x-shuttle-device': connectionsDevice } : {}),
+      ...(deviceId ? { 'x-shuttle-device': deviceId } : {}),
     },
   })
 
@@ -309,7 +325,7 @@ async function connectionsRequest<T>(path: string, init?: RequestInit): Promise<
 }
 
 export function fetchConnections(): Promise<ConnectionsState> {
-  return connectionsRequest('')
+  return connectionsRequest('', undefined, 'both')
 }
 
 export function setDefaultHarness(harness: HarnessId): Promise<{ defaultHarness: HarnessId }> {
@@ -324,14 +340,15 @@ export function setSessionDefaults(defaults: {
   return connectionsRequest('/default', { method: 'PUT', body: JSON.stringify(defaults) })
 }
 
-export function startLogin(harness: string): Promise<{ loginId: string }> {
-  return connectionsRequest(`/${harness}/login`, { method: 'POST' })
+export function startLogin(harness: string, place: SignInPlace): Promise<{ loginId: string }> {
+  return connectionsRequest(`/${harness}/login`, { method: 'POST' }, place)
 }
 
 export function followLogin(
   harness: string,
   loginId: string,
   offset: number,
+  place: SignInPlace,
 ): Promise<{
   events: LoginEvent[]
   offset: number
@@ -339,22 +356,32 @@ export function followLogin(
   connected: boolean
   error?: string
 }> {
-  return connectionsRequest(`/${harness}/login/${loginId}?offset=${offset}`)
+  return connectionsRequest(`/${harness}/login/${loginId}?offset=${offset}`, undefined, place)
 }
 
-export function sendLoginCode(harness: string, loginId: string, code: string): Promise<unknown> {
-  return connectionsRequest(`/${harness}/login/${loginId}/code`, {
-    method: 'POST',
-    body: JSON.stringify({ code }),
-  })
+export function sendLoginCode(
+  harness: string,
+  loginId: string,
+  code: string,
+  place: SignInPlace,
+): Promise<unknown> {
+  return connectionsRequest(
+    `/${harness}/login/${loginId}/code`,
+    { method: 'POST', body: JSON.stringify({ code }) },
+    place,
+  )
 }
 
-export function cancelLogin(harness: string, loginId: string): Promise<unknown> {
-  return connectionsRequest(`/${harness}/login/${loginId}/cancel`, { method: 'POST' })
+export function cancelLogin(
+  harness: string,
+  loginId: string,
+  place: SignInPlace,
+): Promise<unknown> {
+  return connectionsRequest(`/${harness}/login/${loginId}/cancel`, { method: 'POST' }, place)
 }
 
-export function disconnectHarness(harness: string): Promise<unknown> {
-  return connectionsRequest(`/${harness}`, { method: 'DELETE' })
+export function disconnectHarness(harness: string, place: SignInPlace): Promise<unknown> {
+  return connectionsRequest(`/${harness}`, { method: 'DELETE' }, place)
 }
 
 export async function fetchSessionHarness(runId: string): Promise<{ harness: HarnessId }> {

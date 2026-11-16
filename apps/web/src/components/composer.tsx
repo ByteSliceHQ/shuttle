@@ -14,7 +14,6 @@ import {
 import type { AgentIdentity } from '@/lib/agents'
 import {
   DEFAULT_TEAM,
-  fetchConnections,
   fetchSessionTeam,
   fetchSessionVendorModels,
   say,
@@ -24,7 +23,6 @@ import {
   setSessionHarness,
   setSessionTeam,
   setSessionVendorModel,
-  type Connection,
   type HarnessId,
   type Team,
   type VendorHarnessId,
@@ -41,6 +39,7 @@ import { AttachmentTray, releaseAttachments, useComposerAttachments } from './co
 import { ContextUsage } from './context-usage'
 import { HarnessSwitcher } from './harness-switcher'
 import { ModelSwitcher } from './model-switcher'
+import { SignInGate, useAgentGate, useSessionRunsAt } from './sign-in'
 import { Button } from './ui/button'
 import {
   DropdownMenu,
@@ -135,7 +134,6 @@ export function Composer({
 
   const [model, setModel] = useState<OpenRouterModelId>(() => readStoredLlmModel())
   const [team, setTeam] = useState<Team>(DEFAULT_TEAM)
-  const [connections, setConnections] = useState<readonly Connection[] | null>(null)
   const [vendorChoices, setVendorChoices] = useState<VendorModelChoices>({})
   const [mention, setMention] = useState<Mention | null>(null)
   const [inputFocused, setInputFocused] = useState(false)
@@ -167,11 +165,6 @@ export function Composer({
       () => {},
     )
 
-    void fetchConnections().then(
-      (result) => setConnections(result.connections),
-      () => {},
-    )
-
     void fetchSessionVendorModels(runId).then(
       (result) => setVendorChoices(result.choices),
       () => {},
@@ -180,7 +173,12 @@ export function Composer({
 
   // Only a Shuttle session has a team to address, and only its members can be.
   // A saved team can name an agent that is not connected. It will not run, so it is not offered.
-  const activeTeam = connections ? effectiveTeam(team, connections) : team
+  const runsAt = useSessionRunsAt(runId)
+  // An agent that is not signed in where the session runs would only fail the turn, so the
+  // message box offers to sign in there first.
+  const gate = useAgentGate(harness, runsAt.place)
+  const { connections } = gate
+  const activeTeam = connections ? effectiveTeam(team, connections, runsAt.place) : team
   const mentions = harness === 'shuttle' ? teamMentions(activeTeam) : []
   const hybrid = mentions.some((member) => member !== 'worker')
   const activeMention = mention && hybrid && mentions.includes(mention) ? mention : null
@@ -196,11 +194,12 @@ export function Composer({
   const revealExamples = showExamples && inputFocused && text.length === 0 && !disabled
 
   // Agents never block the composer: a message can always be written and sent, even while the
-  // one before it is still on its way.
+  // one before it is still on its way. The one exception is an agent that is not signed in where
+  // the session runs, which could only answer with an error.
   function submit(event?: FormEvent) {
     event?.preventDefault()
 
-    if (disabled) {
+    if (disabled || gate.blocked) {
       return
     }
 
@@ -413,6 +412,17 @@ export function Composer({
               inputRef.current?.focus()
             }}
           />
+          {gate.blocked && gate.connection && runsAt.place ? (
+            <SignInGate
+              connection={gate.connection}
+              place={runsAt.place}
+              onSignedIn={gate.reload}
+              onMoveToCloud={() => {
+                setError(null)
+                runsAt.moveToCloud().catch((cause: unknown) => setError(errorMessage(cause)))
+              }}
+            />
+          ) : null}
           <AttachmentTray attachments={files.attachments} onRemove={files.remove} />
           <textarea
             ref={inputRef}
@@ -490,9 +500,9 @@ export function Composer({
                 <TooltipTrigger asChild>
                   <Button
                     type="submit"
-                    variant={disabled ? 'secondary' : 'brand'}
+                    variant={disabled || gate.blocked ? 'secondary' : 'brand'}
                     size="icon-sm"
-                    disabled={disabled}
+                    disabled={disabled || gate.blocked}
                     aria-label="Send message"
                     className="rounded-lg"
                   >
@@ -524,6 +534,7 @@ export function Composer({
               team={team}
               onTeamChange={onTeamChange}
               disabled={disabled}
+              place={runsAt.place}
             />
             <ModelSwitcher
               harness={harness}

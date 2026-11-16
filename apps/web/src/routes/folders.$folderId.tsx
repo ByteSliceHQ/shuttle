@@ -9,6 +9,7 @@ import { ActivityDot } from '@/components/sidebar/activity-dot'
 import { LinkRepoDialog } from '@/components/sidebar/link-repo-dialog'
 import { RepoChip } from '@/components/sidebar/repo-chip'
 import { useWorkspace, WorkspacePending } from '@/components/sidebar/workspace-context'
+import { SignInGate, useAgentGate, useStartPlace } from '@/components/sign-in'
 import { Button } from '@/components/ui/button'
 import { EmptyState, Kbd } from '@/components/ui/panel'
 import { Textarea } from '@/components/ui/textarea'
@@ -71,6 +72,8 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
   const [error, setError] = useState<string | null>(null)
   const [linkOpen, setLinkOpen] = useState(false)
   const agent = useDefaultHarness()
+  const startPlace = useStartPlace()
+  const gate = useAgentGate(agent.harness, startPlace)
   const [showAllRepos, setShowAllRepos] = useState(false)
 
   const sessions = useMemo(() => sessionsForFolder(tree, folder.folderId), [tree, folder])
@@ -84,7 +87,7 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
   function start() {
     const trimmed = goal.trim()
 
-    if (!trimmed || busy) {
+    if (!trimmed || busy || gate.blocked) {
       return
     }
 
@@ -178,6 +181,14 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
             )}
 
             <div className="bg-card mt-6 rounded-xl border p-1.5 shadow-xl shadow-black/20">
+              {gate.blocked && gate.connection ? (
+                <SignInGate
+                  connection={gate.connection}
+                  place={startPlace}
+                  onSignedIn={gate.reload}
+                  upcoming
+                />
+              ) : null}
               <Textarea
                 value={goal}
                 onChange={(event) => setGoal(event.target.value)}
@@ -194,12 +205,17 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
                   onTeamChange={agent.setTeam}
                   disabled={busy}
                   side="bottom"
+                  place={startPlace}
                 />
                 <span className="text-muted-foreground ml-auto hidden items-center gap-1 text-[11px] sm:inline-flex">
                   <Kbd>⌘</Kbd>
                   <Kbd>↵</Kbd>
                 </span>
-                <Button variant="brand" onClick={start} disabled={busy || !goal.trim()}>
+                <Button
+                  variant="brand"
+                  onClick={start}
+                  disabled={busy || !goal.trim() || gate.blocked}
+                >
                   {busy ? <LoaderCircle className="animate-spin" /> : <ArrowRight />}
                   {busy ? 'Starting' : 'Start session'}
                 </Button>

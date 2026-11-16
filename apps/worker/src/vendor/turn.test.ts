@@ -586,6 +586,23 @@ describe("runVendorTurn in a person's own sandbox", () => {
     expect(started).toHaveLength(1)
   })
 
+  test('on a machine the sign-in file is what counts, with nothing recorded', async () => {
+    const { sandbox, started } = fakeSandbox(done)
+
+    await runVendorTurn(
+      deps(sandbox, {
+        signInStaysInSandbox: true,
+        billedTo: 'alice',
+        credentials: connected(null),
+        signInPresent: async () => true,
+        onMachine: true,
+      }),
+      args(),
+    )
+
+    expect(started).toHaveLength(1)
+  })
+
   test('each person continues their own vendor conversation', async () => {
     const storage = memoryStorage()
     const forAlice = fakeSandbox(done)

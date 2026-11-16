@@ -16,9 +16,30 @@ function team(overrides: Partial<Team> = {}): Team {
 
 function connections(codex: boolean, claudeCode: boolean, cursor = false): Connection[] {
   return [
-    { harness: 'codex', label: 'Codex', connected: codex, updatedAt: null },
-    { harness: 'claude-code', label: 'Claude Code', connected: claudeCode, updatedAt: null },
-    { harness: 'cursor', label: 'Cursor', connected: cursor, updatedAt: null },
+    {
+      harness: 'codex',
+      label: 'Codex',
+      connected: codex,
+      cloud: codex,
+      local: null,
+      updatedAt: null,
+    },
+    {
+      harness: 'claude-code',
+      label: 'Claude Code',
+      connected: claudeCode,
+      cloud: claudeCode,
+      local: null,
+      updatedAt: null,
+    },
+    {
+      harness: 'cursor',
+      label: 'Cursor',
+      connected: cursor,
+      cloud: cursor,
+      local: null,
+      updatedAt: null,
+    },
   ]
 }
 
@@ -50,5 +71,23 @@ describe('effectiveTeam', () => {
 
     expect(effectiveTeam(saved, connections(false, false, true))).toEqual(saved)
     expect(effectiveTeam(saved, connections(false, false, false))).toEqual(team())
+  })
+
+  test('on this machine, leaves out an agent signed in only in the cloud', () => {
+    const saved = team({ codex: true })
+
+    const cloudOnly: Connection[] = [
+      {
+        harness: 'codex',
+        label: 'Codex',
+        connected: true,
+        cloud: true,
+        local: false,
+        updatedAt: null,
+      },
+    ]
+
+    expect(effectiveTeam(saved, cloudOnly, 'local')).toEqual(team())
+    expect(effectiveTeam(saved, cloudOnly, 'cloud')).toEqual(saved)
   })
 })

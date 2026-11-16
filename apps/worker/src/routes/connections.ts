@@ -141,12 +141,14 @@ async function route(request: Request, env: ShuttleEnv, url: URL, actor: Actor):
       return json({ error: 'Method not allowed' }, 405)
     }
 
-    const connected = new Map(
+    // Signed in in the cloud: recorded on the workspace run.
+    const inCloud = new Map(
       (await credentials.listCredentials(userId)).map((entry) => [entry.harness, entry.updatedAt]),
     )
 
-    // On a person's machine the sign-in is a file there and nowhere else, so that is what is
-    // asked. A machine that is not connected has none that can be used.
+    // Asked from the desktop app, also on this machine. There the sign-in is a file in the
+    // machine's sandbox and nowhere else, so that is what is asked. A machine whose sandbox is
+    // not running has none that can be used.
     const onMachine = isLocalSandbox(sandboxName)
       ? new Set(
           (
@@ -166,17 +168,25 @@ async function route(request: Request, env: ShuttleEnv, url: URL, actor: Actor):
       : null
 
     return json({
-      place: onMachine ? 'local' : 'cloud',
+      machine: onMachine !== null,
       defaultHarness: (await credentials.getHarness()).harness,
       defaultTeam: (await credentials.getTeam()).team,
       mode: (await sandbox.getMode()).mode,
       canStore: Boolean(env.SHUTTLE_CREDENTIALS_KEY?.trim()),
-      connections: CONNECTABLE_HARNESSES.map((harness) => ({
-        harness,
-        label: vendorHarnessInfo(harness).label,
-        connected: onMachine ? onMachine.has(harness) : connected.has(harness),
-        updatedAt: onMachine ? null : (connected.get(harness) ?? null),
-      })),
+      connections: CONNECTABLE_HARNESSES.map((harness) => {
+        const cloud = inCloud.has(harness)
+        const local = onMachine ? onMachine.has(harness) : null
+
+        return {
+          harness,
+          label: vendorHarnessInfo(harness).label,
+          // Signed in somewhere: the agent can be picked, and runs where it is signed in.
+          connected: cloud || local === true,
+          cloud,
+          local,
+          updatedAt: inCloud.get(harness) ?? null,
+        }
+      }),
     })
   }
 
@@ -226,6 +236,11 @@ async function route(request: Request, env: ShuttleEnv, url: URL, actor: Actor):
         .catch(() => {})
     }
 
+    // A machine's sign-in was never recorded in the cloud, so the cloud one stays.
+    if (isLocalSandbox(sandboxName)) {
+      return json({ removed: true })
+    }
+
     return json({ removed: await credentials.removeCredential(userId, harness) })
   }
 
@@ -269,6 +284,7 @@ async function route(request: Request, env: ShuttleEnv, url: URL, actor: Actor):
       credentials,
       userId,
       keepInSandbox: personal,
+      onMachine: isLocalSandbox(sandboxName),
     })
   }
 
@@ -364,6 +380,8 @@ async function followLogin(
     userId: string
     /** True where the sandbox is the person's own and the sign-in stays on its disk. */
     keepInSandbox: boolean
+    /** True where that sandbox is on one of the person's machines. */
+    onMachine: boolean
   },
 ): Promise<Response> {
   const startOffset = Number.isFinite(offset) && offset > 0 ? offset : 0
@@ -416,7 +434,11 @@ async function followLogin(
       })
     }
 
-    await deps.credentials.putCredential(deps.userId, harness, {})
+    // Recorded only for the cloud. A machine's sign-in is found by looking on the machine, and
+    // recording it here would show the agent as signed in in the cloud as well.
+    if (!deps.onMachine) {
+      await deps.credentials.putCredential(deps.userId, harness, {})
+    }
 
     return json({ ...page, connected: true })
   }

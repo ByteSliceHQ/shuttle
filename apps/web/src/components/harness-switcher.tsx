@@ -6,13 +6,16 @@ import {
   DEFAULT_TEAM,
   fetchConnections,
   setSessionDefaults,
+  signedInAt,
   type Connection,
   type ConnectionsState,
   type HarnessId,
+  type SignInPlace,
   type Team,
   type TeamPreset,
 } from '@/lib/api'
-import { effectiveTeam, withTeamChange } from '@/lib/team'
+import { cn } from '@/lib/cn'
+import { canRunAt, effectiveTeam, withTeamChange } from '@/lib/team'
 
 import {
   DropdownMenu,
@@ -65,6 +68,27 @@ function teamKey(harness: Connection['harness']): 'codex' | 'claudeCode' | 'curs
   }
 }
 
+/**
+ * How an agent stands where the session runs, for the picker. An agent signed in only at the
+ * other place can still be picked: the message box then offers to sign in where it runs.
+ */
+function agentStatus(
+  connection: Connection,
+  place: SignInPlace | null | undefined,
+): { text: string; warn: boolean } {
+  const there = place ? signedInAt(connection, place) : null
+
+  if (there === true || (there === null && connection.connected)) {
+    return { text: 'Your subscription', warn: false }
+  }
+
+  if (!connection.connected) {
+    return { text: 'Not connected', warn: false }
+  }
+
+  return { text: place === 'local' ? 'Cloud only' : 'This machine only', warn: true }
+}
+
 /** Picks which agent runs the session: Shuttle's own loop, or a connected subscription. */
 export function HarnessSwitcher({
   value,
@@ -73,6 +97,7 @@ export function HarnessSwitcher({
   onTeamChange,
   disabled = false,
   side = 'top',
+  place,
 }: {
   value: HarnessId
   onChange: (harness: HarnessId) => void
@@ -82,6 +107,8 @@ export function HarnessSwitcher({
   disabled?: boolean
   /** Which way the menu opens: up from a composer at the bottom, down from a form. */
   side?: 'top' | 'bottom'
+  /** Where the session runs, so the picker says whether each agent is signed in there. */
+  place?: SignInPlace | null
 }) {
   const [state, setState] = useState<ConnectionsState | null>(null)
 
@@ -94,7 +121,7 @@ export function HarnessSwitcher({
   const connections = state?.connections ?? []
   const label = connections.find((entry) => entry.harness === value)?.label ?? SHUTTLE_LABEL
   // Until the connections load, show the team as saved rather than flash an empty one.
-  const shown = team && state ? effectiveTeam(team, connections) : team
+  const shown = team && state ? effectiveTeam(team, connections, place) : team
 
   return (
     <DropdownMenu onOpenChange={(open) => (open ? reload() : undefined)}>
@@ -119,18 +146,23 @@ export function HarnessSwitcher({
             {SHUTTLE_LABEL}
             <span className="text-muted-foreground ml-auto text-[10px]">OpenRouter</span>
           </DropdownMenuRadioItem>
-          {connections.map((connection) => (
-            <DropdownMenuRadioItem
-              key={connection.harness}
-              value={connection.harness}
-              disabled={!connection.connected}
-            >
-              {connection.label}
-              <span className="text-muted-foreground ml-auto text-[10px]">
-                {connection.connected ? 'Your subscription' : 'Not connected'}
-              </span>
-            </DropdownMenuRadioItem>
-          ))}
+          {connections.map((connection) => {
+            const status = agentStatus(connection, place)
+
+            return (
+              <DropdownMenuRadioItem key={connection.harness} value={connection.harness}>
+                {connection.label}
+                <span
+                  className={cn(
+                    'ml-auto text-[10px]',
+                    status.warn ? 'text-amber-600 dark:text-amber-500' : 'text-muted-foreground',
+                  )}
+                >
+                  {status.text}
+                </span>
+              </DropdownMenuRadioItem>
+            )
+          })}
         </DropdownMenuRadioGroup>
         {value === 'shuttle' && shown && onTeamChange ? (
           <>
@@ -154,7 +186,8 @@ export function HarnessSwitcher({
                 <DropdownMenuCheckboxItem
                   key={connection.harness}
                   checked={shown[key]}
-                  disabled={!connection.connected}
+                  // A team member has no message box of its own to sign in from.
+                  disabled={!canRunAt(connection, place)}
                   onSelect={(event) => event.preventDefault()}
                   onCheckedChange={(checked) =>
                     onTeamChange(withTeamChange(shown, { [key]: checked }))
@@ -162,7 +195,11 @@ export function HarnessSwitcher({
                 >
                   {connection.label}
                   <span className="text-muted-foreground ml-auto text-[10px]">
-                    {connection.connected ? 'Your subscription' : 'Not connected'}
+                    {canRunAt(connection, place)
+                      ? 'Your subscription'
+                      : connection.connected
+                        ? `Sign in ${place === 'local' ? 'on this machine' : 'in the cloud'}`
+                        : 'Not connected'}
                   </span>
                 </DropdownMenuCheckboxItem>
               )

@@ -202,33 +202,31 @@ export async function runVendorTurn(
 
   const stored = await deps.credentials.get(harness)
 
-  // The work never falls back to someone else's sign-in. The person it is for has to connect.
-  if (deps.signInStaysInSandbox && !stored && !conversation.pending) {
-    return {
-      message: {
-        role: 'assistant',
-        content: `${info.label} is not connected for the person this work is for. They can connect it on the Connections page, then send the message again.`,
-      },
-      usage: { input: 0, output: 0 },
+  if (deps.signInStaysInSandbox && !conversation.pending) {
+    // The work never falls back to someone else's sign-in. The person it is for has to connect.
+    // On a machine, the sign-in is a file there and is never recorded, so only the file counts.
+    if (!stored && !deps.onMachine) {
+      return {
+        message: {
+          role: 'assistant',
+          content: `${info.label} is not connected for the person this work is for. They can connect it on the Connections page, then send the message again.`,
+        },
+        usage: { input: 0, output: 0 },
+      }
     }
-  }
 
-  // Connected somewhere, but not where this turn runs. Starting the agent would only end in the
-  // vendor refusing it for want of a sign-in.
-  if (
-    deps.signInStaysInSandbox &&
-    !conversation.pending &&
-    deps.signInPresent &&
-    !(await deps.signInPresent().catch(() => true))
-  ) {
-    return {
-      message: {
-        role: 'assistant',
-        content: deps.onMachine
-          ? `${info.label} is not signed in on this machine. It may be connected in the cloud, but this session runs here. Connect it on the Connections page with This machine selected, or move the session to the cloud, then send the message again.`
-          : `${info.label} is not signed in in the cloud. It may be connected on one of your machines, but this session runs in the cloud. Connect it on the Connections page with Cloud selected, or move the session to your machine, then send the message again.`,
-      },
-      usage: { input: 0, output: 0 },
+    // Connected somewhere, but not where this turn runs. Starting the agent would only end in
+    // the vendor refusing it for want of a sign-in.
+    if (deps.signInPresent && !(await deps.signInPresent().catch(() => true))) {
+      return {
+        message: {
+          role: 'assistant',
+          content: deps.onMachine
+            ? `${info.label} is not signed in on this machine, where this session runs. Sign in from the message box, or move the session to the cloud, then send the message again.`
+            : `${info.label} is not signed in in the cloud, where this session runs. Sign in from the message box, or move the session to your machine, then send the message again.`,
+        },
+        usage: { input: 0, output: 0 },
+      }
     }
   }
 

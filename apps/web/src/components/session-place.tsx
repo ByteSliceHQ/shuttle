@@ -1,6 +1,7 @@
 import { Check, Cloud, Laptop, LoaderCircle } from 'lucide-react'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 
+import { SESSION_MOVED_EVENT } from '@/components/sign-in'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn, errorMessage } from '@/lib/cn'
 import { desktop, isolationLabel, type DesktopRunnerStatus } from '@/lib/desktop'
@@ -94,6 +95,19 @@ export function SessionPlace({ runId, working }: { runId: string; working: boole
     }
   }, [refresh, working])
 
+  // A move made from elsewhere on the page, such as the message box.
+  useEffect(() => {
+    const onMoved = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === runId) {
+        refresh()
+      }
+    }
+
+    window.addEventListener(SESSION_MOVED_EVENT, onMoved)
+
+    return () => window.removeEventListener(SESSION_MOVED_EVENT, onMoved)
+  }, [refresh, runId])
+
   // A move that is waiting happens shortly after the turn ends, without the page being told.
   const waiting = place?.pending != null
 
@@ -137,7 +151,13 @@ export function SessionPlace({ runId, working }: { runId: string; working: boole
 
     // While the session is working this only asks: the move happens when the turn ends.
     moveSession(runId, to === 'local' && app ? { to, deviceId: app.deviceId } : { to: 'cloud' })
-      .then(setPlace, (cause: unknown) => setError(errorMessage(cause)))
+      .then(
+        (next) => {
+          setPlace(next)
+          window.dispatchEvent(new CustomEvent(SESSION_MOVED_EVENT, { detail: runId }))
+        },
+        (cause: unknown) => setError(errorMessage(cause)),
+      )
       .finally(() => setMoving(null))
   }
 

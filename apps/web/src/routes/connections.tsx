@@ -3,12 +3,34 @@ import { Check } from 'lucide-react'
 import { useState } from 'react'
 
 import { ConnectionsPanel } from '@/components/connections-panel'
-import { setDefaultHarness, type ConnectionsState, type HarnessId } from '@/lib/api'
+import {
+  setDefaultHarness,
+  type Connection,
+  type ConnectionsState,
+  type HarnessId,
+} from '@/lib/api'
 import { cn, errorMessage } from '@/lib/cn'
 
 export const Route = createFileRoute('/connections')({
   component: ConnectionsPage,
 })
+
+/** Where an agent is signed in, in a few words. */
+function whereSignedIn(connection: Connection): string {
+  if (connection.local === null) {
+    return connection.cloud ? 'Your subscription' : 'Not connected'
+  }
+
+  if (connection.local && connection.cloud) {
+    return 'Signed in on this machine and in the cloud'
+  }
+
+  return connection.local
+    ? 'Signed in on this machine only'
+    : connection.cloud
+      ? 'Signed in in the cloud only'
+      : 'Not connected'
+}
 
 function ConnectionsPage() {
   const [state, setState] = useState<ConnectionsState | null>(null)
@@ -33,7 +55,7 @@ function ConnectionsPage() {
     ...(state?.connections ?? []).map((connection) => ({
       harness: connection.harness as HarnessId,
       label: connection.label,
-      detail: connection.connected ? 'Your subscription' : 'Not connected',
+      detail: whereSignedIn(connection),
       enabled: connection.connected,
     })),
   ]
@@ -45,8 +67,8 @@ function ConnectionsPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
           <p className="text-muted-foreground mt-2 max-w-xl text-sm leading-relaxed text-pretty">
             Run sessions on your own coding agent subscription instead of OpenRouter. You sign in to
-            the agent itself, inside your sandbox. Shuttle stores the sign-in encrypted in your
-            deployment and never sends it anywhere else.
+            the agent itself, inside the sandbox where your sessions run, and the sign-in stays
+            there.
           </p>
         </section>
 
