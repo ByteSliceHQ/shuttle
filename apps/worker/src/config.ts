@@ -27,7 +27,7 @@ import {
   type ReasoningEffort,
 } from './llm'
 import { loomsStub } from './looms-stub'
-import { sandboxesArePersonal } from './sandbox/names'
+import { sandboxIsPersonal } from './sandbox/names'
 import { sessionWorkDir } from './sandbox/workspace'
 import { readSandboxBinding, sandboxNameForSession } from './session/bind-sandbox'
 import { prepareSessionSandbox } from './session/handoff'
@@ -215,10 +215,8 @@ export function resolveLlm(
         }
       }
 
-      const sandbox = sandboxStub(
-        env,
-        await sandboxNameForSession(env, storage, runId, binding.sandboxName),
-      )
+      const sandboxName = await sandboxNameForSession(env, storage, runId, binding.sandboxName)
+      const sandbox = sandboxStub(env, sandboxName)
 
       if ((await sandbox.getMode()).mode !== 'container') {
         return {
@@ -255,7 +253,7 @@ export function resolveLlm(
           // The turn runs on the sign-in of the person it is working for, and on no one else's.
           // A session Shuttle started itself, which nobody has spoken in, has no one's.
           ...(sponsorId ? { billedTo: sponsorId } : {}),
-          signInStaysInSandbox: sandboxesArePersonal(env),
+          signInStaysInSandbox: sandboxIsPersonal(sandboxName, env),
           shareInstructions: shareInstructions(runId),
           collectShared: () =>
             collectSharedFiles({

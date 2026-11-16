@@ -43,9 +43,15 @@ Default `SHUTTLE_WORKSPACE_MODE=memory` needs no Docker. Set
 ## Repo layout
 
 ```text
-apps/worker   Cloudflare Worker + Durable Objects + custom Looms modules
-apps/web      Vite + React session UI
+apps/worker              Cloudflare Worker + Durable Objects + custom Looms modules
+apps/web                 Vite + React session UI
+apps/desktop             Electron app: the session UI plus a sandbox on this machine
+apps/runner              Keeps that local sandbox and connects it to Shuttle
+packages/runner-protocol What the worker and a runner say to each other
 ```
+
+Sandboxes are pluggable (memory, Cloudflare, Daytona, a person's own machine) and a session
+moves between them with its work. See [docs/sandboxes.md](docs/sandboxes.md).
 
 ## Local Looms development
 
@@ -66,6 +72,7 @@ bun link @swirls/looms
 | Command               | What it does                    |
 | --------------------- | ------------------------------- |
 | `bun run dev`         | Worker + web (+ webhook tunnel) |
+| `bun run desktop`     | Desktop app against the dev UI  |
 | `bun run check-types` | Typecheck both apps             |
 | `bun run test`        | Worker unit/integration tests   |
 | `bun run verify`      | Types + tests                   |

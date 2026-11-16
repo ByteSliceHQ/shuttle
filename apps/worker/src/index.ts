@@ -9,6 +9,7 @@ import { forwardedActorAuth } from '@swirls/looms/runtime'
 import { shuttleAttributes } from './attributes'
 import { resolveActor } from './auth/actor'
 import { AUTH_BASE_PATH, AuthUnavailableError, getAuth, githubSignInEnabled } from './auth/auth'
+import { refuseSignUp, signUpCodeRequired } from './auth/signup-code'
 import {
   personalWorkspaceRunId,
   playbookRunId,
@@ -40,6 +41,7 @@ import { handleAssetRoutes } from './routes/assets'
 import { handleConnectionRoutes } from './routes/connections'
 import { handleFirehoseRoutes } from './routes/firehose'
 import { handleGithubPublicRoutes, handleGithubRoutes } from './routes/github'
+import { handleRunnerRoutes, handleRunnerTokenRoutes } from './routes/runners'
 import { handleSandboxRoutes } from './routes/sandbox'
 import { handleShuttleRoutes } from './routes/sessions'
 import { handleWorkspaceRoutes } from './routes/workspace'
@@ -48,10 +50,20 @@ import { parsePreviewHost } from './sandbox/preview-host'
 import { SessionSandbox } from './sandbox/session-sandbox'
 import {
   readSandboxBinding,
+  readSandboxPlacement,
   sandboxNameForSession,
+  writeSandboxPlacement,
   type SandboxBinding,
+  type SandboxPlacement,
 } from './session/bind-sandbox'
-import { SANDBOX_HOME_KEY } from './session/handoff'
+import {
+  LAST_MOVE_KEY,
+  PENDING_PLACEMENT_KEY,
+  prepareSessionSandbox,
+  SANDBOX_HOME_KEY,
+  type PendingPlacement,
+  type SessionMove,
+} from './session/handoff'
 import { DEFAULT_TEAM, readPinnedTeam, writeStoredTeam, type Team } from './team'
 import { readSessionAccess, writeSessionAccess, type SessionAccess } from './tenancy/access'
 import { authorizeLoomsRoute, authorizeRun, runIdOfPath } from './tenancy/gate'
@@ -68,6 +80,7 @@ import {
   type VendorModelChoice,
   type VendorModelChoices,
 } from './vendor/models'
+import { isWebAppRequest } from './web-app'
 import { deriveActivityFromRunState } from './workspace/activity-state'
 import type { SessionActivity } from './workspace/module'
 import { sandboxNameFor } from './workspace/thread'
@@ -132,6 +145,66 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
       (await this.ctx.storage.get<string>(SANDBOX_HOME_KEY)) ??
       sandboxNameForSession(this.env, this.ctx.storage, runId, binding.sandboxName)
     )
+  }
+
+  /** The machine a person asked for this session to run on, or null for the cloud. */
+  async getSandboxPlacement(): Promise<SandboxPlacement | null> {
+    return readSandboxPlacement(this.ctx.storage)
+  }
+
+  /**
+   * Moves this session to one of a person's own machines, or back to the cloud with null. A
+   * session that has already worked somewhere is moved now, files and all, so the person sees
+   * it arrive; one that has not simply starts there. If the move fails the session stays where
+   * it was. `moved` says what was carried, when anything was.
+   */
+  async placeSandbox(
+    placement: SandboxPlacement | null,
+  ): Promise<{ sandboxName: string | null; moved: SessionMove | null }> {
+    const runId = this.ctx.id.name ?? ''
+    const before = await readSandboxPlacement(this.ctx.storage)
+    const binding = await readSandboxBinding(this.ctx.storage, runId)
+    const lastMove = await this.ctx.storage.get<SessionMove>(LAST_MOVE_KEY)
+
+    await this.ctx.storage.delete(PENDING_PLACEMENT_KEY)
+    await writeSandboxPlacement(this.ctx.storage, placement)
+
+    if (!binding) {
+      return { sandboxName: null, moved: null }
+    }
+
+    try {
+      await prepareSessionSandbox(this.env, this.ctx.storage, runId, binding)
+    } catch (cause) {
+      await writeSandboxPlacement(this.ctx.storage, before)
+
+      throw cause
+    }
+
+    const move = await this.ctx.storage.get<SessionMove>(LAST_MOVE_KEY)
+
+    return {
+      sandboxName: await this.getSandboxName(),
+      moved: move && move.at !== lastMove?.at ? move : null,
+    }
+  }
+
+  /** Asks for a move that happens when the session next stops working. */
+  async placeSandboxLater(placement: SandboxPlacement | null): Promise<{ ok: true }> {
+    await this.ctx.storage.put(PENDING_PLACEMENT_KEY, { placement } satisfies PendingPlacement)
+
+    return { ok: true }
+  }
+
+  /** What is known about where this session is going and where it last came from. */
+  async getSandboxMoves(): Promise<{
+    pending: PendingPlacement | null
+    last: SessionMove | null
+  }> {
+    return {
+      pending: (await this.ctx.storage.get<PendingPlacement>(PENDING_PLACEMENT_KEY)) ?? null,
+      last: (await this.ctx.storage.get<SessionMove>(LAST_MOVE_KEY)) ?? null,
+    }
   }
 
   /** The repositories this session works in. Empty before it binds a sandbox, or with none linked. */
@@ -289,6 +362,11 @@ export default {
 
     const url = new URL(request.url)
 
+    // A deployment serves the web app itself. In development Vite does, and `WEB` is absent.
+    if (env.WEB && isWebAppRequest(request)) {
+      return env.WEB.fetch(request)
+    }
+
     if (request.method === 'GET' && url.pathname === '/health') {
       return Response.json({ ok: true })
     }
@@ -313,17 +391,28 @@ async function route(
 ): Promise<Response> {
   // Sign-in itself, and the calls GitHub makes, are the only routes that need no sign-in.
   if (url.pathname.startsWith(AUTH_BASE_PATH)) {
-    return getAuth(env).handler(request)
+    return refuseSignUp(request, env) ?? getAuth(env).handler(request)
   }
 
   if (request.method === 'GET' && url.pathname === '/auth/providers') {
-    return Response.json({ emailAndPassword: true, github: githubSignInEnabled(env) })
+    return Response.json({
+      emailAndPassword: true,
+      github: githubSignInEnabled(env),
+      signUpCode: signUpCodeRequired(env),
+    })
   }
 
   const githubPublic = await handleGithubPublicRoutes(request, env)
 
   if (githubPublic) {
     return githubPublic
+  }
+
+  // A runner signs in with its machine's token, not as a browser.
+  const runner = await handleRunnerTokenRoutes(request, env)
+
+  if (runner) {
+    return runner
   }
 
   const actor = await resolveActor(getAuth(env), request)
@@ -365,6 +454,7 @@ async function route(
     (await handleConnectionRoutes(request, env, actor)) ??
     (await handleWorkspaceRoutes(request, env, actor, ctx)) ??
     (await handleGithubRoutes(request, env, actor)) ??
+    (await handleRunnerRoutes(request, env, actor)) ??
     (await handleSandboxRoutes(request, env, actor)) ??
     (await handleAssetRoutes(request, env, actor)) ??
     (await handleShuttleRoutes(request, env, actor))

@@ -218,6 +218,17 @@ export const shuttleCatalog = defineEventCatalog('shuttle', {
   // What a vendor agent (Codex, Claude Code) did during a turn inside the sandbox. Looms does
   // not run these steps; they are recorded so the session shows the agent's work. Each is sent
   // live as it happens and again, durably, when the turn ends.
+  // The session's work was carried from one sandbox to another: between a person's machine and
+  // the cloud, or between two people's sandboxes. Recorded so the history shows where each
+  // stretch of work happened.
+  'sandbox.moved': Schema.Struct({
+    from: Schema.Union([Schema.Literal('local'), Schema.Literal('cloud')]),
+    to: Schema.Union([Schema.Literal('local'), Schema.Literal('cloud')]),
+    /** The machine's name, for whichever end is one. */
+    device: Schema.optional(Schema.String),
+    /** True when the work came from the last save because the machine could not be reached. */
+    fromSave: Schema.Boolean,
+  }),
   // The developer changed who the conductor may delegate to. Recorded so the session history
   // shows when an agent joined or left the team.
   'team.changed': Schema.Struct({

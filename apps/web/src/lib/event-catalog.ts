@@ -191,6 +191,12 @@ function summarizeShuttle(event: SessionEvent): EventSummary | undefined {
         detail: jsonText(payload.delta),
       }
 
+    case 'shuttle.sandbox.moved':
+      return {
+        title: 'sandbox moved',
+        detail: `${String(payload.from)} → ${String(payload.to)}${payload.fromSave === true ? ' (from last save)' : ''}`,
+      }
+
     case 'shuttle.team.changed':
       return {
         title: 'team changed',

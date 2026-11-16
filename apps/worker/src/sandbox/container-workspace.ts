@@ -125,11 +125,24 @@ export function settleOriginScript(input: {
 }
 
 /**
+ * Stops a command started by `timedBashArgv`. `kill` is run through bash because the sandbox
+ * image has no `kill` program, only the shell's own. `timeout` leads a process group, so the
+ * group is signalled: stopping only `timeout` would leave what it started running, holding the
+ * command's output open.
+ */
+export function killArgv(pid: number): string[] {
+  return ['bash', '-c', 'kill -TERM -- "-$1" 2>/dev/null || kill -TERM "$1"', 'bash', String(pid)]
+}
+
+/**
  * Real Linux workspace on a `SandboxHost`: a Durable Object container or a Daytona sandbox.
  */
 export class ContainerWorkspace implements Workspace {
   /** One sandbox serves every worker in a session, so kills must target a specific exec. */
   private readonly activePids = new Map<string, number>()
+
+  /** Commands under way, whether or not the host could report a pid for them. */
+  private running = 0
 
   constructor(
     /** The host to run on, started if it has to be. Asked for on every operation. */
@@ -485,6 +498,10 @@ export class ContainerWorkspace implements Workspace {
     return result.stdout
   }
 
+  busy(): boolean {
+    return this.running > 0
+  }
+
   async kill(execId?: string): Promise<void> {
     const pid = execId ? this.activePids.get(execId) : undefined
 
@@ -493,7 +510,7 @@ export class ContainerWorkspace implements Workspace {
     }
 
     const host = await this.host()
-    await host.exec(['kill', '-TERM', String(pid)]).then((process) => process.output())
+    await host.exec(killArgv(pid)).then((process) => process.output())
   }
 
   private async seedDemoRepo(host: SandboxHost): Promise<void> {
@@ -550,6 +567,23 @@ export class ContainerWorkspace implements Workspace {
     const timeoutSeconds = Math.max(1, Math.ceil(timeoutMs / 1000))
     const execId = options?.execId ?? crypto.randomUUID()
 
+    this.running++
+
+    try {
+      return await this.runTimed(command, options, host, timeoutMs, timeoutSeconds, execId)
+    } finally {
+      this.running--
+    }
+  }
+
+  private async runTimed(
+    command: string,
+    options: ExecOptions | undefined,
+    host: SandboxHost,
+    timeoutMs: number,
+    timeoutSeconds: number,
+    execId: string,
+  ): Promise<ExecResult> {
     const process = await host.exec(
       timedBashArgv(command, timeoutSeconds),
       options?.cwd ? { cwd: options.cwd } : {},
@@ -564,7 +598,7 @@ export class ContainerWorkspace implements Workspace {
     const raceKill = new Promise<ExecResult>((resolve) => {
       const timer = setTimeout(() => {
         if (pid !== undefined) {
-          void host.exec(['kill', '-TERM', String(pid)]).then((proc) => proc.output())
+          void host.exec(killArgv(pid)).then((proc) => proc.output())
         }
 
         resolve({

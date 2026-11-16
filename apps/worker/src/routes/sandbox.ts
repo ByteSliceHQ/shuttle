@@ -10,8 +10,14 @@ import { loomsStub } from '../looms-stub'
 import { shellQuote } from '../sandbox/exec-argv'
 import {
   DEMO_REPO,
+  deviceOfSandbox,
   isDemoRepo,
+  isLocalSandbox,
+  localSandboxName,
+  providerIdForSandbox,
+  sandboxCarriesWork,
   sandboxesArePersonal,
+  sandboxIsPersonal,
   userOfSandbox,
   userSandboxName,
 } from '../sandbox/names'
@@ -85,24 +91,24 @@ export async function handleSandboxRoutes(
       target.searchParams.set('cwd', `/workspace/.wt/${runId}`)
     }
 
+    const home = await resolveSandboxName(env, runId)
+
+    // A session on the viewer's own machine opens there: that sandbox is theirs too.
+    const mine = isLocalSandbox(home) && userOfSandbox(home) === actor.userId
+
     return forwardTerminal(
       new Request(target, request),
-      sandboxStub(env, own ?? (await resolveSandboxName(env, runId))),
+      sandboxStub(env, mine ? home : (own ?? home)),
       env,
     )
   }
 
   if (action === 'place') {
-    if (request.method !== 'GET') {
-      return Response.json({ error: 'Method not allowed' }, { status: 405 })
-    }
-
-    // Whose sandbox holds the session's files, so a terminal can say when that is not the
-    // viewer's. Null where sandboxes are shared, or before the session has worked anywhere.
-    const home = personal ? await loomsStub(env.LOOMS_RUN, runId).getSandboxName() : null
-    const holderId = home ? userOfSandbox(home) : null
-
-    return Response.json({ personal, holderId, here: !personal || home === own })
+    return request.method === 'POST'
+      ? moveSession(request, env, actor, runId)
+      : request.method === 'GET'
+        ? Response.json(await sessionPlace(env, actor, runId))
+        : Response.json({ error: 'Method not allowed' }, { status: 405 })
   }
 
   const sandboxName = await resolveSandboxName(env, runId)
@@ -113,7 +119,7 @@ export async function handleSandboxRoutes(
   }
 
   if (action === 'write') {
-    return writeFile(request, env, stub, runId, personal)
+    return writeFile(request, env, stub, runId, sandboxIsPersonal(sandboxName, env))
   }
 
   if (action === 'diagnostics') {
@@ -127,7 +133,8 @@ export async function handleSandboxRoutes(
   // Looking never wakes a sandbox. While the one that holds the session is asleep, the tabs
   // show the session's work as it was last saved.
   const asleep =
-    sandboxesArePersonal(env) && !(await stub.isAwake().catch(() => ({ awake: true }))).awake
+    sandboxIsPersonal(sandboxName, env) &&
+    !(await stub.isAwake().catch(() => ({ awake: true }))).awake
 
   const path = url.searchParams.get('path')
 
@@ -145,7 +152,12 @@ export async function handleSandboxRoutes(
     case 'diff':
       return path ? fileDiff(env, stub, runId, path) : listDiffs(env, stub, runId)
     case 'workspace':
-      return liveWorkspace(env, stub, runId, personal ? userOfSandbox(sandboxName) : null)
+      return liveWorkspace(
+        env,
+        stub,
+        runId,
+        sandboxIsPersonal(sandboxName, env) ? userOfSandbox(sandboxName) : null,
+      )
 
     default: {
       const exhaustive: never = action as never
@@ -153,6 +165,175 @@ export async function handleSandboxRoutes(
       return exhaustive
     }
   }
+}
+
+/**
+ * Where a session's files are, and where they could go.
+ *
+ * `holderId` and `here` say whose sandbox holds them, so a terminal can say when that is not the
+ * viewer's. `sandbox` describes that sandbox: the provider it runs on and, for one on a person's
+ * machine, the machine and whether it is connected. `local` is set while the session is placed
+ * on a machine, whoever it is working for at the moment.
+ */
+async function sessionPlace(env: ShuttleEnv, actor: Actor, runId: string) {
+  const run = loomsStub(env.LOOMS_RUN, runId)
+  const home = await run.getSandboxName()
+  const placement = await run.getSandboxPlacement()
+  const personal = home ? sandboxIsPersonal(home, env) : sandboxesArePersonal(env)
+  const local = home !== null && isLocalSandbox(home)
+
+  const machine = local
+    ? await sandboxStub(env, home)
+        .describe()
+        .catch(() => ({ online: false }))
+    : null
+
+  const cloud = providerIdForSandbox('', env)
+  const moves = await run.getSandboxMoves()
+
+  return {
+    // A move that is waiting for the session to stop working.
+    pending: moves.pending ? (moves.pending.placement ? 'local' : 'cloud') : null,
+    // Set when the session last left a machine that could not be reached. What it took was that
+    // machine's last save; anything changed there afterwards is still there.
+    leftBehind:
+      moves.last?.fromSave && isLocalSandbox(moves.last.from)
+        ? { deviceId: deviceOfSandbox(moves.last.from), at: moves.last.at }
+        : null,
+    personal,
+    holderId: personal && home ? userOfSandbox(home) : null,
+    here:
+      !personal ||
+      (local
+        ? userOfSandbox(home) === actor.userId
+        : home === userSandboxName(actor.orgId, actor.userId)),
+    sandbox: {
+      provider: home ? providerIdForSandbox(home, env) : cloud,
+      location: local ? 'local' : 'cloud',
+      ...(local ? { deviceId: deviceOfSandbox(home) } : {}),
+      ...machine,
+    },
+    local: placement
+      ? { deviceId: placement.deviceId, mine: placement.userId === actor.userId }
+      : null,
+    cloud: {
+      provider: cloud,
+      // Work travels through Code Storage, between sandboxes that have a machine behind them.
+      movable: codeStorageConfigured(env) && sandboxCarriesWork('', env),
+    },
+  }
+}
+
+/**
+ * Moves a session to the caller's own machine (`{ to: 'local', deviceId }`) or back to the cloud
+ * (`{ to: 'cloud' }`), with its work. A session is only moved between turns.
+ */
+async function moveSession(
+  request: Request,
+  env: ShuttleEnv,
+  actor: Actor,
+  runId: string,
+): Promise<Response> {
+  const body = (await request.json().catch(() => null)) as {
+    to?: unknown
+    deviceId?: unknown
+  } | null
+
+  const run = loomsStub(env.LOOMS_RUN, runId)
+
+  // Between an agent's steps a session can look idle for a moment, so the sandbox is asked too:
+  // a command running there would keep writing after its files had been carried away.
+  const home = await run.getSandboxName()
+
+  const working =
+    (await run.getSessionActivitySnapshot().catch(() => null))?.activity === 'working' ||
+    (home !== null &&
+      (
+        await sandboxStub(env, home)
+          .isBusy()
+          .catch(() => ({ busy: false }))
+      ).busy)
+
+  if (body?.to === 'cloud') {
+    const placement = await run.getSandboxPlacement()
+
+    // Leaving a machine takes the session's files off it, so only its owner may.
+    if (placement && placement.userId !== actor.userId) {
+      return Response.json({ error: "Only the machine's owner can move it" }, { status: 403 })
+    }
+  } else if (body?.to !== 'local' || typeof body.deviceId !== 'string') {
+    return Response.json(
+      { error: 'Expected { to: "local", deviceId } or { to: "cloud" }' },
+      { status: 400 },
+    )
+  } else {
+    // The name is built from the caller, so the machine is one of their own.
+    const machine = await sandboxStub(
+      env,
+      localSandboxName(actor.orgId, actor.userId, body.deviceId),
+    )
+      .describe()
+      .catch(() => ({ online: false }))
+
+    if (!machine.online) {
+      return Response.json(
+        { error: 'That machine is not connected. Open the Shuttle desktop app on it first.' },
+        { status: 409 },
+      )
+    }
+  }
+
+  const placement =
+    body.to === 'local'
+      ? ({ kind: 'local', userId: actor.userId, deviceId: String(body.deviceId) } as const)
+      : null
+
+  // Work is never carried out from under a running turn. The move waits for it to end.
+  if (working) {
+    await run.placeSandboxLater(placement)
+
+    return Response.json(await sessionPlace(env, actor, runId), { status: 202 })
+  }
+
+  try {
+    const { moved } = await run.placeSandbox(placement)
+
+    if (moved) {
+      const machine = isLocalSandbox(moved.from) ? moved.from : moved.to
+
+      const device = isLocalSandbox(machine)
+        ? (
+            await sandboxStub(env, machine)
+              .describe()
+              .catch(() => null)
+          )?.device?.name
+        : undefined
+
+      // In the session's history, so it shows where each stretch of work happened.
+      await run
+        .signal([
+          {
+            type: 'shuttle.sandbox.moved',
+            payload: {
+              from: isLocalSandbox(moved.from) ? 'local' : 'cloud',
+              to: isLocalSandbox(moved.to) ? 'local' : 'cloud',
+              fromSave: moved.fromSave,
+              ...(device ? { device } : {}),
+            },
+            idempotencyKey: `sandbox-moved:${moved.at}`,
+            origin: { type: 'external', actorId: actor.userId },
+          },
+        ])
+        .catch(() => {})
+    }
+  } catch (cause) {
+    return Response.json(
+      { error: cause instanceof Error ? cause.message : String(cause) },
+      { status: 502 },
+    )
+  }
+
+  return Response.json(await sessionPlace(env, actor, runId))
 }
 
 /** The repositories a session works in: the ones linked to its folder, or its scratch one. */
@@ -248,7 +429,7 @@ async function diagnostics(
   }
 
   // Looking never wakes a sandbox.
-  if (sandboxesArePersonal(env) && !(await stub.isAwake().catch(() => ({ awake: true }))).awake) {
+  if (!(await stub.isAwake().catch(() => ({ awake: true }))).awake) {
     return Response.json({ status: 'unavailable', reason: 'The sandbox is asleep.' })
   }
 

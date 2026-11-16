@@ -103,10 +103,18 @@ Cloudflare Worker that hosts Shuttle sessions on Looms Durable Objects.
 7. Deploy:
 
    ```bash
-   bun run deploy
+   SHUTTLE_DEPLOY_VARS='{"SHUTTLE_WEB_URL":"https://shuttle.example.com"}' bun run deploy
    ```
 
-Point the web app at the Worker URL (Vite proxy for local, or your static host).
+   This builds the web app and deploys it with the Worker, so the page, the API and the
+   sign-in cookie share one origin. The assets are declared in a generated
+   `wrangler.deploy.jsonc` (see `scripts/deploy-config.ts`), not in `wrangler.jsonc`, because
+   the folder only exists after a web build. `SHUTTLE_DEPLOY_VARS` is merged over `vars`:
+   set `SHUTTLE_WEB_URL` to the deployment's own address, and `SHUTTLE_WORKSPACE_MODE` and
+   `SHUTTLE_PREVIEW_HOST` to suit it. `bun run deploy:config` writes the file without
+   deploying.
+
+   The desktop app points at that same address (`SHUTTLE_DESKTOP_URL`).
 
 ## Demo script
 

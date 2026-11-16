@@ -298,6 +298,63 @@ export interface SandboxPlace {
   readonly holderId: string | null
   /** Whether the session's files are in the sandbox the viewer's terminal opens in. */
   readonly here: boolean
+  /** The sandbox that holds the session's files. */
+  readonly sandbox: {
+    readonly provider: string
+    readonly location: 'local' | 'cloud'
+    readonly deviceId?: string | null
+    /** For a sandbox on someone's machine: whether that machine is connected. */
+    readonly online?: boolean
+    readonly device?: { readonly id: string; readonly name: string; readonly platform: string }
+    readonly backend?: { readonly id: string; readonly label: string; readonly isolation: string }
+  }
+  /** Where a move that is waiting for the session to stop working will take it. */
+  readonly pending: 'local' | 'cloud' | null
+  /** Set when the session last left a machine that was not connected, from its last save. */
+  readonly leftBehind: { readonly deviceId: string | null; readonly at: number } | null
+  /** Set while the session is placed on a person's own machine. */
+  readonly local: { readonly deviceId: string; readonly mine: boolean } | null
+  readonly cloud: { readonly provider: string; readonly movable: boolean }
+}
+
+/** A machine's sandbox, as `GET /runners/<deviceId>` describes it. */
+export interface LocalMachine {
+  readonly online: boolean
+  readonly device?: { readonly id: string; readonly name: string; readonly platform: string }
+  readonly backend?: { readonly id: string; readonly label: string; readonly isolation: string }
+}
+
+export async function fetchLocalMachine(deviceId: string): Promise<LocalMachine> {
+  const response = await fetch(`/runners/${encodeURIComponent(deviceId)}`)
+
+  if (!response.ok) {
+    throw new Error(`Failed to load this machine's sandbox: ${response.status}`)
+  }
+
+  return (await response.json()) as LocalMachine
+}
+
+/** Moves a session, with its work, to one of the viewer's machines or back to the cloud. */
+export async function moveSession(
+  runId: string,
+  to: { readonly to: 'local'; readonly deviceId: string } | { readonly to: 'cloud' },
+): Promise<SandboxPlace> {
+  const response = await fetch(`${sandboxBase(runId)}/place`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(to),
+  })
+
+  const body = (await response.json().catch(() => null)) as
+    | (SandboxPlace & { error?: undefined })
+    | { error: string }
+    | null
+
+  if (!response.ok || !body || body.error !== undefined) {
+    throw new Error(body?.error ?? `Could not move the session: ${response.status}`)
+  }
+
+  return body
 }
 
 export async function fetchSandboxPlace(runId: string): Promise<SandboxPlace> {

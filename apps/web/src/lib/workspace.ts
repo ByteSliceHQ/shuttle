@@ -1,3 +1,4 @@
+import { desktop } from '@/lib/desktop'
 import { defineProjection } from '@swirls/looms/core'
 
 import type { WorkspaceEvent } from './shuttle-events'
@@ -556,11 +557,33 @@ export async function fetchWorkspace(): Promise<WorkspaceSnapshotResponse> {
   return (await response.json()) as WorkspaceSnapshotResponse
 }
 
+/**
+ * In the desktop app a new session starts on this machine whenever its sandbox is up. It can be
+ * moved to the cloud from the session's title bar at any point after that.
+ */
+async function startsOnThisMachine(): Promise<{ deviceId?: string }> {
+  const app = desktop()
+
+  if (!app) {
+    return {}
+  }
+
+  const [runner, wanted] = await Promise.all([
+    app.runnerStatus().catch(() => null),
+    app.startsLocally().catch(() => true),
+  ])
+
+  return wanted && runner?.status === 'online' ? { deviceId: app.deviceId } : {}
+}
+
 export async function startWorkspaceSession(input: {
   folderId: string
   goal: string
 }): Promise<{ runId: string }> {
-  const response = await postJson('/workspace/sessions', input)
+  const response = await postJson('/workspace/sessions', {
+    ...input,
+    ...(await startsOnThisMachine()),
+  })
 
   if (!response.ok) {
     throw new Error(`Failed to start session: ${response.status} ${await response.text()}`)

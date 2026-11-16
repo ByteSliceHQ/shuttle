@@ -1,0 +1,70 @@
+{
+  "name": "@shuttle/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Shuttle desktop app: the session UI, with a sandbox on this machine",
+  "license": "Apache-2.0",
+  "author": "ByteSlice",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "bun build src/main.ts src/preload.ts --outdir dist --target node --format cjs --external electron --entry-naming '[name].cjs'",
+    "start": "bun run build && electron .",
+    "check-types": "bun x tsc -p tsconfig.json --noEmit",
+    "package": "bun scripts/package.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "electron": "^45.3.3",
+    "electron-builder": "^26.18.0",
+    "typescript": "7.0.2"
+  },
+  "build": {
+    "appId": "codes.shuttle.desktop",
+    "productName": "Shuttle",
+    "electronVersion": "45.3.3",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../runner/dist/shuttle-runner",
+        "to": "shuttle-runner"
+      },
+      {
+        "from": "../runner/node_modules/@superradcompany/microsandbox-darwin-arm64/bin/msb",
+        "to": "microsandbox/bin/msb"
+      },
+      {
+        "from": "../runner/node_modules/@superradcompany/microsandbox-darwin-arm64/lib/libkrunfw.5.dylib",
+        "to": "microsandbox/lib/libkrunfw.5.dylib"
+      },
+      {
+        "from": "build/bridge",
+        "to": "bridge"
+      },
+      {
+        "from": "build/desktop.config.json",
+        "to": "desktop.config.json"
+      }
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg"
+        }
+      ],
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
+      "artifactName": "Shuttle-${version}-${arch}.${ext}"
+    }
+  }
+}

@@ -832,6 +832,23 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       }
     }
 
+    case 'shuttle.sandbox.moved': {
+      const machine = typeof payload.device === 'string' ? payload.device : 'a local machine'
+      const place = (end: unknown) => (end === 'local' ? machine : 'the cloud')
+
+      return appendItem(feed, {
+        kind: 'notice',
+        id: event.id,
+        seq: event.seq,
+        ts: event.ts,
+        tone: 'info',
+        text:
+          payload.fromSave === true
+            ? `Moved from ${place(payload.from)} to ${place(payload.to)} using its last save, because ${machine} was not connected. Anything changed there since is still on it.`
+            : `Moved from ${place(payload.from)} to ${place(payload.to)}, with its branches and uncommitted files.`,
+      })
+    }
+
     case 'shuttle.team.changed': {
       const members = [
         payload.workers === true ? 'Shuttle workers' : null,

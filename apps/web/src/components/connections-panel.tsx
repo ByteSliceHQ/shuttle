@@ -7,11 +7,13 @@ import {
   fetchConnections,
   followLogin,
   sendLoginCode,
+  setConnectionsDevice,
   startLogin,
   type Connection,
   type ConnectionsState,
 } from '@/lib/api'
-import { errorMessage } from '@/lib/cn'
+import { cn, errorMessage } from '@/lib/cn'
+import { desktop } from '@/lib/desktop'
 
 import { Button } from './ui/button'
 import { Input } from './ui/input'
@@ -32,21 +34,25 @@ const POLL_MS = 1_500
 
 /** Connect, check and remove coding agent subscriptions. */
 export function ConnectionsPanel({ onChanged }: { onChanged?: (state: ConnectionsState) => void }) {
+  const app = desktop()
   const [state, setState] = useState<ConnectionsState | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // In the desktop app a sign-in can live on this machine or in the cloud sandbox. Each is used
+  // by the sessions that run there, so both can be set up from here.
+  const [place, setPlace] = useState<'local' | 'cloud'>(app ? 'local' : 'cloud')
 
-  const reload = useCallback(
-    () =>
-      fetchConnections().then(
-        (next) => {
-          setState(next)
-          setError(null)
-          onChanged?.(next)
-        },
-        (cause: unknown) => setError(errorMessage(cause)),
-      ),
-    [onChanged],
-  )
+  const reload = useCallback(() => {
+    setConnectionsDevice(app && place === 'local' ? app.deviceId : null)
+
+    return fetchConnections().then(
+      (next) => {
+        setState(next)
+        setError(null)
+        onChanged?.(next)
+      },
+      (cause: unknown) => setError(errorMessage(cause)),
+    )
+  }, [onChanged, app, place])
 
   useEffect(() => {
     void reload()
@@ -54,6 +60,42 @@ export function ConnectionsPanel({ onChanged }: { onChanged?: (state: Connection
 
   return (
     <div className="flex flex-col gap-3">
+      {app ? (
+        <div className="flex flex-col gap-1.5">
+          <div
+            role="radiogroup"
+            aria-label="Where to sign in"
+            className="bg-muted/40 inline-flex w-fit rounded-lg border p-0.5"
+          >
+            {(['local', 'cloud'] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="radio"
+                aria-checked={place === option}
+                onClick={() => {
+                  setState(null)
+                  setPlace(option)
+                }}
+                className={cn(
+                  'focus-visible:ring-ring/50 rounded-md px-2.5 py-1 text-xs outline-none focus-visible:ring-2',
+                  place === option
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {option === 'local' ? 'This machine' : 'Cloud'}
+              </button>
+            ))}
+          </div>
+          <p className="text-muted-foreground text-xs text-pretty">
+            {place === 'local'
+              ? 'Used by sessions that run on this machine. The sign-in stays in its sandbox here.'
+              : 'Used by sessions that run in the cloud.'}
+          </p>
+        </div>
+      ) : null}
+
       {error ? <p className="text-status-failed text-xs wrap-anywhere">{error}</p> : null}
 
       {state && state.mode !== 'container' ? (

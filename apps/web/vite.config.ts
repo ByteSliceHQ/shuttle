@@ -62,6 +62,8 @@ export default defineConfig({
       '/playbook': api,
       '/workspace': api,
       '/firehose': { ...api, ws: true },
+      // Local sandbox runners connect here, as the desktop app's own page origin.
+      '/runners': { ...api, ws: true },
       '/github': githubApi,
       // Sign-in. OAuth callbacks are browser navigations, so these never fall back to the SPA.
       '/api/auth': githubApi,

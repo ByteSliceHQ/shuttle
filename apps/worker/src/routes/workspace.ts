@@ -1,3 +1,5 @@
+import { DEVICE_ID } from '@shuttle/runner-protocol'
+
 import { getAuth } from '../auth/auth'
 import {
   ensureNamedWorkspace,
@@ -288,6 +290,7 @@ async function createWorkspaceSession(
   const body = (await request.json().catch(() => null)) as {
     folderId?: unknown
     goal?: unknown
+    deviceId?: unknown
   } | null
 
   const folderId = typeof body?.folderId === 'string' ? body.folderId : null
@@ -295,6 +298,13 @@ async function createWorkspaceSession(
 
   if (!folderId || !goal) {
     return Response.json({ error: 'folderId and goal are required' }, { status: 400 })
+  }
+
+  // One of the caller's own machines to start on, as the desktop app asks for.
+  const deviceId = typeof body?.deviceId === 'string' ? body.deviceId : null
+
+  if (deviceId !== null && !DEVICE_ID.test(deviceId)) {
+    return Response.json({ error: 'Invalid device id' }, { status: 400 })
   }
 
   // A new session is private, so it is listed in its owner's workspace and nowhere else.
@@ -312,6 +322,15 @@ async function createWorkspaceSession(
 
   // Recorded before the session exists, so there is no moment when it is open to everyone.
   await loomsStub(env.LOOMS_RUN, runId).setAccess(privateTo(actor))
+
+  // Also before it exists, so its first turn already runs where it was asked to.
+  if (deviceId) {
+    await loomsStub(env.LOOMS_RUN, runId).placeSandbox({
+      kind: 'local',
+      userId: actor.userId,
+      deviceId,
+    })
+  }
 
   await stub.signal([
     requestSession({

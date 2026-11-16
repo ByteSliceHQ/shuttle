@@ -8,10 +8,11 @@
   "scripts": {
     "dev": "wrangler dev --port 8790",
     "dev:tunnel": "bun --env-file=.dev.vars scripts/dev-tunnel.ts",
-    "deploy": "wrangler deploy",
+    "deploy": "bun run --cwd ../web build && bun scripts/deploy-config.ts && wrangler deploy --config wrangler.deploy.jsonc",
     "build": "bun x tsc -p tsconfig.json --noEmit",
     "check-types": "bun x tsc -p tsconfig.json --noEmit",
-    "test": "bun test src scripts bridge"
+    "test": "bun test src scripts bridge",
+    "deploy:config": "bun run --cwd ../web build && bun scripts/deploy-config.ts"
   },
   "dependencies": {
     "@ai-sdk/typesafe-ai": "^3.0.35",
@@ -19,6 +20,7 @@
     "@daytona/sdk": "^0.231.1",
     "@openrouter/ai-sdk-provider": "^3.0.0",
     "@pierre/sdk": "^0.1.2",
+    "@shuttle/runner-protocol": "workspace:*",
     "@swirls/looms": "^0.14.0",
     "ai": "^7.0.0",
     "better-auth": "^1.7.23",

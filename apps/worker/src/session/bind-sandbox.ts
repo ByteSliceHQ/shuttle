@@ -1,7 +1,7 @@
 import { Schema } from 'effect'
 
 import type { ShuttleEnv } from '../env'
-import { sandboxesArePersonal, userSandboxName } from '../sandbox/names'
+import { localSandboxName, sandboxesArePersonal, userSandboxName } from '../sandbox/names'
 import { orgOfRun } from '../tenancy/run-id'
 import { shuttleModule } from './scope'
 import { readSponsor } from './sponsor'
@@ -96,8 +96,45 @@ export async function readSandboxBinding(
   return null
 }
 
+export const SANDBOX_PLACEMENT_KEY = 'shuttle:sandbox-placement'
+
+/**
+ * Where a person asked for a session to run, when that is one of their own machines. A session
+ * with no placement runs in the cloud, on the deployment's provider.
+ */
+export interface SandboxPlacement {
+  readonly kind: 'local'
+  /** Whose machine it is. */
+  readonly userId: string
+  readonly deviceId: string
+}
+
+type PlacementStorage = Pick<DurableObjectStorage, 'get' | 'put' | 'delete'>
+
+export async function readSandboxPlacement(
+  storage: Pick<DurableObjectStorage, 'get'>,
+): Promise<SandboxPlacement | null> {
+  return (await storage.get<SandboxPlacement>(SANDBOX_PLACEMENT_KEY)) ?? null
+}
+
+export async function writeSandboxPlacement(
+  storage: PlacementStorage,
+  placement: SandboxPlacement | null,
+): Promise<void> {
+  if (placement) {
+    await storage.put(SANDBOX_PLACEMENT_KEY, placement)
+  } else {
+    await storage.delete(SANDBOX_PLACEMENT_KEY)
+  }
+}
+
 /**
  * The sandbox a session's work runs in right now.
+ *
+ * A session placed on a person's own machine runs there for as long as it is working for that
+ * person. When someone else gives it work, that turn runs in the cloud instead: a machine only
+ * ever runs its owner's turns, on its owner's sign-ins. The session's work follows it either way
+ * (see `handoff.ts`).
  *
  * On Daytona each person has a sandbox of their own, and a session runs in the one that belongs
  * to whoever it is working for (see `sponsor.ts`), so that person's sign-ins are the only ones
@@ -109,12 +146,21 @@ export async function sandboxNameForSession(
   runId: string,
   boundName: string,
 ): Promise<string> {
-  if (!sandboxesArePersonal(env) || !storage) {
+  if (!storage) {
     return boundName
   }
 
   const orgId = orgOfRun(runId)
   const sponsorId = await readSponsor(storage)
+  const placement = await readSandboxPlacement(storage)
+
+  if (placement && orgId && (sponsorId === null || sponsorId === placement.userId)) {
+    return localSandboxName(orgId, placement.userId, placement.deviceId)
+  }
+
+  if (!sandboxesArePersonal(env)) {
+    return boundName
+  }
 
   return orgId && sponsorId ? userSandboxName(orgId, sponsorId) : boundName
 }

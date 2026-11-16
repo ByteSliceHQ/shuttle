@@ -1,13 +1,17 @@
 import { describe, expect, test } from 'bun:test'
 
 import type { ShuttleEnv } from '../env'
-import { userSandboxName } from '../sandbox/names'
+import { localSandboxName, userSandboxName } from '../sandbox/names'
 import type { SessionSnapshot } from '../sandbox/session-sync'
 import { ACCESS_STORAGE_KEY } from '../tenancy/access'
 import { scopedRunId } from '../tenancy/run-id'
 import { fakeEnv } from '../testing/fake-env'
+import { SANDBOX_PLACEMENT_KEY } from './bind-sandbox'
 import {
+  applyPendingPlacement,
+  LAST_MOVE_KEY,
   LAST_SNAPSHOT_KEY,
+  PENDING_PLACEMENT_KEY,
   prepareSessionSandbox,
   SANDBOX_HOME_KEY,
   saveSessionWork,
@@ -17,6 +21,7 @@ import { SPONSOR_STORAGE_KEY } from './sponsor'
 const ORG = 'orgA0000000000000000000000000000'
 const ALICE = userSandboxName(ORG, 'alice')
 const BOB = userSandboxName(ORG, 'bob')
+const LAPTOP = localSandboxName(ORG, 'alice', 'laptop-1')
 
 const repo = {
   installationId: 1,
@@ -43,6 +48,8 @@ function world(
   mode: string | undefined,
   empty: readonly string[] = [],
   repos: readonly (typeof repo)[] = [repo],
+  /** Sandboxes on a machine that is not connected. */
+  offline: readonly string[] = [],
 ) {
   const calls: string[] = []
 
@@ -55,6 +62,7 @@ function world(
     put: async (key: string, value: unknown) => {
       values.set(key, value)
     },
+    delete: async (key: string) => values.delete(key),
   } as unknown as DurableObjectStorage
 
   const env = fakeEnv({
@@ -74,6 +82,10 @@ function world(
           return { root: '/workspace' }
         },
         snapshotSession: async (_runId: string, target: { name: string }) => {
+          if (offline.includes(name)) {
+            throw new Error('sandbox-offline: the machine is not connected')
+          }
+
           calls.push(
             target.name === 'glue' ? `${name} snapshot` : `${name} snapshot ${target.name}`,
           )
@@ -104,7 +116,7 @@ function world(
     return [...calls]
   }
 
-  return { work, home: () => values.get(SANDBOX_HOME_KEY) }
+  return { work, values, env, storage, calls, home: () => values.get(SANDBOX_HOME_KEY) }
 }
 
 describe('prepareSessionSandbox', () => {
@@ -229,6 +241,126 @@ describe('prepareSessionSandbox', () => {
   })
 })
 
+describe("a session placed on a person's own machine", () => {
+  // Preparations are remembered per run, so each test has a run of its own.
+  let count = 0
+  const newRun = () => scopedRunId(ORG, `session_local_${++count}`)
+  const place = { kind: 'local', userId: 'alice', deviceId: 'laptop-1' }
+
+  test('works on the machine, and carries its work to the cloud and back', async () => {
+    const run = newRun()
+    const { work, values, home } = world('daytona')
+
+    values.set(SANDBOX_PLACEMENT_KEY, place)
+    expect(await work(run, 'alice')).toEqual([`${LAPTOP} ensureRepos`, `${LAPTOP} ensureWorktree`])
+    expect(home()).toBe(LAPTOP)
+
+    values.delete(SANDBOX_PLACEMENT_KEY)
+
+    expect(await work(run)).toEqual([
+      `${LAPTOP} snapshot`,
+      `${ALICE} restore snapshot-from-${LAPTOP}`,
+      `${ALICE} ensureWorktree`,
+    ])
+
+    values.set(SANDBOX_PLACEMENT_KEY, place)
+
+    expect(await work(run)).toEqual([
+      `${ALICE} snapshot`,
+      `${LAPTOP} restore snapshot-from-${ALICE}`,
+      `${LAPTOP} ensureWorktree`,
+    ])
+  })
+
+  test('moves between a machine and a folder sandbox where sandboxes are shared', async () => {
+    const run = newRun()
+    const { work, values } = world('container')
+
+    values.set(SANDBOX_PLACEMENT_KEY, place)
+    await work(run, 'alice')
+    values.delete(SANDBOX_PLACEMENT_KEY)
+
+    expect(await work(run)).toEqual([
+      `${LAPTOP} snapshot`,
+      `folder:f1 restore snapshot-from-${LAPTOP}`,
+      `folder:f1 ensureWorktree`,
+    ])
+  })
+
+  test('a turn for someone else runs in their cloud sandbox, not on the machine', async () => {
+    const run = newRun()
+    const { work, values, home } = world('daytona')
+
+    values.set(SANDBOX_PLACEMENT_KEY, place)
+    await work(run, 'alice')
+
+    expect(await work(run, 'bob')).toEqual([
+      `${LAPTOP} snapshot`,
+      `${BOB} restore snapshot-from-${LAPTOP}`,
+      `${BOB} ensureWorktree`,
+    ])
+
+    expect(home()).toBe(BOB)
+  })
+
+  test('leaves a machine that is not connected from its last save', async () => {
+    const run = newRun()
+    const { work, values } = world('daytona', [], [repo], [LAPTOP])
+
+    values.set(SANDBOX_HOME_KEY, LAPTOP)
+
+    values.set(LAST_SNAPSHOT_KEY, {
+      at: 1,
+      sandboxName: LAPTOP,
+      repos: [],
+      carried: [{ repo, snapshot: snapshotOf('the-last-save') }],
+    })
+
+    expect(await work(run, 'alice')).toEqual([
+      `${ALICE} restore snapshot-from-the-last-save`,
+      `${ALICE} ensureWorktree`,
+    ])
+
+    // Recorded, so the session can say that what changed on the machine since is still there.
+    expect(values.get(LAST_MOVE_KEY)).toMatchObject({ from: LAPTOP, to: ALICE, fromSave: true })
+  })
+
+  test('a move asked for during a turn happens when it is applied, and only once', async () => {
+    const run = newRun()
+    const { work, values, env, storage, calls, home } = world('daytona')
+    const binding = { sandboxName: 'folder:f1', repos: [repo] }
+
+    await work(run, 'alice')
+    expect(home()).toBe(ALICE)
+
+    values.set(PENDING_PLACEMENT_KEY, { placement: place })
+    calls.length = 0
+
+    expect(await applyPendingPlacement(env, storage, run, binding)).toBe(true)
+
+    expect(calls).toEqual([
+      `${ALICE} snapshot`,
+      `${LAPTOP} restore snapshot-from-${ALICE}`,
+      `${LAPTOP} ensureWorktree`,
+    ])
+
+    expect(home()).toBe(LAPTOP)
+    expect(values.get(LAST_MOVE_KEY)).toMatchObject({ from: ALICE, to: LAPTOP, fromSave: false })
+
+    expect(await applyPendingPlacement(env, storage, run, binding)).toBe(false)
+  })
+
+  test('does not leave a machine that is not connected with nothing saved', async () => {
+    const run = newRun()
+    const { work, values, home } = world('daytona', [], [repo], [LAPTOP])
+
+    values.set(SANDBOX_HOME_KEY, LAPTOP)
+
+    expect(work(run, 'alice')).rejects.toThrow('sandbox-offline')
+    expect(home()).toBe(LAPTOP)
+  })
+})
+
 describe('saveSessionWork', () => {
   function saver(mode: string | undefined, home: string | undefined, empty = false) {
     const asked: string[] = []
@@ -269,6 +401,7 @@ describe('saveSessionWork', () => {
       at: 1234,
       sandboxName: BOB,
       repos: [{ name: 'glue', head: 'shuttle/x/glue', snapshotSha: `snapshot-from-${BOB}` }],
+      carried: [{ repo, snapshot: snapshotOf(BOB) }],
     })
 
     expect(record()).toEqual(saved)

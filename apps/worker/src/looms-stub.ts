@@ -4,6 +4,8 @@ import type { CredentialPayload, CredentialSummary } from './credentials/store'
 import type { ShuttleEnv } from './env'
 import type { HarnessId, VendorHarnessId } from './harness'
 import type { LinkedSandboxRepo } from './sandbox/workspace'
+import type { SandboxPlacement } from './session/bind-sandbox'
+import type { PendingPlacement, SessionMove } from './session/handoff'
 import type { Team } from './team'
 import type { SessionAccess } from './tenancy/access'
 import type {
@@ -56,6 +58,12 @@ export interface LoomsRunStub {
   getAccess(): Promise<SessionAccess | null>
   setAccess(access: unknown): Promise<SessionAccess>
   getSandboxName(): Promise<string | null>
+  getSandboxPlacement(): Promise<SandboxPlacement | null>
+  placeSandbox(
+    placement: SandboxPlacement | null,
+  ): Promise<{ sandboxName: string | null; moved: SessionMove | null }>
+  placeSandboxLater(placement: SandboxPlacement | null): Promise<{ ok: true }>
+  getSandboxMoves(): Promise<{ pending: PendingPlacement | null; last: SessionMove | null }>
   getSessionRepos(): Promise<readonly LinkedSandboxRepo[]>
   getSessionActivitySnapshot(): Promise<{ activity: SessionActivity; tail: number } | null>
 }

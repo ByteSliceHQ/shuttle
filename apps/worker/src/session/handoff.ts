@@ -1,17 +1,31 @@
 import { sandboxStub, type SessionSandboxStub, type ShuttleEnv } from '../env'
-import { DEMO_REPO, sandboxesArePersonal } from '../sandbox/names'
+import { DEMO_REPO, sandboxCarriesWork, sandboxIsPersonal } from '../sandbox/names'
+import { isSandboxOffline } from '../sandbox/providers/local'
+import type { SessionSnapshot } from '../sandbox/session-sync'
 import type { LinkedSandboxRepo } from '../sandbox/workspace'
-import { sandboxNameForSession, type SandboxBinding } from './bind-sandbox'
+import {
+  readSandboxPlacement,
+  sandboxNameForSession,
+  writeSandboxPlacement,
+  type SandboxBinding,
+  type SandboxPlacement,
+} from './bind-sandbox'
 
 /**
  * Gets a session's sandbox ready for work, moving the session there first if it was last worked
  * on somewhere else.
  *
- * Where each person has a sandbox of their own, a session runs in the sandbox of whoever it is
- * working for. When that person changes, the session's work so far (its branches and its
- * uncommitted files) is pushed from the sandbox it was in and rebuilt in the new one, so the next
- * turn continues from exactly where the last one stopped. Agent turns in a session run one at a
- * time, so this happens between turns, never under a running one.
+ * A session's sandbox changes when the person it is working for changes (where each person has
+ * a sandbox of their own) and when someone moves it between their own machine and the cloud.
+ * Either way the session's work so far (its branches and its uncommitted files) is pushed to Code
+ * Storage from the sandbox it was in and rebuilt in the new one, so the next turn continues from
+ * exactly where the last one stopped. Which providers the two sandboxes run on makes no
+ * difference. Agent turns in a session run one at a time, so this happens between turns, never
+ * under a running one.
+ *
+ * A session's work is also saved every time it stops working (`saveSessionWork`). That is what
+ * lets a session leave a machine that is no longer reachable, such as a laptop that was closed:
+ * the new sandbox is rebuilt from the last save.
  */
 
 /** The sandbox that holds the session's worktree. */
@@ -30,33 +44,65 @@ const inFlight = new Map<string, Promise<string>>()
 /** Sandboxes already prepared for a session in this isolate, to skip repeating the setup. */
 const prepared = new Map<string, string>()
 
-/** Moves the session from `from` to `to`. Returns false when `from` had nothing to move. */
+type CarriedWork = readonly {
+  readonly repo: LinkedSandboxRepo
+  readonly snapshot: SessionSnapshot
+}[]
+
+/**
+ * Moves the session from `from` to `to`. Returns what was carried, which is nothing when `from`
+ * had nothing to move, and whether it came from the last save and not from `from` itself.
+ *
+ * `saved` is the session's work as it was last saved from `from`. It is used only when `from`
+ * cannot be reached, so whatever changed there since that save stays behind on that machine.
+ */
 export async function moveSession(
   from: HandoffSandbox,
   to: HandoffSandbox,
   runId: string,
   repos: readonly LinkedSandboxRepo[],
-): Promise<boolean> {
-  const snapshots = []
+  saved: CarriedWork = [],
+): Promise<{ carried: CarriedWork; fromSave: boolean }> {
+  let snapshots: { repo: LinkedSandboxRepo; snapshot: SessionSnapshot }[] = []
+  let fromSave = false
 
   // Everything is pushed before anything is rebuilt, so a failure leaves the old sandbox whole.
-  for (const repo of repos) {
-    const { snapshot } = await from.snapshotSession(runId, repo)
+  try {
+    for (const repo of repos) {
+      const { snapshot } = await from.snapshotSession(runId, repo)
 
-    if (snapshot) {
-      snapshots.push({ repo, snapshot })
+      if (snapshot) {
+        snapshots.push({ repo, snapshot })
+      }
     }
-  }
+  } catch (cause) {
+    if (!isSandboxOffline(cause) || saved.length === 0) {
+      throw cause
+    }
 
-  if (snapshots.length === 0) {
-    return false
+    snapshots = [...saved]
+    fromSave = true
   }
 
   for (const { repo, snapshot } of snapshots) {
     await to.restoreSession(runId, repo, snapshot)
   }
 
-  return true
+  return { carried: snapshots, fromSave }
+}
+
+/** The last time the session's work was carried from one sandbox to another. */
+export const LAST_MOVE_KEY = 'shuttle:last-move'
+
+export interface SessionMove {
+  readonly at: number
+  readonly from: string
+  readonly to: string
+  /**
+   * True when `from` could not be reached and the work came from its last save. Whatever
+   * changed there after that save is still there, and is not in the session.
+   */
+  readonly fromSave: boolean
 }
 
 /** Checks the head of `pull` out as the session's worktree for its repository. */
@@ -102,15 +148,44 @@ async function prepare(
   }
 
   // A session with no linked repository still has work to carry: the demo repository's.
-  const moved =
-    storage && sandboxesArePersonal(env) && home && home !== name
+  const { carried, fromSave } =
+    storage &&
+    home &&
+    home !== name &&
+    sandboxCarriesWork(home, env) &&
+    sandboxCarriesWork(name, env)
       ? await moveSession(
           sandboxStub(env, home),
           sandbox,
           runId,
           repos.length > 0 ? repos : [DEMO_REPO],
+          await savedWorkFrom(storage, home),
         )
-      : false
+      : { carried: [], fromSave: false }
+
+  const moved = carried.length > 0
+
+  // What was carried is the newest copy of the session's work, and it is now here. Recording
+  // it as this sandbox's last save lets the session leave again even if this one goes away.
+  if (storage && moved) {
+    await storage.put(LAST_SNAPSHOT_KEY, {
+      at: Date.now(),
+      sandboxName: name,
+      repos: carried.map(({ repo, snapshot }) => ({
+        name: repo.name,
+        head: snapshot.head,
+        snapshotSha: snapshot.snapshotSha,
+      })),
+      carried,
+    } satisfies SavedSnapshot)
+
+    await storage.put(LAST_MOVE_KEY, {
+      at: Date.now(),
+      from: home ?? '',
+      to: name,
+      fromSave,
+    } satisfies SessionMove)
+  }
 
   if (!moved) {
     await sandbox.ensureRepos([...repos])
@@ -154,6 +229,49 @@ export async function prepareSessionSandbox(
   return sandboxStub(env, await pending)
 }
 
+/** A move someone asked for while the session was working. It happens when the turn ends. */
+export const PENDING_PLACEMENT_KEY = 'shuttle:sandbox-placement-pending'
+
+export interface PendingPlacement {
+  /** Where to: one of a person's machines, or null for the cloud. */
+  readonly placement: SandboxPlacement | null
+}
+
+/**
+ * Carries out a move that was waiting for the session to stop working. Returns whether there
+ * was one. A move that fails is dropped, and the session stays where it is.
+ */
+export async function applyPendingPlacement(
+  env: ShuttleEnv,
+  storage: DurableObjectStorage,
+  runId: string,
+  binding: SandboxBinding | null,
+): Promise<boolean> {
+  const pending = await storage.get<PendingPlacement>(PENDING_PLACEMENT_KEY)
+
+  if (!pending) {
+    return false
+  }
+
+  await storage.delete(PENDING_PLACEMENT_KEY)
+
+  const before = await readSandboxPlacement(storage)
+
+  await writeSandboxPlacement(storage, pending.placement)
+
+  if (binding) {
+    try {
+      await prepareSessionSandbox(env, storage, runId, binding)
+    } catch (cause) {
+      await writeSandboxPlacement(storage, before)
+
+      throw cause
+    }
+  }
+
+  return true
+}
+
 /** The last time the session's work was saved to Code Storage, and what was saved. */
 export const LAST_SNAPSHOT_KEY = 'shuttle:last-snapshot'
 
@@ -166,6 +284,15 @@ export interface SavedSnapshot {
     readonly head: string
     readonly snapshotSha: string
   }[]
+  /** Everything needed to rebuild the work somewhere else without asking that sandbox again. */
+  readonly carried?: CarriedWork
+}
+
+/** The session's work as last saved from `sandboxName`, in the form another sandbox rebuilds from. */
+async function savedWorkFrom(storage: HandoffStorage, sandboxName: string): Promise<CarriedWork> {
+  const saved = await storage.get<SavedSnapshot>(LAST_SNAPSHOT_KEY)
+
+  return saved?.sandboxName === sandboxName ? (saved.carried ?? []) : []
 }
 
 /**
@@ -173,8 +300,8 @@ export interface SavedSnapshot {
  * when a session stops working, so what an agent did survives the sandbox being lost and is
  * there to pick up from anywhere.
  *
- * Returns null where there is nothing to do: sandboxes are not personal, or the session has not
- * worked anywhere yet.
+ * Returns null where there is nothing to do: the session's sandbox is shared, or the session has
+ * not worked anywhere yet.
  */
 export async function saveSessionWork(
   env: ShuttleEnv,
@@ -183,20 +310,22 @@ export async function saveSessionWork(
   repos: readonly LinkedSandboxRepo[],
   now = Date.now(),
 ): Promise<SavedSnapshot | null> {
-  const home = sandboxesArePersonal(env) ? await storage.get<string>(SANDBOX_HOME_KEY) : undefined
+  const home = await storage.get<string>(SANDBOX_HOME_KEY)
 
-  if (!home) {
+  if (!home || !sandboxIsPersonal(home, env)) {
     return null
   }
 
   const sandbox = sandboxStub(env, home)
   const saved = []
+  const carried = []
 
   for (const repo of repos.length > 0 ? repos : [DEMO_REPO]) {
     const { snapshot } = await sandbox.snapshotSession(runId, repo)
 
     if (snapshot) {
       saved.push({ name: repo.name, head: snapshot.head, snapshotSha: snapshot.snapshotSha })
+      carried.push({ repo, snapshot })
     }
   }
 
@@ -204,7 +333,7 @@ export async function saveSessionWork(
     return null
   }
 
-  const record: SavedSnapshot = { at: now, sandboxName: home, repos: saved }
+  const record: SavedSnapshot = { at: now, sandboxName: home, repos: saved, carried }
 
   await storage.put(LAST_SNAPSHOT_KEY, record)
 

@@ -1,0 +1,17 @@
+{
+  "name": "@shuttle/runner-protocol",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Wire protocol between a Shuttle sandbox Durable Object and a runner on someone's machine",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check-types": "bun x tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}

@@ -27,6 +27,7 @@ import { Composer } from '@/components/composer'
 import { Conversation, type OpenArtifact } from '@/components/conversation'
 import { EventStream } from '@/components/event-stream'
 import { SessionContextButtons } from '@/components/session-context'
+import { SessionPlace } from '@/components/session-place'
 import { SessionPrPills } from '@/components/session-pr-pills'
 import { SessionRepos } from '@/components/session-repos'
 import { SessionShare } from '@/components/session-share'
@@ -896,6 +897,11 @@ function SessionTitleBar({
         {status === 'idle' ? null : (
           <SessionStatusLine status={status} onShowAgents={onShowAgents} />
         )}
+        <SessionPlace
+          key={`place:${runId}`}
+          runId={runId}
+          working={status === 'working' || status === 'running'}
+        />
         <SessionShare key={runId} runId={runId} />
         <DropdownMenu onOpenChange={(open) => !open && setCopied(false)}>
           <DropdownMenuTrigger asChild>

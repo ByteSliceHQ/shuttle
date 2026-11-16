@@ -23,6 +23,7 @@ export function SignInScreen({
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [signUpCode, setSignUpCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -37,7 +38,11 @@ export function SignInScreen({
 
     const result =
       mode === 'sign-up'
-        ? await authClient.signUp.email({ name: name.trim(), email: email.trim(), password })
+        ? await authClient.signUp.email(
+            { name: name.trim(), email: email.trim(), password },
+            // Where the deployment asks for one. See the worker's `auth/signup-code.ts`.
+            { headers: { 'x-shuttle-signup-code': signUpCode.trim() } },
+          )
         : await authClient.signIn.email({ email: email.trim(), password })
 
     setBusy(false)
@@ -130,6 +135,16 @@ export function SignInScreen({
               required
             />
           </Field>
+          {mode === 'sign-up' && providers?.signUpCode ? (
+            <Field label="Sign-up code">
+              <Input
+                value={signUpCode}
+                onChange={(event) => setSignUpCode(event.target.value)}
+                autoComplete="off"
+                required
+              />
+            </Field>
+          ) : null}
 
           {error ? (
             <p role="alert" className="text-destructive text-[12.5px] leading-relaxed">

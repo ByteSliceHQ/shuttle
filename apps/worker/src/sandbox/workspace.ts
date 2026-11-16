@@ -121,6 +121,8 @@ export interface Workspace {
   exec(command: string, options?: ExecOptions): Promise<ExecResult>
   gitDiff(cwd?: string): Promise<string>
   kill(execId?: string): Promise<void>
+  /** Whether a command is running right now. Its effects are not in a snapshot taken now. */
+  busy?(): boolean
 }
 
 export function resolvePath(path: string, cwd?: string): string {

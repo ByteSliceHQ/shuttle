@@ -21,7 +21,11 @@ export class AuthUnavailableError extends Error {
 
 type AuthEnv = Pick<
   ShuttleEnv,
-  'BETTER_AUTH_SECRET' | 'SHUTTLE_WEB_URL' | 'GITHUB_CLIENT_ID' | 'GITHUB_CLIENT_SECRET'
+  | 'BETTER_AUTH_SECRET'
+  | 'SHUTTLE_WEB_URL'
+  | 'GITHUB_CLIENT_ID'
+  | 'GITHUB_CLIENT_SECRET'
+  | 'SHUTTLE_SIGNUP_CODE'
 >
 
 /** The web app's origin. Sign-in requests reach the Worker through it. */
@@ -85,6 +89,9 @@ export function authOptions(env: AuthEnv, database: BetterAuthOptions['database'
           github: {
             clientId: env.GITHUB_CLIENT_ID ?? '',
             clientSecret: env.GITHUB_CLIENT_SECRET ?? '',
+            // Where creating an account needs a code, GitHub cannot be a way around it: it
+            // signs in people who already have an account and have connected GitHub to it.
+            disableSignUp: Boolean(env.SHUTTLE_SIGNUP_CODE?.trim()),
           },
         }
       : {},

@@ -16,6 +16,8 @@ export interface Tenant {
 export interface SignInProviders {
   readonly emailAndPassword: boolean
   readonly github: boolean
+  /** Whether creating an account needs the deployment's sign-up code. */
+  readonly signUpCode?: boolean
 }
 
 export type TenantResult =

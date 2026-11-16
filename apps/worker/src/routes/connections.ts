@@ -1,3 +1,5 @@
+import { DEVICE_ID } from '@shuttle/runner-protocol'
+
 import { isTerminalBridgeEvent, type BridgeEvent } from '../../bridge/protocol'
 import { workspaceRunId } from '../config'
 import { CredentialsKeyMissingError } from '../credentials/store'
@@ -5,7 +7,13 @@ import { sandboxStub, type ShuttleEnv } from '../env'
 import { isVendorHarness, parseHarness, type VendorHarnessId } from '../harness'
 import { loomsStub } from '../looms-stub'
 import { shellQuote } from '../sandbox/exec-argv'
-import { sandboxesArePersonal, userSandboxName } from '../sandbox/names'
+import {
+  isLocalSandbox,
+  localSandboxName,
+  sandboxesArePersonal,
+  sandboxIsPersonal,
+  userSandboxName,
+} from '../sandbox/names'
 import { parseTeam } from '../team'
 import type { Actor } from '../tenancy/access'
 import { CONNECTABLE_HARNESSES, vendorHarnessInfo } from '../vendor/harnesses'
@@ -33,8 +41,20 @@ import {
  *   PUT    /workspace/connections/default                         harness for new sessions
  */
 
+/** The header the desktop app sends to say "on this machine", with the machine's id. */
+const DEVICE_HEADER = 'x-shuttle-device'
+
 /** Sign-ins run in a sandbox of the person's own, apart from any folder's workspace. */
-function connectionsSandbox(env: ShuttleEnv, actor: Actor): string {
+function connectionsSandbox(env: ShuttleEnv, actor: Actor, request: Request): string {
+  const deviceId = request.headers.get(DEVICE_HEADER)
+
+  // Asked from the desktop app, a sign-in happens on that machine and stays there: a session
+  // working there uses it, and it never leaves for the cloud. The name is built from the
+  // caller, so the machine is one of their own.
+  if (deviceId && DEVICE_ID.test(deviceId)) {
+    return localSandboxName(actor.orgId, actor.userId, deviceId)
+  }
+
   // Where each person has a sandbox of their own, they sign in there, where their sessions run.
   return sandboxesArePersonal(env)
     ? userSandboxName(actor.orgId, actor.userId)
@@ -115,7 +135,10 @@ export async function handleConnectionRoutes(
 async function route(request: Request, env: ShuttleEnv, url: URL, actor: Actor): Promise<Response> {
   const { userId } = actor
   const credentials = loomsStub(env.LOOMS_RUN, workspaceRunId(env, actor.orgId))
-  const sandbox = sandboxStub(env, connectionsSandbox(env, actor))
+  const sandboxName = connectionsSandbox(env, actor, request)
+  const sandbox = sandboxStub(env, sandboxName)
+  // Whether sign-ins are kept in this sandbox and nowhere else.
+  const personal = sandboxIsPersonal(sandboxName, env)
   const parts = url.pathname.split('/').filter(Boolean).slice(2).map(decodeURIComponent)
 
   if (parts.length === 0) {
@@ -127,7 +150,28 @@ async function route(request: Request, env: ShuttleEnv, url: URL, actor: Actor):
       (await credentials.listCredentials(userId)).map((entry) => [entry.harness, entry.updatedAt]),
     )
 
+    // On a person's machine the sign-in is a file there and nowhere else, so that is what is
+    // asked. A machine that is not connected has none that can be used.
+    const onMachine = isLocalSandbox(sandboxName)
+      ? new Set(
+          (
+            await Promise.all(
+              CONNECTABLE_HARNESSES.map(async (harness) =>
+                (
+                  await sandbox
+                    .exec(signInFilesPresent(vendorHarnessInfo(harness).credentialFiles))
+                    .catch(() => ({ exitCode: 1 }))
+                ).exitCode === 0
+                  ? harness
+                  : null,
+              ),
+            )
+          ).filter((harness) => harness !== null),
+        )
+      : null
+
     return json({
+      place: onMachine ? 'local' : 'cloud',
       defaultHarness: (await credentials.getHarness()).harness,
       defaultTeam: (await credentials.getTeam()).team,
       mode: (await sandbox.getMode()).mode,
@@ -135,8 +179,8 @@ async function route(request: Request, env: ShuttleEnv, url: URL, actor: Actor):
       connections: CONNECTABLE_HARNESSES.map((harness) => ({
         harness,
         label: vendorHarnessInfo(harness).label,
-        connected: connected.has(harness),
-        updatedAt: connected.get(harness) ?? null,
+        connected: onMachine ? onMachine.has(harness) : connected.has(harness),
+        updatedAt: onMachine ? null : (connected.get(harness) ?? null),
       })),
     })
   }
@@ -181,7 +225,7 @@ async function route(request: Request, env: ShuttleEnv, url: URL, actor: Actor):
     }
 
     // Where the sign-in lives in the person's sandbox, disconnecting deletes it there.
-    if (sandboxesArePersonal(env)) {
+    if (personal) {
       await sandbox
         .exec(removeSignInFiles(vendorHarnessInfo(harness).credentialFiles))
         .catch(() => {})
@@ -229,7 +273,7 @@ async function route(request: Request, env: ShuttleEnv, url: URL, actor: Actor):
       sandbox,
       credentials,
       userId,
-      keepInSandbox: sandboxesArePersonal(env),
+      keepInSandbox: personal,
     })
   }
 

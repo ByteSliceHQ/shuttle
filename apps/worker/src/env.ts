@@ -3,6 +3,7 @@ import type { DurableObjectNamespaceLike } from '@swirls/looms/cloudflare'
 import type { EventFirehose } from './firehose/durable-object'
 import type { LoomsRunStub } from './looms-stub'
 import type { AgentEventsPage, AgentRunInput, AgentRunState } from './sandbox/agent-runs'
+import type { SandboxMachineInfo } from './sandbox/providers/types'
 import type { SessionSandbox } from './sandbox/session-sandbox'
 import type { SessionSnapshot } from './sandbox/session-sync'
 import type {
@@ -27,6 +28,8 @@ export interface ShuttleEnv {
   readonly LOOMS_RUN: DurableObjectNamespaceLike<LoomsRunStub>
   readonly SANDBOX: DurableObjectNamespace<SessionSandbox>
   readonly EVENT_FIREHOSE: DurableObjectNamespace<EventFirehose>
+  /** The built web app, in a deployment. Absent in development, where Vite serves it. */
+  readonly WEB?: Fetcher
   /** Where uploaded and agent-made media is stored. Without it, attachments are unavailable. */
   readonly ASSETS?: R2Bucket
   readonly REPLICA?: D1Database
@@ -34,6 +37,8 @@ export interface ShuttleEnv {
   readonly AUTH_DB?: D1Database
   /** Signs sign-in sessions. At least 32 random characters. */
   readonly BETTER_AUTH_SECRET?: string
+  /** When set, creating an account needs this code. See `auth/signup-code.ts`. */
+  readonly SHUTTLE_SIGNUP_CODE?: string
   /** GitHub OAuth client for "Sign in with GitHub". Optional; email and password always work. */
   readonly GITHUB_CLIENT_ID?: string
   readonly GITHUB_CLIENT_SECRET?: string
@@ -43,7 +48,10 @@ export interface ShuttleEnv {
   readonly TYPESAFE_AI_API_KEY?: string
   /** Optional Jev model id; defaults to `jev-latest`. */
   readonly JEV_MODEL?: string
-  /** `memory` (default), `container` (Cloudflare) or `daytona`. */
+  /**
+   * The provider the deployment's own sandboxes run on: `memory` (default), `container`
+   * (Cloudflare) or `daytona`. A sandbox on a person's machine is local whatever this says.
+   */
   readonly SHUTTLE_WORKSPACE_MODE?: string
   readonly DAYTONA_API_KEY?: string
   readonly DAYTONA_API_URL?: string
@@ -142,6 +150,9 @@ export interface SessionSandboxStub {
   kill(execId?: string): Promise<{ ok: true }>
   getMode(): Promise<{ mode: 'memory' | 'container' }>
   isAwake(): Promise<{ awake: boolean }>
+  describe(): Promise<SandboxMachineInfo>
+  disconnect(): Promise<{ ok: true }>
+  isBusy(): Promise<{ busy: boolean }>
   startAgentRun(input: AgentRunInput): Promise<{ started: boolean }>
   readAgentEvents(runKey: string, offset: number): Promise<AgentEventsPage>
   agentRunState(runKey: string): Promise<{ state: AgentRunState }>

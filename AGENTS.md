@@ -22,4 +22,6 @@ Shuttle is a Looms application, not a Looms package.
 
 - `apps/worker` owns custom Looms modules (`session`, `reflect`) and Cloudflare hosting.
 - `apps/web` is the session UI.
+- `apps/desktop` hosts that UI in Electron and starts `apps/runner`, which keeps a sandbox on the machine.
+- Sandbox providers live in `apps/worker/src/sandbox/providers`; nothing outside it names one. See `docs/sandboxes.md`.
 - Depend on published `@swirls/looms`. Link a local Looms build only when developing SDK changes.

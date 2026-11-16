@@ -16,30 +16,14 @@ import {
   type AgentRunInput,
   type AgentRunState,
 } from './agent-runs'
-import {
-  ensureContainerRunning,
-  reapplyInactivityTimeout,
-  requireContainerMode,
-} from './container-runtime'
-import { ContainerWorkspace } from './container-workspace'
-import {
-  connectDaytonaSandbox,
-  isDaytonaOwnError,
-  openDaytonaTerminal,
-  peekDaytonaSandbox,
-  proxyDaytonaPreview,
-  sandboxNotRunning,
-} from './daytona'
-import { daytonaHost } from './daytona-host'
 import { shellQuote } from './exec-argv'
-import { cloudflareHost, type SandboxHost } from './host'
-import { MemoryWorkspace } from './memory-workspace'
+import type { SandboxHost } from './host'
 import { isDemoRepo, orgOfSandbox } from './names'
 import { parsePreviewHost } from './preview-host'
-import { previewUnavailableResponse, proxyContainerPreview } from './preview-proxy'
+import { openSandbox } from './providers/registry'
+import type { SandboxMachine, SandboxMachineInfo } from './providers/types'
 import { sessionRemote } from './repo-access'
 import { restoreSession, snapshotSession, type SessionSnapshot } from './session-sync'
-import { openContainerTerminal } from './terminal'
 import { resolvePath, worktreeRepoPath } from './workspace'
 import type {
   ChangesetResult,
@@ -67,32 +51,20 @@ import {
 } from './workspace-summary'
 
 /**
- * One sandbox Durable Object per workspace folder (named `folder:<folderId>`).
- * Legacy sessions may still use a run id as the DO name.
+ * One sandbox Durable Object per place a session can work: a workspace folder
+ * (`folder:<folderId>`), a person's cloud sandbox (`user:<orgId>:<userId>`) or one of their own
+ * machines (`local:<orgId>:<userId>:<deviceId>`). Legacy sessions may still use a run id.
  *
- * Modes:
- * - `memory` (default): in-DO filesystem + GitHub tarball import, no Docker required.
- * - `container`: real Linux via Durable Object containers + `@cloudflare/sandbox` Files.
- * - `daytona`: real Linux in a Daytona sandbox named after this object, which keeps its disk
- *   when it stops.
+ * What the sandbox runs on is its provider's business (see `providers/`). This object is the
+ * same for all of them: it serializes setup, answers the RPC surface in `env.ts`, and moves a
+ * session's work in and out through Code Storage.
  */
-/** How long a Daytona sandbox is assumed to still be running before it is checked again. */
-const DAYTONA_RECHECK_MS = 60_000
 
 /** Longest a look at the session's files may take, in milliseconds. */
 const SUMMARY_TIMEOUT_MS = 30_000
 
-/** How long an answer to "is it running?" is reused. The Files tab asks every few seconds. */
-const DAYTONA_PEEK_MS = 10_000
-
-type DaytonaSandbox = Awaited<ReturnType<typeof connectDaytonaSandbox>>
-
 export class SessionSandbox extends DurableObject<ShuttleEnv> {
-  private memory: MemoryWorkspace | null = null
-  private containerWs: ContainerWorkspace | null = null
-  private daytona: { sandbox: DaytonaSandbox; checkedAt: number } | null = null
-  private connecting: Promise<DaytonaSandbox> | null = null
-  private peeked: { awake: boolean; at: number } | null = null
+  private readonly machine: SandboxMachine
   private preparedRepos = false
 
   /**
@@ -103,151 +75,16 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
 
   constructor(ctx: DurableObjectState, env: ShuttleEnv) {
     super(ctx, env)
-    reapplyInactivityTimeout(ctx)
+    this.machine = openSandbox({ ctx, env, name: ctx.id.name ?? 'unnamed' })
   }
 
-  private mode(): 'memory' | 'container' | 'daytona' {
-    const mode = this.env.SHUTTLE_WORKSPACE_MODE
-
-    return mode === 'container' || mode === 'daytona' ? mode : 'memory'
+  /** The machine this sandbox runs on. Not available for a sandbox kept in memory. */
+  private host(): Promise<SandboxHost> {
+    return this.machine.host()
   }
 
-  /** The Daytona sandbox behind this object, started if it had stopped. Checked once a minute. */
-  private async daytonaSandbox(): Promise<DaytonaSandbox> {
-    const known = this.daytona
-
-    if (known && Date.now() - known.checkedAt < DAYTONA_RECHECK_MS) {
-      return known.sandbox
-    }
-
-    // A page loading in the preview asks many times at once. They share one wake-up: Daytona
-    // refuses a second start while the first is under way.
-    this.connecting ??= connectDaytonaSandbox(this.env, this.ctx.id.name ?? 'unnamed')
-      .then((sandbox) => {
-        this.daytona = { sandbox, checkedAt: Date.now() }
-
-        return sandbox
-      })
-      .finally(() => {
-        this.connecting = null
-      })
-
-    return this.connecting
-  }
-
-  /**
-   * Runs `use` against the Daytona sandbox. If it turns out to have gone to sleep since it was
-   * last checked, it is woken and `use` runs once more: Daytona turned the first attempt away
-   * before it reached the sandbox, so nothing ran twice.
-   */
-  private async withDaytona<T>(use: (sandbox: DaytonaSandbox) => Promise<T>): Promise<T> {
-    try {
-      return await use(await this.daytonaSandbox())
-    } catch (cause) {
-      if (!sandboxNotRunning(cause)) {
-        throw cause
-      }
-
-      this.daytona = null
-
-      return use(await this.daytonaSandbox())
-    }
-  }
-
-  /** The Daytona sandbox as a host whose every operation wakes it if it has gone to sleep. */
-  private daytonaHost(): SandboxHost {
-    return daytonaHost({
-      process: {
-        executeCommand: (command, cwd, env, timeout) =>
-          this.withDaytona((sandbox) => sandbox.process.executeCommand(command, cwd, env, timeout)),
-      },
-      fs: {
-        uploadFile: (file, remotePath) =>
-          this.withDaytona((sandbox) => sandbox.fs.uploadFile(file, remotePath)),
-        downloadFile: (remotePath) =>
-          this.withDaytona((sandbox) => sandbox.fs.downloadFile(remotePath)),
-      },
-    })
-  }
-
-  /** A preview request, sent again after waking the sandbox if it had gone to sleep. */
-  private async daytonaPreview(request: Request, port: number): Promise<Response> {
-    // Split in case the request has to be sent twice; a body can only be read once.
-    const [body, again] = request.body ? request.body.tee() : [null, null]
-    const response = await proxyDaytonaPreview(request, await this.daytonaSandbox(), port, body)
-
-    // Daytona answers for a sleeping sandbox with a 400 of its own, in JSON.
-    if (
-      response.status !== 400 ||
-      !response.headers.get('content-type')?.includes('json') ||
-      !sandboxNotRunning(await response.clone().text())
-    ) {
-      void again?.cancel().catch(() => {})
-
-      return this.daytonaAnswer(request, port, response)
-    }
-
-    this.daytona = null
-
-    return this.daytonaAnswer(
-      request,
-      port,
-      await proxyDaytonaPreview(request, await this.daytonaSandbox(), port, again),
-    )
-  }
-
-  /** A preview response, with Daytona's own errors replaced by ours so they never reach a person. */
-  private async daytonaAnswer(
-    request: Request,
-    port: number,
-    response: Response,
-  ): Promise<Response> {
-    if (!(await isDaytonaOwnError(response))) {
-      return response
-    }
-
-    void response.body?.cancel().catch(() => {})
-
-    return previewUnavailableResponse(request, port)
-  }
-
-  /** The machine this sandbox runs on. Not available in memory mode. */
-  private async host(): Promise<SandboxHost> {
-    const mode = this.mode()
-
-    switch (mode) {
-      case 'daytona':
-        // Connected here so a sandbox that cannot start fails now, not on first use.
-        await this.daytonaSandbox()
-
-        return this.daytonaHost()
-      case 'container':
-        return cloudflareHost(await ensureContainerRunning(this.ctx.container))
-      case 'memory':
-        throw new Error('container-mode-required')
-
-      default: {
-        const exhaustive: never = mode
-
-        return exhaustive
-      }
-    }
-  }
-
-  private async workspace(): Promise<Workspace> {
-    if (this.mode() === 'memory') {
-      this.memory ??= await MemoryWorkspace.restore(this.ctx.storage, this.env)
-      this.memory.resetAbort()
-      return this.memory
-    }
-
-    this.containerWs ??= new ContainerWorkspace(
-      () => this.host(),
-      this.env,
-      orgOfSandbox(this.ctx.id.name ?? ''),
-    )
-
-    return this.containerWs
+  private workspace(): Promise<Workspace> {
+    return this.machine.workspace()
   }
 
   private serializeSetup<T>(task: () => Promise<T>): Promise<T> {
@@ -390,7 +227,7 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
   ): Promise<{ bytes: Uint8Array | null; size: number | null }> {
     const workspace = await this.workspace()
 
-    if (this.mode() !== 'memory') {
+    if (this.machine.kind !== 'memory') {
       const sized = await workspace.exec(`stat -c %s -- ${shellQuote(resolvePath(path, cwd))}`, {
         timeoutMs: 15_000,
       })
@@ -444,33 +281,34 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
     return (await this.workspace()).exec(command, options)
   }
 
-  /** Workspace mode for UI feature gates (terminal / browser). */
-  /** Whether this is a real Linux sandbox. A Daytona sandbox is reported as a container. */
   /**
    * Whether this sandbox is running right now. Asking never starts it, which is the point: a
    * caller that only wants to look uses this to decide whether to look here or at what was saved.
    */
   async isAwake(): Promise<{ awake: boolean }> {
-    if (this.mode() !== 'daytona') {
-      return { awake: true }
-    }
-
-    const known = this.peeked
-
-    if (known && Date.now() - known.at < DAYTONA_PEEK_MS) {
-      return { awake: known.awake }
-    }
-
-    const state = await peekDaytonaSandbox(this.env, this.ctx.id.name ?? 'unnamed')
-    const awake = state === 'started'
-
-    this.peeked = { awake, at: Date.now() }
-
-    return { awake }
+    return { awake: await this.machine.isAwake() }
   }
 
+  /** Whether this is a real Linux sandbox, for UI feature gates (terminal / browser). */
   async getMode(): Promise<{ mode: 'memory' | 'container' }> {
-    return { mode: this.mode() === 'memory' ? 'memory' : 'container' }
+    return { mode: this.machine.kind }
+  }
+
+  /** What is known about the machine behind this sandbox, for showing to people. */
+  async describe(): Promise<SandboxMachineInfo> {
+    return (await this.machine.describe?.()) ?? { online: await this.machine.isAwake() }
+  }
+
+  /** Whether a command is running here right now, which a snapshot taken now would miss. */
+  async isBusy(): Promise<{ busy: boolean }> {
+    return { busy: (await this.workspace()).busy?.() ?? false }
+  }
+
+  /** Cuts off whatever keeps this sandbox connected from outside, such as a machine's runner. */
+  async disconnect(): Promise<{ ok: true }> {
+    await this.machine.disconnect?.()
+
+    return { ok: true }
   }
 
   /** The session's files and what it has changed, repository by repository. */
@@ -637,48 +475,30 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
   }
 
   /**
-   * HTTP entry for terminal WebSockets and container port previews.
-   * Preview hosts look like `p3000-<folderId>.preview.example`.
+   * HTTP entry for terminal WebSockets, container port previews, and whatever else the
+   * sandbox's provider answers. Preview hosts look like `p3000-<folderId>.preview.example`.
    */
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
     const preview = parsePreviewHost(url.hostname)
 
     if (preview) {
-      if (this.mode() === 'daytona') {
-        return this.daytonaPreview(request, preview.port)
-      }
-
-      const container = requireContainerMode(
-        this.mode() === 'memory' ? 'memory' : 'container',
-        this.ctx.container,
-      )
-
-      if (container instanceof Response) {
-        return container
-      }
-
-      return proxyContainerPreview(request, container, preview.port)
+      return this.machine.preview(request, preview.port)
     }
 
     if (url.pathname.includes('/sandbox/terminal')) {
-      if (this.mode() === 'daytona') {
-        return this.withDaytona((sandbox) => openDaytonaTerminal(request, sandbox))
-      }
-
-      const container = requireContainerMode(
-        this.mode() === 'memory' ? 'memory' : 'container',
-        this.ctx.container,
-      )
-
-      if (container instanceof Response) {
-        return container
-      }
-
-      return openContainerTerminal(request, container)
+      return this.machine.terminal(request)
     }
 
-    return new Response('Not Found', { status: 404 })
+    return (await this.machine.fetch?.(request)) ?? new Response('Not Found', { status: 404 })
+  }
+
+  override async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    await this.machine.webSocketMessage?.(socket, message)
+  }
+
+  override async webSocketClose(socket: WebSocket): Promise<void> {
+    await this.machine.webSocketClose?.(socket)
   }
 }
 

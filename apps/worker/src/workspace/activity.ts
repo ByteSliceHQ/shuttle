@@ -7,7 +7,7 @@ import { runKindFor } from '../firehose/run-kind'
 import { jsonObject } from '../json'
 import { loomsStub } from '../looms-stub'
 import { readSandboxBinding } from '../session/bind-sandbox'
-import { saveSessionWork } from '../session/handoff'
+import { applyPendingPlacement, saveSessionWork } from '../session/handoff'
 import { readSessionAccess } from '../tenancy/access'
 import { listingRunIds } from '../tenancy/listings'
 import { orgOfRun } from '../tenancy/run-id'
@@ -201,9 +201,13 @@ export function createWorkspaceActivityProjector(
       // save never holds up the session's own events.
       if (activityChanged && activity !== 'working' && storage) {
         void readSandboxBinding(storage, runId)
-          .then((binding) => saveSessionWork(env, storage, runId, binding?.repos ?? []))
+          .then(async (binding) => {
+            await saveSessionWork(env, storage, runId, binding?.repos ?? [])
+            // A move asked for during the turn was waiting for this.
+            await applyPendingPlacement(env, storage, runId, binding)
+          })
           .catch((cause: unknown) => {
-            console.warn("could not save the session's work", cause)
+            console.warn("could not save or move the session's work", cause)
           })
       }
     },

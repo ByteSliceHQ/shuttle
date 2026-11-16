@@ -259,6 +259,8 @@ export const DEFAULT_TEAM: Team = {
 }
 
 export interface ConnectionsState {
+  /** Where these sign-ins are: the viewer's cloud sandbox, or the machine the app runs on. */
+  readonly place?: 'local' | 'cloud'
   /** The harness new sessions start on. */
   readonly defaultHarness: HarnessId
   /** The team new Shuttle sessions start with. */
@@ -279,10 +281,22 @@ export type LoginEvent =
     }
   | { readonly type: 'login_done'; readonly success: boolean; readonly error?: string }
 
+/** The machine sign-ins are managed on, when it is not the cloud. Set by the desktop app's panel. */
+let connectionsDevice: string | null = null
+
+/** Points the sign-in calls below at one of the viewer's machines, or back at the cloud. */
+export function setConnectionsDevice(deviceId: string | null): void {
+  connectionsDevice = deviceId
+}
+
 async function connectionsRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/workspace/connections${path}`, {
     ...init,
-    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      ...(connectionsDevice ? { 'x-shuttle-device': connectionsDevice } : {}),
+    },
   })
 
   const body = (await response.json().catch(() => ({}))) as T & { error?: string }

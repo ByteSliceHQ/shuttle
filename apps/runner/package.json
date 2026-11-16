@@ -1,0 +1,24 @@
+{
+  "name": "@shuttle/runner",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Keeps a Shuttle sandbox on this machine and connects it to Shuttle",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "start": "bun src/main.ts",
+    "build": "bun build src/main.ts --compile --outfile dist/shuttle-runner",
+    "check-types": "bun x tsc -p tsconfig.json --noEmit",
+    "test": "bun test src"
+  },
+  "dependencies": {
+    "@shuttle/runner-protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.9",
+    "typescript": "7.0.2"
+  },
+  "optionalDependencies": {
+    "@superradcompany/microsandbox-darwin-arm64": "0.7.15"
+  }
+}
