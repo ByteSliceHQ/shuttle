@@ -14,12 +14,12 @@ export interface SiteEnv {
 }
 
 /** A build's file name: nothing that could reach outside the bucket's top level. */
-const RELEASE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.(dmg|zip|exe|AppImage)$/
+const RELEASE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.(dmg|zip|exe|AppImage|blockmap)$/
 
 export function releaseName(pathname: string): string | null {
   const name = pathname.slice('/download/'.length)
 
-  return RELEASE_NAME.test(name) ? name : null
+  return name === 'latest-mac.yml' || RELEASE_NAME.test(name) ? name : null
 }
 
 async function download(request: Request, env: SiteEnv, name: string): Promise<Response> {
@@ -36,7 +36,7 @@ async function download(request: Request, env: SiteEnv, name: string): Promise<R
   headers.set('accept-ranges', 'bytes')
   headers.set('content-disposition', `attachment; filename="${name}"`)
   // A build never changes under its name; a new one gets a new name.
-  headers.set('cache-control', 'public, max-age=86400')
+  headers.set('cache-control', name === 'latest-mac.yml' ? 'no-store' : 'public, max-age=86400')
 
   if (!('body' in object)) {
     return new Response(null, { status: 304, headers })
@@ -51,12 +51,12 @@ async function download(request: Request, env: SiteEnv, name: string): Promise<R
     headers.set('content-range', `bytes ${offset}-${offset + length - 1}/${object.size}`)
     headers.set('content-length', String(length))
 
-    return new Response(object.body, { status: 206, headers })
+    return new Response(request.method === 'HEAD' ? null : object.body, { status: 206, headers })
   }
 
   headers.set('content-length', String(object.size))
 
-  return new Response(object.body, { headers })
+  return new Response(request.method === 'HEAD' ? null : object.body, { headers })
 }
 
 export default {
@@ -70,7 +70,14 @@ export default {
     const url = new URL(request.url)
 
     if (url.pathname === '/download/mac') {
-      return Response.redirect(new URL(`/download/${env.LATEST_MAC}`, url).toString(), 302)
+      // Resolve the same manifest the updater uses, so the download button follows releases.
+      const manifest = await env.RELEASES.get('latest-mac.yml')
+      const text = manifest ? await manifest.text() : ''
+
+      const name =
+        text.match(/^\s*(?:-\s*)?url:\s*(Shuttle-[A-Za-z0-9._-]+\.dmg)\s*$/m)?.[1] ?? env.LATEST_MAC
+
+      return Response.redirect(new URL(`/download/${name}`, url).toString(), 302)
     }
 
     if (url.pathname.startsWith('/download/')) {

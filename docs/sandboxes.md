@@ -209,14 +209,19 @@ Open Anyway under System Settings, Privacy & Security.
 
 ### Desktop updates
 
-Packaged apps check GitHub Releases in `ByteSliceHQ/shuttle` shortly after launch and every four
-hours. The bottom-left sidebar also offers a manual check. People choose when to download and
-when to restart; the app never restarts or installs an update on quit automatically. Development
-builds do not check for updates.
+Packaged apps check `https://shuttle.codes/download/latest-mac.yml` shortly after launch and every
+four hours. The bottom-left sidebar also offers a manual check. People choose when to download
+and when to restart; the app never installs an update on quit automatically. Development builds
+do not check for updates.
 
-To release an update, increase `apps/desktop/package.json`'s version, package with a stable
-Developer ID signing identity and notarization credentials, and publish a GitHub release with a
-matching version tag. Upload the generated DMG, ZIP, blockmaps, and `latest-mac.yml` together.
-Packaging uses `--publish never`, so it does not create or publish the release for you. macOS
-requires signed apps for automatic installation; ad hoc development builds are not suitable for
-this release flow. An older build without the update bridge needs one manual upgrade first.
+The release workflow builds and signs a new Apple Silicon version for each push to `main`, then
+uploads it to the existing `shuttle-releases` R2 bucket. The ZIP and DMG are uploaded before the
+update manifest, so an available update always points to uploaded binaries. The public feed works
+without giving desktop apps credentials for the private source repository. See
+[deployment setup](deployments.md) for required GitHub variables and secrets.
+
+For a manual release, package with a stable Developer ID signing identity and notarization
+credentials, then upload the generated DMG, ZIP, blockmaps, and `latest-mac.yml` to R2, publishing
+the manifest last. Packaging uses `--publish never`; the workflow performs publication. macOS
+requires signed apps for automatic installation. An older build without the update bridge or
+with the previous GitHub feed needs one manual upgrade first.

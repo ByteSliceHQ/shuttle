@@ -76,9 +76,9 @@
       "artifactName": "Shuttle-${version}-${arch}.${ext}"
     },
     "publish": {
-      "provider": "github",
-      "owner": "ByteSliceHQ",
-      "repo": "shuttle"
+      "provider": "generic",
+      "url": "https://shuttle.codes/download/",
+      "useMultipleRangeRequest": false
     }
   }
 }
