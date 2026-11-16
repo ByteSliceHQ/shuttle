@@ -1,4 +1,4 @@
-import { Check, GitBranch, LoaderCircle, Lock, Search } from 'lucide-react'
+import { Check, GitBranch, LoaderCircle, Lock, Plus, Search } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import { RepoName } from '@/components/sidebar/repo-chip'
@@ -231,6 +231,14 @@ export function LinkRepoDialog({
         {error ? <p className="text-status-failed text-xs">{error}</p> : null}
 
         <DialogFooter>
+          {hasInstall ? (
+            <Button variant="ghost" size="sm" className="text-muted-foreground mr-auto" asChild>
+              <a href="/github/install?add">
+                <Plus />
+                Add GitHub organization
+              </a>
+            </Button>
+          ) : null}
           <Button variant="ghost" size="sm" onClick={() => handleOpenChange(false)}>
             Cancel
           </Button>

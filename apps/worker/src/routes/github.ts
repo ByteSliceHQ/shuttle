@@ -54,7 +54,7 @@ export async function handleGithubRoutes(
   const url = new URL(request.url)
 
   if (request.method === 'GET' && url.pathname === '/github/install') {
-    return startInstall(env, actor.orgId)
+    return startInstall(env, actor.orgId, url.searchParams.has('add'))
   }
 
   if (request.method === 'GET' && url.pathname === '/github/repos') {
@@ -255,9 +255,18 @@ async function authorizeUrl(env: ShuttleEnv, orgId: string): Promise<string> {
  * Starts connecting GitHub. With the App's OAuth client configured the person first identifies
  * themselves, so installations they already have can be linked; without it, the only way in is
  * a fresh install.
+ *
+ * `addAccount` is for an organization that already has GitHub connected and wants another
+ * account. Identifying the person would only find the installations already linked and stop
+ * there, so it goes straight to GitHub's install page, where they pick the account to add.
+ * Coming back through setup still proves who they are before anything is linked.
  */
-async function startInstall(env: ShuttleEnv, orgId: string): Promise<Response> {
-  if (githubOAuthConfigured(env)) {
+export async function startInstall(
+  env: ShuttleEnv,
+  orgId: string,
+  addAccount = false,
+): Promise<Response> {
+  if (githubOAuthConfigured(env) && !(addAccount && env.GITHUB_APP_SLUG)) {
     return Response.redirect(await authorizeUrl(env, orgId), 302)
   }
 
@@ -329,9 +338,17 @@ async function finishLink(url: URL, env: ShuttleEnv): Promise<Response> {
  * sent on to identify themselves, and only installations GitHub says they can access are linked.
  * A change to an existing installation arrives with no state at all, and is sent to start over
  * from the web app, where the person is signed in.
+ *
+ * A person who cannot install the App on the account they picked only sends its owners a
+ * request. Nothing is installed yet, so there is nothing to link until an owner approves.
  */
-async function finishSetup(url: URL, env: ShuttleEnv): Promise<Response> {
+export async function finishSetup(url: URL, env: ShuttleEnv): Promise<Response> {
   const webUrl = env.SHUTTLE_WEB_URL ?? 'http://127.0.0.1:5180'
+
+  if (url.searchParams.get('setup_action') === 'request') {
+    return Response.redirect(`${webUrl}/?github=requested`, 302)
+  }
+
   const installationId = Number(url.searchParams.get('installation_id'))
   const state = url.searchParams.get('state') ?? ''
   const verified = await verifyState(env, state)
