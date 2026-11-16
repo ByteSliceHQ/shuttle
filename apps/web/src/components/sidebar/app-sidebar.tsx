@@ -680,9 +680,9 @@ function GithubFooter({ installations }: { installations: readonly GithubInstall
       <span className="text-muted-foreground min-w-0 flex-1 truncate text-[11px]" title={logins}>
         {logins}
       </span>
-      <IconTip label="Add GitHub account">
-        <Button variant="ghost" size="icon-xs" aria-label="Add GitHub account" asChild>
-          <a href="/github/install">
+      <IconTip label="Add GitHub organization">
+        <Button variant="ghost" size="icon-xs" aria-label="Add GitHub organization" asChild>
+          <a href="/github/install?add">
             <Plus />
           </a>
         </Button>

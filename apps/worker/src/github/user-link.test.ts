@@ -121,6 +121,19 @@ describe('linkInstallations', () => {
     expect((await linkInstallations(db, 'orgA', [acme])).kind).toBe('linked')
   })
 
+  test('adding a second GitHub organization preserves the first connection', async () => {
+    const db = await migratedD1()
+    await linkInstallations(db, 'orgA', [acme])
+
+    expect(await linkInstallations(db, 'orgA', [acme, other])).toEqual({
+      kind: 'linked',
+      installations: [acme, other],
+    })
+
+    expect(await orgsOfInstallation(db, 1)).toEqual(['orgA'])
+    expect(await orgsOfInstallation(db, 2)).toEqual(['orgA'])
+  })
+
   test('an installation another organization has is linked to this one too', async () => {
     const db = await migratedD1()
     await linkInstallations(db, 'orgA', [acme])

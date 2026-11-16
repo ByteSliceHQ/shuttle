@@ -87,6 +87,9 @@ Cloudflare Worker that hosts Shuttle sessions on Looms Durable Objects.
      **Connect GitHub** in the web UI (`http://127.0.0.1:5180`). Vite proxies
      `/github/*` to the worker; you can also open
      `http://127.0.0.1:8790/github/install` directly.
+   - To connect a second GitHub organization, use **Add GitHub organization**
+     (the `+` beside the connected accounts in the sidebar). It opens GitHub's
+     install page so you can pick another account.
    - Opt out with `SHUTTLE_TUNNEL=off` (inbox **Sync** still works without a
      tunnel).
    - Convert the private key to PKCS#8:

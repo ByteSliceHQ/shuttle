@@ -6,6 +6,7 @@ import { cn } from '@/lib/cn'
 
 type GithubConnectResult =
   | 'connected'
+  | 'requested'
   | 'already_connected'
   | 'missing_installation'
   | 'invalid_state'
@@ -15,6 +16,7 @@ type GithubConnectResult =
 function parseGithubConnectResult(value: string | null): GithubConnectResult | null {
   switch (value) {
     case 'connected':
+    case 'requested':
     case 'already_connected':
     case 'missing_installation':
     case 'invalid_state':
@@ -30,6 +32,8 @@ function messageFor(result: GithubConnectResult): string {
   switch (result) {
     case 'connected':
       return 'GitHub connected. You can link repos to folders from the sidebar.'
+    case 'requested':
+      return 'Install request sent to the GitHub organization’s owners. Once they approve it, choose Connect GitHub again to link it.'
     case 'already_connected':
       return 'That GitHub installation is already connected to another Shuttle organization.'
     case 'missing_installation':
@@ -75,7 +79,7 @@ export function GithubConnectBanner() {
     return null
   }
 
-  const ok = result === 'connected'
+  const ok = result === 'connected' || result === 'requested'
 
   return (
     <div
