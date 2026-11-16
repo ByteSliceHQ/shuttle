@@ -16,7 +16,9 @@ import {
 } from '../sandbox/names'
 import { parseTeam } from '../team'
 import type { Actor } from '../tenancy/access'
-import { CONNECTABLE_HARNESSES, vendorHarnessInfo } from '../vendor/harnesses'
+import { CONNECTABLE_HARNESSES, signInFilesPresent, vendorHarnessInfo } from '../vendor/harnesses'
+
+export { signInFilesPresent }
 import {
   builtInVendorModels,
   CATALOGUE_TTL_MS,
@@ -81,13 +83,6 @@ export function explainDeadRun(label: string, log: string): string {
   return lastLine
     ? `${label} sign-in stopped before it started: ${lastLine.trim().slice(0, 300)}`
     : `${label} sign-in stopped before it started, and left no explanation.`
-}
-
-/** A command that succeeds when every sign-in file exists and is not empty. Reads none of them. */
-export function signInFilesPresent(homeRelativePaths: readonly string[]): string {
-  return homeRelativePaths.length === 0
-    ? 'false'
-    : homeRelativePaths.map((path) => `test -s "$HOME"/${shellQuote(path)}`).join(' && ')
 }
 
 /** A command that deletes the sign-in files. */

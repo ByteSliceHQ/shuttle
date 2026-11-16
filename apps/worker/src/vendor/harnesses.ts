@@ -1,4 +1,5 @@
 import type { VendorHarnessId } from '../harness'
+import { shellQuote } from '../sandbox/exec-argv'
 
 export interface VendorHarnessInfo {
   readonly label: string
@@ -39,3 +40,10 @@ export const CONNECTABLE_HARNESSES = [
   'claude-code',
   'cursor',
 ] as const satisfies VendorHarnessId[]
+
+/** A command that succeeds when every sign-in file exists and is not empty. Reads none of them. */
+export function signInFilesPresent(homeRelativePaths: readonly string[]): string {
+  return homeRelativePaths.length === 0
+    ? 'false'
+    : homeRelativePaths.map((path) => `test -s "$HOME"/${shellQuote(path)}`).join(' && ')
+}

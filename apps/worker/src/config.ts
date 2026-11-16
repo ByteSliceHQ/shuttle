@@ -27,14 +27,14 @@ import {
   type ReasoningEffort,
 } from './llm'
 import { loomsStub } from './looms-stub'
-import { sandboxIsPersonal } from './sandbox/names'
+import { isLocalSandbox, sandboxIsPersonal } from './sandbox/names'
 import { sessionWorkDir } from './sandbox/workspace'
 import { readSandboxBinding, sandboxNameForSession } from './session/bind-sandbox'
 import { prepareSessionSandbox } from './session/handoff'
 import { resolveSponsor } from './session/sponsor'
 import { onTeam, readPinnedTeam, writeStoredTeam, type Team } from './team'
 import { orgOfRun, personalRunId, scopedRunId } from './tenancy/run-id'
-import { vendorHarnessInfo } from './vendor/harnesses'
+import { signInFilesPresent, vendorHarnessInfo } from './vendor/harnesses'
 import { readVendorModelChoice } from './vendor/models'
 import { runVendorTurn } from './vendor/turn'
 import { createWorkspaceActivityProjector } from './workspace/activity'
@@ -254,6 +254,10 @@ export function resolveLlm(
           // A session Shuttle started itself, which nobody has spoken in, has no one's.
           ...(sponsorId ? { billedTo: sponsorId } : {}),
           signInStaysInSandbox: sandboxIsPersonal(sandboxName, env),
+          signInPresent: async () =>
+            (await sandbox.exec(signInFilesPresent(vendorHarnessInfo(harness).credentialFiles)))
+              .exitCode === 0,
+          onMachine: isLocalSandbox(sandboxName),
           shareInstructions: shareInstructions(runId),
           collectShared: () =>
             collectSharedFiles({

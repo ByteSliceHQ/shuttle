@@ -550,6 +550,42 @@ describe("runVendorTurn in a person's own sandbox", () => {
     expect(result.message.content).toContain('not connected')
   })
 
+  test('connected elsewhere but not signed in where the turn runs stops and says where', async () => {
+    const { sandbox, started } = fakeSandbox(done)
+
+    const result = await runVendorTurn(
+      deps(sandbox, {
+        signInStaysInSandbox: true,
+        billedTo: 'alice',
+        // Connected in the cloud, so the record exists, but this machine has no sign-in.
+        credentials: connected({}),
+        signInPresent: async () => false,
+        onMachine: true,
+      }),
+      args(),
+    )
+
+    expect(started).toEqual([])
+    expect(result.message.content).toContain('not signed in on this machine')
+  })
+
+  test('a sign-in present where the turn runs lets the turn start', async () => {
+    const { sandbox, started } = fakeSandbox(done)
+
+    await runVendorTurn(
+      deps(sandbox, {
+        signInStaysInSandbox: true,
+        billedTo: 'alice',
+        credentials: connected({}),
+        signInPresent: async () => true,
+        onMachine: true,
+      }),
+      args(),
+    )
+
+    expect(started).toHaveLength(1)
+  })
+
   test('each person continues their own vendor conversation', async () => {
     const storage = memoryStorage()
     const forAlice = fakeSandbox(done)

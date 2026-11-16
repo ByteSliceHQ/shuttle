@@ -48,6 +48,14 @@ export interface VendorTurnDeps {
    * says whether the person has connected the agent.
    */
   readonly signInStaysInSandbox?: boolean
+  /**
+   * Where the sign-in stays in the sandbox, whether it is there. Being connected is recorded per
+   * person, not per place, so a person signed in on the cloud can have a turn run on their
+   * machine (or the other way round), where the agent has no sign-in.
+   */
+  readonly signInPresent?: () => Promise<boolean>
+  /** Whether the sandbox is on the person's own machine, for saying where to sign in. */
+  readonly onMachine?: boolean
   /** Added to the agent's standing instructions: how to show a file to the people in the session. */
   readonly shareInstructions?: string
   /** Shares the files the agent left to be shown, once its turn has ended. */
@@ -200,6 +208,25 @@ export async function runVendorTurn(
       message: {
         role: 'assistant',
         content: `${info.label} is not connected for the person this work is for. They can connect it on the Connections page, then send the message again.`,
+      },
+      usage: { input: 0, output: 0 },
+    }
+  }
+
+  // Connected somewhere, but not where this turn runs. Starting the agent would only end in the
+  // vendor refusing it for want of a sign-in.
+  if (
+    deps.signInStaysInSandbox &&
+    !conversation.pending &&
+    deps.signInPresent &&
+    !(await deps.signInPresent().catch(() => true))
+  ) {
+    return {
+      message: {
+        role: 'assistant',
+        content: deps.onMachine
+          ? `${info.label} is not signed in on this machine. It may be connected in the cloud, but this session runs here. Connect it on the Connections page with This machine selected, or move the session to the cloud, then send the message again.`
+          : `${info.label} is not signed in in the cloud. It may be connected on one of your machines, but this session runs in the cloud. Connect it on the Connections page with Cloud selected, or move the session to your machine, then send the message again.`,
       },
       usage: { input: 0, output: 0 },
     }
