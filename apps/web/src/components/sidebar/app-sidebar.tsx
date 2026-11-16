@@ -60,6 +60,8 @@ import {
 } from '@/lib/workspace'
 import { LoomsProvider, useProjection, useRunStore } from '@swirls/looms/react'
 
+import { DesktopUpdate } from './desktop-update'
+
 const COLLAPSED_KEY = 'shuttle.sidebar-collapsed'
 const EXPANDED_KEY = 'shuttle.sidebar-expanded'
 const SHOW_ARCHIVED_KEY = 'shuttle.sidebar-show-archived'
@@ -410,6 +412,7 @@ function SidebarPanel({
         <FolderTreeSkeleton error={error} />
       )}
 
+      <DesktopUpdate />
       <LocalSandboxStatus />
       <GithubFooter installations={workspace ? Object.values(workspace.tree.installations) : []} />
       <AccountMenu />

@@ -579,11 +579,23 @@ async function startsOnThisMachine(): Promise<{ deviceId?: string }> {
 export async function startWorkspaceSession(input: {
   folderId: string
   goal: string
+  files?: readonly File[]
 }): Promise<{ runId: string }> {
-  const response = await postJson('/workspace/sessions', {
-    ...input,
-    ...(await startsOnThisMachine()),
-  })
+  const { files = [], ...fields } = input
+  const payload = { ...fields, ...(await startsOnThisMachine()) }
+  const form = new FormData()
+
+  for (const [key, value] of Object.entries(payload)) {
+    form.set(key, value)
+  }
+
+  for (const file of files) {
+    form.append('files', file)
+  }
+
+  const response = files.length
+    ? await fetch('/workspace/sessions', { method: 'POST', body: form })
+    : await postJson('/workspace/sessions', payload)
 
   if (!response.ok) {
     throw new Error(`Failed to start session: ${response.status} ${await response.text()}`)

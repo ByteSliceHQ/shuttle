@@ -104,7 +104,7 @@ async function uploadAsset(
   return Response.json({ asset }, { status: 201 })
 }
 
-async function readCapped(stream: ReadableStream<Uint8Array>, limit: number) {
+export async function readCapped(stream: ReadableStream<Uint8Array>, limit: number) {
   const chunks: Uint8Array[] = []
   let total = 0
 

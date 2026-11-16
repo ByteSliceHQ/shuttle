@@ -73,6 +73,7 @@ await run(
     'electron-builder',
     '--mac',
     'dmg',
+    'zip',
     // "-" is an ad hoc signature: enough to run on Apple Silicon, not enough for Gatekeeper.
     `-c.mac.identity=${identity || '-'}`,
     `-c.mac.notarize=${identity ? 'true' : 'false'}`,

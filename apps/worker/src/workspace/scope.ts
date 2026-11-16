@@ -4,6 +4,8 @@ import { agentCatalog } from '@swirls/looms/agent'
 import { approvalCatalog } from '@swirls/looms/approval'
 import { createModuleScope, defineEventCatalog } from '@swirls/looms/core'
 
+import { AttachmentRefSchema } from '../session/scope'
+
 const GithubAccountSchema = Schema.Struct({
   login: Schema.String,
   type: Schema.String,
@@ -86,6 +88,7 @@ export const workspaceCatalog = defineEventCatalog('workspace', {
     runId: Schema.String,
     folderId: Schema.String,
     goal: Schema.String,
+    attachments: Schema.optional(Schema.Array(AttachmentRefSchema)),
     lessons: Schema.Array(LessonSchema),
     playbookVersion: Schema.Finite,
     playbookRunId: Schema.NullOr(Schema.String),

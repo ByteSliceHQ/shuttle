@@ -1,5 +1,12 @@
 import { DEVICE_ID } from '@shuttle/runner-protocol'
 
+import {
+  MAX_ASSET_BYTES,
+  MAX_ATTACHMENTS,
+  putAsset,
+  cleanMediaType,
+  type AssetRef,
+} from '../assets/store'
 import { getAuth } from '../auth/auth'
 import {
   ensureNamedWorkspace,
@@ -32,6 +39,7 @@ import {
   unlinkRepo,
   type LinkedRepo,
 } from '../workspace/module'
+import { readCapped } from './assets'
 
 export async function handleWorkspaceRoutes(
   request: Request,
@@ -287,7 +295,56 @@ async function createWorkspaceSession(
 ): Promise<Response> {
   const { orgId } = actor
 
-  const body = (await request.json().catch(() => null)) as {
+  const multipart = request.headers.get('content-type')?.startsWith('multipart/form-data')
+  let files: File[] = []
+  let data: unknown
+
+  if (multipart) {
+    if (!env.ASSETS) {
+      return Response.json({ error: 'File storage is not set up.' }, { status: 503 })
+    }
+
+    if (!request.body) {
+      return Response.json({ error: 'Missing request body' }, { status: 400 })
+    }
+
+    const bytes = await readCapped(request.body, MAX_ASSET_BYTES)
+
+    if (!bytes) {
+      return Response.json({ error: 'Attachments exceed 50 MB.' }, { status: 413 })
+    }
+
+    const form = await new Response(bytes, {
+      headers: { 'content-type': request.headers.get('content-type')! },
+    })
+      .formData()
+      .catch(() => null)
+
+    if (!form) {
+      return Response.json({ error: 'Invalid form data' }, { status: 400 })
+    }
+
+    const entries = form.getAll('files')
+
+    if (
+      entries.length > MAX_ATTACHMENTS ||
+      entries.some((file) => typeof file === 'string' || file.size === 0)
+    ) {
+      return Response.json({ error: 'Attach up to 10 nonempty files.' }, { status: 400 })
+    }
+
+    files = entries.filter((file): file is File => typeof file !== 'string')
+
+    data = {
+      folderId: form.get('folderId'),
+      goal: form.get('goal'),
+      deviceId: form.get('deviceId'),
+    }
+  } else {
+    data = await request.json().catch(() => null)
+  }
+
+  const body = data as {
     folderId?: unknown
     goal?: unknown
     deviceId?: unknown
@@ -332,11 +389,26 @@ async function createWorkspaceSession(
     })
   }
 
+  const attachments: AssetRef[] = []
+
+  for (const file of files) {
+    attachments.push(
+      await putAsset(env.ASSETS!, runId, {
+        name: file.name,
+        mediaType: cleanMediaType(file.type) ?? 'application/octet-stream',
+        body: await file.arrayBuffer(),
+        source: 'upload',
+        createdBy: actor.userId,
+      }),
+    )
+  }
+
   await stub.signal([
     requestSession({
       runId,
       folderId,
       goal,
+      ...(attachments.length ? { attachments } : {}),
       lessons: playbook.lessons,
       playbookVersion: playbook.version,
       playbookRunId: playbook.runId,

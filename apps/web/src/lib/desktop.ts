@@ -7,6 +7,11 @@ export interface ShuttleDesktop {
   readonly deviceId: string
   readonly deviceName: string
   readonly platform: string
+  updateStatus?(): Promise<DesktopUpdateStatus>
+  checkForUpdates?(): Promise<void>
+  downloadUpdate?(): Promise<void>
+  installUpdate?(): Promise<void>
+  onUpdateStatus?(listener: (status: DesktopUpdateStatus) => void): () => void
   /** What the app's runner last reported, such as `online` or `preparing`. */
   runnerStatus(): Promise<DesktopRunnerStatus>
   /** Whether a new session starts on this machine. A setting in the app's Sandbox menu. */
@@ -48,4 +53,20 @@ const ISOLATION: Record<string, string> = {
 /** How a local sandbox is kept apart from the machine, in a few words. */
 export function isolationLabel(isolation: string | undefined): string {
   return (isolation && ISOLATION[isolation]) || 'in a sandbox'
+}
+
+export interface DesktopUpdateStatus {
+  readonly status:
+    | 'disabled'
+    | 'idle'
+    | 'checking'
+    | 'current'
+    | 'available'
+    | 'downloading'
+    | 'ready'
+    | 'error'
+  readonly version: string
+  readonly nextVersion?: string
+  readonly progress?: number
+  readonly message?: string
 }

@@ -10,6 +10,7 @@ import { LinkRepoDialog } from '@/components/sidebar/link-repo-dialog'
 import { RepoChip } from '@/components/sidebar/repo-chip'
 import { useWorkspace, WorkspacePending } from '@/components/sidebar/workspace-context'
 import { SignInGate, useAgentGate, useStartPlace } from '@/components/sign-in'
+import { StartAttachments, useStartAttachments } from '@/components/start-attachments'
 import { Button } from '@/components/ui/button'
 import { EmptyState, Kbd } from '@/components/ui/panel'
 import { Textarea } from '@/components/ui/textarea'
@@ -68,6 +69,7 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
   const now = useNow()
   const seenSnapshot = useSeenSessions()
   const [goal, setGoal] = useState(() => (folder.repos.length === 0 ? DEMO_GOAL : ''))
+  const attachments = useStartAttachments()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [linkOpen, setLinkOpen] = useState(false)
@@ -96,7 +98,13 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
 
     void agent
       .save()
-      .then(() => startWorkspaceSession({ folderId: folder.folderId, goal: trimmed }))
+      .then(() =>
+        startWorkspaceSession({
+          folderId: folder.folderId,
+          goal: trimmed,
+          files: attachments.files,
+        }),
+      )
       .then(({ runId: sessionId }) => {
         rememberSession({ runId: sessionId, goal: trimmed })
         return navigate({ to: '/sessions/$sessionId', params: { sessionId } })
@@ -189,10 +197,13 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
                   upcoming
                 />
               ) : null}
+              <StartAttachments files={attachments.files} remove={attachments.remove} />
               <Textarea
                 value={goal}
                 onChange={(event) => setGoal(event.target.value)}
                 onKeyDown={onKeyDown}
+                onPaste={attachments.onPaste}
+                disabled={busy}
                 aria-label="Session goal"
                 placeholder="Describe the change you want…"
                 className="max-h-80 min-h-24 resize-none border-0 bg-transparent text-sm focus-visible:ring-0"
@@ -221,6 +232,11 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
                 </Button>
               </div>
             </div>
+            {attachments.error ? (
+              <p role="alert" className="text-status-failed mt-3 text-xs">
+                {attachments.error}
+              </p>
+            ) : null}
             {error ? (
               <p className="text-status-failed mt-3 text-xs wrap-anywhere">{error}</p>
             ) : null}

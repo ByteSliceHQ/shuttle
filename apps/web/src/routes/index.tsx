@@ -12,6 +12,7 @@ import { useMemo, useState, type KeyboardEvent } from 'react'
 import { HarnessSwitcher, useDefaultHarness } from '@/components/harness-switcher'
 import { useWorkspace, WorkspacePending } from '@/components/sidebar/workspace-context'
 import { SignInGate, useAgentGate, useStartPlace } from '@/components/sign-in'
+import { StartAttachments, useStartAttachments } from '@/components/start-attachments'
 import { Button } from '@/components/ui/button'
 import { EmptyState, Kbd } from '@/components/ui/panel'
 import {
@@ -59,6 +60,7 @@ function HomeComposer({ runId, tree }: { runId: string; tree: WorkspaceTree }) {
   const [goal, setGoal] = useState(DEFAULT_GOAL)
   const [folderId, setFolderId] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
+  const attachments = useStartAttachments()
   const [busy, setBusy] = useState(false)
   const agent = useDefaultHarness()
   const startPlace = useStartPlace()
@@ -90,7 +92,11 @@ function HomeComposer({ runId, tree }: { runId: string; tree: WorkspaceTree }) {
       .then(ensureFolder)
       .then((resolvedFolderId) => {
         rememberLastFolder(resolvedFolderId)
-        return startWorkspaceSession({ folderId: resolvedFolderId, goal: trimmed })
+        return startWorkspaceSession({
+          folderId: resolvedFolderId,
+          goal: trimmed,
+          files: attachments.files,
+        })
       })
       .then(({ runId: sessionId }) => {
         rememberSession({ runId: sessionId, goal: trimmed })
@@ -128,10 +134,13 @@ function HomeComposer({ runId, tree }: { runId: string; tree: WorkspaceTree }) {
                 upcoming
               />
             ) : null}
+            <StartAttachments files={attachments.files} remove={attachments.remove} />
             <Textarea
               value={goal}
               onChange={(event) => setGoal(event.target.value)}
               onKeyDown={onKeyDown}
+              onPaste={attachments.onPaste}
+              disabled={busy}
               aria-label="Session goal"
               placeholder="Describe the change you want…"
               className="min-h-24 resize-none border-0 bg-transparent text-sm focus-visible:ring-0"
@@ -188,6 +197,11 @@ function HomeComposer({ runId, tree }: { runId: string; tree: WorkspaceTree }) {
               </Button>
             </div>
           </div>
+          {attachments.error ? (
+            <p role="alert" className="text-status-failed mt-3 text-xs">
+              {attachments.error}
+            </p>
+          ) : null}
           {error ? <p className="text-status-failed mt-3 text-xs">{error}</p> : null}
         </section>
 
