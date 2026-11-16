@@ -35,6 +35,7 @@ import {
   type HarnessId,
   type VendorHarnessId,
 } from './harness'
+import { httpsRedirect, withHsts } from './https'
 import { loomsStub } from './looms-stub'
 import { shuttleModules } from './modules'
 import { handleAssetRoutes } from './routes/assets'
@@ -354,6 +355,12 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
 
 export default {
   async fetch(request: Request, env: ShuttleEnv, ctx: ExecutionContext): Promise<Response> {
+    const secure = httpsRedirect(request)
+
+    if (secure) {
+      return secure
+    }
+
     const preview = await handlePreviewHost(request, env)
 
     if (preview) {
@@ -364,7 +371,7 @@ export default {
 
     // A deployment serves the web app itself. In development Vite does, and `WEB` is absent.
     if (env.WEB && isWebAppRequest(request)) {
-      return env.WEB.fetch(request)
+      return withHsts(request, await env.WEB.fetch(request))
     }
 
     if (request.method === 'GET' && url.pathname === '/health') {

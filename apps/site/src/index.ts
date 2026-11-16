@@ -5,6 +5,8 @@
  *   GET /download/<file name>  → that build, from the `shuttle-releases` bucket
  */
 
+import { httpsRedirect, withHsts } from './https'
+
 export interface SiteEnv {
   readonly ASSETS: Fetcher
   readonly RELEASES: R2Bucket
@@ -59,6 +61,12 @@ async function download(request: Request, env: SiteEnv, name: string): Promise<R
 
 export default {
   async fetch(request: Request, env: SiteEnv): Promise<Response> {
+    const secure = httpsRedirect(request)
+
+    if (secure) {
+      return secure
+    }
+
     const url = new URL(request.url)
 
     if (url.pathname === '/download/mac') {
@@ -77,6 +85,6 @@ export default {
         : new Response('No such download.', { status: 404 })
     }
 
-    return env.ASSETS.fetch(request)
+    return withHsts(request, await env.ASSETS.fetch(request))
   },
 } satisfies ExportedHandler<SiteEnv>

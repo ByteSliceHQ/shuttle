@@ -5,8 +5,8 @@
   "compatibility_date": "2026-06-01",
   "workers_dev": false,
   "routes": [{ "pattern": "shuttle.codes", "custom_domain": true }],
-  // The page itself. Anything that is not a file here goes to the Worker.
-  "assets": { "directory": "./public", "binding": "ASSETS" },
+  // The page itself. The Worker sees every request first, so it can send plain http to https.
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
   // Built desktop apps, uploaded by hand: see README.md.
   "r2_buckets": [{ "binding": "RELEASES", "bucket_name": "shuttle-releases" }],
   "vars": {
