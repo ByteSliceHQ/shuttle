@@ -20,6 +20,7 @@ import { FixtureToggle } from '@/components/sidebar/fixture-toggle'
 import { FolderGroup } from '@/components/sidebar/folder-group'
 import { InlineNameInput } from '@/components/sidebar/inline-name-input'
 import { LinkRepoDialog } from '@/components/sidebar/link-repo-dialog'
+import { LocalSandboxStatus } from '@/components/sidebar/local-sandbox-status'
 import { SessionRow } from '@/components/sidebar/session-row'
 import {
   useWorkspace,
@@ -409,6 +410,7 @@ function SidebarPanel({
         <FolderTreeSkeleton error={error} />
       )}
 
+      <LocalSandboxStatus />
       <GithubFooter installations={workspace ? Object.values(workspace.tree.installations) : []} />
       <AccountMenu />
     </aside>

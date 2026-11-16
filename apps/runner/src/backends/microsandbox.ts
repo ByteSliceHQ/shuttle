@@ -200,7 +200,7 @@ export class MicrosandboxBackend implements LocalBackend {
     const memoryMb =
       this.spec.limits?.memoryMb ?? Math.min(8192, Math.floor(totalmem() / 2 / 1024 / 1024))
 
-    this.spec.log(`creating sandbox ${this.name}`)
+    this.spec.log('Downloading the sandbox’s Linux system')
 
     await this.must(
       [
@@ -260,7 +260,7 @@ export class MicrosandboxBackend implements LocalBackend {
     const tools = toolsDigest()
 
     if ((await this.marker('tools')) !== tools) {
-      this.spec.log('installing the agent tools in the sandbox; the first time takes a few minutes')
+      this.spec.log('Installing Claude Code, Codex and Cursor in the sandbox')
 
       await this.must(['exec', '--quiet', '--no-tty', this.name, '--', 'bash'], 'install tools', {
         stdin: new TextEncoder().encode(TOOLS_SCRIPT),
@@ -278,6 +278,8 @@ export class MicrosandboxBackend implements LocalBackend {
     const bridge = bridgeDigest(source)
 
     if ((await this.marker('bridge')) !== bridge) {
+      this.spec.log('Finishing the sandbox')
+
       const staged = stageBridge(source)
 
       try {

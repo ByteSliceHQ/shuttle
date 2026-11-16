@@ -9,6 +9,7 @@ import { CHANNELS, type DesktopInfo, type RunnerStatus } from './channels'
 import { readPackagedConfig } from './config'
 import { forgetMachineToken, machineToken } from './machine'
 import { RunnerSupervisor } from './runner'
+import { showSplash } from './splash'
 import { Store } from './store'
 
 /**
@@ -103,6 +104,8 @@ function createWindow(store: Store): BrowserWindow {
 
     return { action: 'deny' }
   })
+
+  showSplash(window)
 
   void window.loadURL(APP_URL).catch(() => {
     void window.loadURL(
