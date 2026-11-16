@@ -63,7 +63,7 @@ export function PullPublishCard({
   }
 
   return (
-    <div className={cn('flex gap-3', className)}>
+    <div className={cn('flex gap-3', className)} data-approval-id={item.approvalId}>
       <AgentAvatar identity={identity} threadId={item.threadId} />
       <div
         className={cn(

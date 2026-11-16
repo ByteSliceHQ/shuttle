@@ -26,6 +26,7 @@ import { CommandPalette, type Command } from '@/components/command-palette'
 import { Composer } from '@/components/composer'
 import { Conversation, type OpenArtifact } from '@/components/conversation'
 import { EventStream } from '@/components/event-stream'
+import { OpenPullRequestButton } from '@/components/open-pull-request'
 import { SessionContextButtons } from '@/components/session-context'
 import { SessionPlace } from '@/components/session-place'
 import { SessionPrPills } from '@/components/session-pr-pills'
@@ -893,6 +894,14 @@ function SessionTitleBar({
           </a>
         ) : null}
         <SessionPrPills pulls={sessionPulls} labelFor={labelFor} onInspect={onInspect} />
+        {folder && folder.repos.length > 0 && !reviewed ? (
+          <OpenPullRequestButton
+            runId={runId}
+            feed={feed}
+            hasPulls={sessionPulls.length > 0}
+            working={status === 'working' || status === 'running'}
+          />
+        ) : null}
         <ConnectionIndicator connection={connection} />
         {status === 'idle' ? null : (
           <SessionStatusLine status={status} onShowAgents={onShowAgents} />

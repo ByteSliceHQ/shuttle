@@ -11,6 +11,7 @@ import { createLooms, type Looms } from '@swirls/looms/runtime'
 import { intake } from '../agents/intake'
 import { fakeEnv } from '../testing/fake-env'
 import { codingSession, say, shuttleSession, transcript, routing } from './module'
+import { requestPullRequest } from './signals'
 import { sponsorOfMessages } from './sponsor'
 
 const TextInput = z.object({
@@ -574,6 +575,70 @@ describe('shuttle session routing', () => {
 
       const restarts = conductorSpawnedPayloads(await looms.getEvents(runId))
       expect(restarts[1]).toMatchObject({ generation: 1, reason: 'failed' })
+    } finally {
+      await looms.stop()
+    }
+  })
+})
+
+function publishGates(events: readonly { type: string; payload: unknown }[]) {
+  return events
+    .filter((event) => event.type === 'approval.requested')
+    .map((event) => event.payload as { approvalId: string; description: string })
+    .filter((payload) => payload.approvalId.startsWith('pr_publish_'))
+}
+
+describe('the PR button', () => {
+  const idleConductor = defineAgent({
+    name: 'conductor',
+    input: TextInput,
+    instructions: 'Conduct.',
+    conversational: true,
+    runTurn: () => ({ message: { role: 'assistant', content: 'Ready' }, done: true }),
+  })
+
+  test('opens the publish card, titled from the goal when nothing is committed', async () => {
+    const looms = createSessionLooms(idleConductor)
+
+    try {
+      const { runId } = await startCodingSession(looms, 'Support attachments in the first message')
+
+      await looms.signal(runId, [
+        requestPullRequest({ requestId: 'r1', title: '', body: '', draft: true }),
+      ])
+
+      await waitFor(async () => publishGates(await looms.getEvents(runId)).length > 0)
+
+      const [gate] = publishGates(await looms.getEvents(runId))
+
+      expect(gate?.approvalId).toBe('pr_publish_r1')
+      expect(gate?.description).toBe('Support attachments in the first message')
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('asks once while a card is already open', async () => {
+    const looms = createSessionLooms(idleConductor)
+
+    try {
+      const { runId } = await startCodingSession(looms)
+
+      await looms.signal(runId, [
+        requestPullRequest({ requestId: 'r1', title: 'First', body: '', draft: true }),
+      ])
+
+      await waitFor(async () => publishGates(await looms.getEvents(runId)).length > 0)
+
+      await looms.signal(runId, [
+        requestPullRequest({ requestId: 'r2', title: 'Second', body: '', draft: true }),
+      ])
+
+      await sleep(200)
+
+      expect(publishGates(await looms.getEvents(runId)).map((gate) => gate.approvalId)).toEqual([
+        'pr_publish_r1',
+      ])
     } finally {
       await looms.stop()
     }

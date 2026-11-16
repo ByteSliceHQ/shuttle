@@ -1,6 +1,11 @@
 import type { AgentTurnResult, LlmCompleteArgs } from '@swirls/looms/agent'
 
-import type { BridgeEvent, BridgeToolKind } from '../../bridge/protocol'
+import {
+  SHUTTLE_PROPOSE_PULL_REQUEST,
+  type BridgeEvent,
+  type BridgePullProposal,
+  type BridgeToolKind,
+} from '../../bridge/protocol'
 import type { ShareResult } from '../assets/sandbox'
 import type { CredentialPayload } from '../credentials/store'
 import type { SessionSandboxStub } from '../env'
@@ -68,6 +73,8 @@ export interface VendorTurnDeps {
 interface VendorConversation {
   /** The vendor's own conversation id, so the next turn continues it. */
   readonly vendorThreadId?: string
+  /** What Shuttle has to tell the agent at the start of its next turn, such as a PR's fate. */
+  readonly notes?: readonly string[]
   /** A turn that has started but whose result has not been returned yet. */
   readonly pending?: {
     readonly runKey: string
@@ -76,6 +83,14 @@ interface VendorConversation {
     readonly owner?: string
   }
 }
+
+/** Added to the standing instructions when the agent may propose pull requests. */
+export const PULL_REQUEST_INSTRUCTIONS = [
+  'To ship the work as a GitHub pull request, call propose_pull_request, the tool from the shuttle MCP server, with a title and a short description. Do it whenever the user asks for a PR.',
+  'Shuttle commits anything uncommitted, pushes, and opens or updates the pull request with its own GitHub access once the user approves it in Shuttle. You have no GitHub credentials here and need none: never push, run gh, or ask for a token.',
+  'Commit on the branch you are on, or leave the changes uncommitted. Do not create or switch branches.',
+  'If propose_pull_request is not available, tell the user to press Open pull request at the top of the session instead.',
+].join('\n')
 
 /**
  * Standing instructions for a vendor agent working inside Shuttle's sandbox. The agent's process
@@ -200,6 +215,26 @@ export async function runVendorTurn(
     await storage.put(conversationKey, next)
   }
 
+  // Shuttle ran the pull request the agent proposed, and the person approved, published or
+  // discarded it. That is the end of this turn: the agent hears how it went next time.
+  const proposalResult = proposalToolResult(args)
+
+  if (proposalResult !== null) {
+    const outcome = describeProposalOutcome(proposalResult)
+
+    await save({ ...conversation, notes: [...(conversation.notes ?? []), outcome.forAgent] })
+
+    return {
+      message: { role: 'assistant', content: outcome.forPerson },
+      usage: { input: 0, output: 0 },
+    }
+  }
+
+  // Only the agent running the session proposes pull requests, and only where the session has a
+  // repository to open them on: then the conductor has the tool this hands the proposal to.
+  const canPropose =
+    !deps.member && args.tools.some((tool) => tool.name === SHUTTLE_PROPOSE_PULL_REQUEST)
+
   const stored = await deps.credentials.get(harness)
 
   if (deps.signInStaysInSandbox && !conversation.pending) {
@@ -240,18 +275,23 @@ export async function runVendorTurn(
     // Recorded before the agent starts, so a restart mid-turn rejoins this run and never
     // starts a second agent on the same prompt.
     pending = { runKey, offset: 0, ...(owner ? { owner } : {}) }
-    await save({ ...conversation, pending })
+    // Shuttle's notes go out with this prompt, once.
+    const prompt = withNotes(conversation.notes, unreadUserText(args))
+    await save({ ...withoutNotes(conversation), pending })
 
     await sandbox.startAgentRun({
       runKey,
       mode: 'turn',
       request: {
         harness,
-        prompt: unreadUserText(args),
+        prompt,
         cwd: deps.cwd,
-        instructions: deps.shareInstructions
-          ? `${SANDBOX_INSTRUCTIONS}\n${deps.shareInstructions}`
-          : SANDBOX_INSTRUCTIONS,
+        instructions: [
+          SANDBOX_INSTRUCTIONS,
+          ...(canPropose ? [PULL_REQUEST_INSTRUCTIONS] : []),
+          ...(deps.shareInstructions ? [deps.shareInstructions] : []),
+        ].join('\n'),
+        ...(canPropose ? { shuttleTools: { proposePullRequest: true } } : {}),
         ...(deps.choice?.model ? { model: deps.choice.model } : {}),
         ...(deps.choice?.effort ? { effort: deps.choice.effort } : {}),
         ...(conversation.vendorThreadId ? { vendorThreadId: conversation.vendorThreadId } : {}),
@@ -277,6 +317,8 @@ export async function runVendorTurn(
   let quietReads = 0
   let stopRequestedAt: number | undefined
   let announced = false
+  /** What the agent proposed with Shuttle's tool. The last one stands. */
+  let proposal: BridgePullProposal | undefined
 
   thinking?.reset()
 
@@ -375,6 +417,13 @@ export async function runVendorTurn(
 
       case 'usage': {
         usage = { input: event.input, output: event.output }
+        break
+      }
+
+      case 'pr_proposed': {
+        const { type: _type, seq: _seq, at: _at, ...proposed } = event
+
+        proposal = proposed
         break
       }
 
@@ -494,8 +543,123 @@ export async function runVendorTurn(
     }
   }
 
+  const content = text || `${info.label} finished without a message.`
+
+  // Handed to Looms as the conductor's own call, so the person gets the same publish card a
+  // Shuttle agent's proposal makes, and Shuttle publishes it the same way.
+  if (proposal && canPropose) {
+    const toolCalls = [
+      {
+        id: `vendor_pr_${proposal.id}`,
+        name: SHUTTLE_PROPOSE_PULL_REQUEST,
+        arguments: {
+          title: proposal.title,
+          body: proposal.body,
+          draft: proposal.draft,
+          ...(proposal.repo ? { repo: proposal.repo } : {}),
+        },
+      },
+    ]
+
+    return { message: { role: 'assistant', content, toolCalls }, toolCalls, usage }
+  }
+
+  return { message: { role: 'assistant', content }, usage }
+}
+
+function withoutNotes(conversation: VendorConversation): VendorConversation {
+  const { notes: _notes, ...rest } = conversation
+
+  return rest
+}
+
+/** Puts what Shuttle has to tell the agent ahead of the person's words. */
+export function withNotes(notes: readonly string[] | undefined, prompt: string): string {
+  if (!notes || notes.length === 0) {
+    return prompt
+  }
+
+  const told = notes.map((note) => `- ${note}`).join('\n')
+
+  return `<shuttle_update>\n${told}\n</shuttle_update>\n\n${prompt}`
+}
+
+/**
+ * The result of the pull request this agent proposed, when the conversation ends with it: Looms
+ * calls the model again with the tool's result. Null for any other turn.
+ */
+export function proposalToolResult(args: Pick<LlmCompleteArgs, 'messages'>): string | null {
+  const last = args.messages.at(-1)
+
+  if (last?.role !== 'tool' || !last.toolCallId) {
+    return null
+  }
+
+  const call = args.messages
+    .findLast((message) => message.role === 'assistant' && message.toolCalls?.length)
+    ?.toolCalls?.find((entry) => entry.id === last.toolCallId)
+
+  return call?.name === SHUTTLE_PROPOSE_PULL_REQUEST && call.id.startsWith('vendor_pr_')
+    ? last.content
+    : null
+}
+
+/** What became of a proposed pull request, for the person and for the agent. */
+export function describeProposalOutcome(result: string): { forPerson: string; forAgent: string } {
+  let parsed: unknown = null
+
+  try {
+    parsed = JSON.parse(result)
+  } catch {
+    // Not JSON: say what it says.
+  }
+
+  const value = (parsed && typeof parsed === 'object' ? parsed : {}) as {
+    pulls?: { fullName?: string; number?: number; url?: string; outcome?: string }[]
+    error?: string
+    message?: string
+  }
+
+  const pulls = (value.pulls ?? []).filter((pull) => pull.url)
+
+  if (pulls.length > 0) {
+    const list = pulls
+      .map((pull) => {
+        const verb =
+          pull.outcome === 'updated'
+            ? 'Updated'
+            : pull.outcome === 'unchanged'
+              ? 'No change to'
+              : 'Opened'
+
+        return `${verb} ${pull.fullName}#${pull.number}: ${pull.url}`
+      })
+      .join('\n')
+
+    return {
+      forPerson: list,
+      forAgent: `The pull request you proposed was published. ${list.replaceAll('\n', '; ')}`,
+    }
+  }
+
+  if (value.error) {
+    return {
+      forPerson: `The pull request could not be published: ${value.error}`,
+      forAgent: `Publishing the pull request you proposed failed: ${value.error}. Fix the cause if it is in the code, then propose it again.`,
+    }
+  }
+
+  if (value.message || /discard/i.test(result)) {
+    return {
+      forPerson: 'The pull request was discarded. Nothing was published.',
+      forAgent: 'The user discarded the pull request you proposed; nothing was published.',
+    }
+  }
+
+  const said = result.trim().slice(0, 500)
+
   return {
-    message: { role: 'assistant', content: text || `${info.label} finished without a message.` },
-    usage,
+    forPerson: said || 'The pull request proposal ended.',
+    forAgent: `Your pull request proposal ended: ${said}`,
   }
 }

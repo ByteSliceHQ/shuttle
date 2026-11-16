@@ -12,7 +12,7 @@ import { playbookRunId, workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { isVendorHarness, parseHarness } from '../harness'
 import { loomsStub } from '../looms-stub'
-import { say } from '../session/signals'
+import { requestPullRequest, say } from '../session/signals'
 import { parseTeam } from '../team'
 import { canShareSession, isPublicSession, type Actor, type SessionAccess } from '../tenancy/access'
 import { scopedRunId } from '../tenancy/run-id'
@@ -47,6 +47,12 @@ export async function handleShuttleRoutes(
 
   if (request.method === 'POST' && sayMatch) {
     return sessionSay(request, env, actor, decodeURIComponent(sayMatch[1] ?? ''))
+  }
+
+  const pullMatch = url.pathname.match(/^\/sessions\/([^/]+)\/pull-request$/)
+
+  if (request.method === 'POST' && pullMatch) {
+    return sessionPullRequest(request, env, actor, decodeURIComponent(pullMatch[1] ?? ''))
   }
 
   const threadStopMatch = url.pathname.match(/^\/sessions\/([^/]+)\/threads\/([^/]+)\/stop$/)
@@ -312,6 +318,52 @@ async function sessionSay(
   ])
 
   return Response.json({ messageId })
+}
+
+/**
+ * Asks the session for a pull request of its work: the PR button. The session opens the same
+ * publish card an agent's proposal does, so nothing is published until someone approves it.
+ *
+ *   POST /sessions/:id/pull-request    { title?, body?, draft?, repo? }
+ *
+ * With no title, Shuttle writes one from the commits, or the session goal.
+ */
+/** A trimmed string field from a request body, at most `max` characters. */
+function textField(value: unknown, max: number): string {
+  return typeof value === 'string' ? value.trim().slice(0, max) : ''
+}
+
+async function sessionPullRequest(
+  request: Request,
+  env: ShuttleEnv,
+  actor: Actor,
+  runId: string,
+): Promise<Response> {
+  const body = (await request.json().catch(() => ({}))) as {
+    title?: unknown
+    body?: unknown
+    draft?: unknown
+    repo?: unknown
+  } | null
+
+  const requestId = crypto.randomUUID()
+  const repo = textField(body?.repo, 200)
+
+  await loomsStub(env.LOOMS_RUN, runId).signal([
+    {
+      ...requestPullRequest({
+        requestId,
+        title: textField(body?.title, 300),
+        body: textField(body?.body, 20_000),
+        draft: body?.draft !== false,
+        ...(repo ? { repo } : {}),
+        requestedBy: actor.userId,
+      }),
+      origin: { type: 'external', actorId: actor.userId },
+    },
+  ])
+
+  return Response.json({ approvalId: `pr_publish_${requestId}` })
 }
 
 /**

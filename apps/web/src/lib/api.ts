@@ -114,6 +114,23 @@ export async function stopSession(runId: string, threadId: string): Promise<void
  * Sends a message into a session. The Worker records who sent it from the sign-in, so it goes
  * through a route of its own and not straight to the run as a signal.
  */
+/**
+ * Asks the session for a pull request of its work. It opens the same publish card an agent's
+ * proposal does, titled from the commits when no title is given. Returns the card's approval id.
+ */
+export async function requestPullRequest(
+  runId: string,
+  options: { title?: string; body?: string; draft?: boolean; repo?: string } = {},
+): Promise<{ approvalId: string }> {
+  const response = await postJson(`/sessions/${encodeURIComponent(runId)}/pull-request`, options)
+
+  if (!response.ok) {
+    throw await requestFailure('Could not open a pull request', response)
+  }
+
+  return (await response.json()) as { approvalId: string }
+}
+
 export async function say(
   runId: string,
   text: string,

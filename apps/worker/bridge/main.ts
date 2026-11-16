@@ -4,8 +4,9 @@ import { join } from 'node:path'
 
 import { runClaudeLogin, runClaudeTurn } from './claude.ts'
 import { listCodexModels, runCodexLogin, runCodexTurn } from './codex.ts'
-import { listCursorModels, runCursorLogin, runCursorTurn } from './cursor.ts'
+import { listCursorModels, runCursorLogin, runCursorTurn, SHUTTLE_RUN_DIR_ENV } from './cursor.ts'
 import { collectHomeFiles, seedHomeFiles } from './home.ts'
+import { serveMcp, shuttleMcpCommand, takeProposals } from './mcp.ts'
 import {
   BRIDGE_EVENTS_FILE,
   BRIDGE_INPUT_FILE,
@@ -27,6 +28,7 @@ import {
  *   node main.ts seed                 (sign-in files as JSON on stdin)
  *   node main.ts collect --paths a,b  (sign-in files as JSON on stdout)
  *   node main.ts models --harness codex  (the agent's models as JSON on stdout)
+ *   node main.ts mcp   --dir <dir>   (Shuttle's tools for the agent, as a stdio MCP server)
  *
  * `<dir>` holds `request.json`. The bridge appends events to `events.jsonl` there and always ends
  * the file with a terminal event, so a reader never waits on a run that has died. SIGTERM
@@ -81,17 +83,57 @@ export function createInputReader(dir: string, signal: AbortSignal): BridgeReadI
     })
 }
 
-async function runTurn(request: BridgeTurnRequest, emit: BridgeEmit, signal: AbortSignal) {
-  if (request.harness === 'codex') {
-    return runCodexTurn(request, emit, signal)
+/**
+ * Reports the pull requests the agent proposes with Shuttle's MCP server as events, while the
+ * turn runs and once more just before it ends, so none is lost to the timing of the last poll.
+ */
+export function withProposals(
+  dir: string,
+  emit: BridgeEmit,
+): { emit: BridgeEmit; stop: () => void } {
+  const flush = () => {
+    for (const proposal of takeProposals(dir)) {
+      emit({ type: 'pr_proposed', ...proposal })
+    }
   }
 
-  if (request.harness === 'claude-code') {
-    return runClaudeTurn(request, emit, signal)
-  }
+  const timer = setInterval(flush, 500)
 
-  if (request.harness === 'cursor') {
-    return runCursorTurn(request, emit, signal)
+  return {
+    emit: (event) => {
+      if (isTerminalBridgeEvent(event)) {
+        flush()
+      }
+
+      emit(event)
+    },
+    stop: () => clearInterval(timer),
+  }
+}
+
+async function runTurn(
+  request: BridgeTurnRequest,
+  dir: string,
+  emitEvent: BridgeEmit,
+  signal: AbortSignal,
+) {
+  const mcp = request.shuttleTools?.proposePullRequest ? shuttleMcpCommand(dir) : undefined
+  const { emit, stop } = withProposals(dir, emitEvent)
+
+  try {
+    if (request.harness === 'codex') {
+      return await runCodexTurn(request, emit, signal, mcp ? { mcp } : {})
+    }
+
+    if (request.harness === 'claude-code') {
+      return await runClaudeTurn(request, emit, signal, mcp ? { mcp } : {})
+    }
+
+    if (request.harness === 'cursor') {
+      return await runCursorTurn(request, emit, signal, mcp ? { mcp } : {})
+    }
+  } finally {
+    stop()
   }
 
   emit({
@@ -168,6 +210,14 @@ async function main(): Promise<void> {
     return
   }
 
+  if (mode === 'mcp') {
+    // Cursor cannot pass arguments per turn, so it passes the run directory in the environment.
+    const fromEnv = process.env[SHUTTLE_RUN_DIR_ENV]?.trim()
+
+    await serveMcp(dir ?? (fromEnv && !fromEnv.startsWith('${') ? fromEnv : ''))
+    return
+  }
+
   if ((mode !== 'turn' && mode !== 'login') || !dir) {
     console.error('usage: shuttle-agent-bridge <turn|login> --dir <dir>')
     process.exitCode = 2
@@ -190,7 +240,7 @@ async function main(): Promise<void> {
     const request = JSON.parse(readFileSync(join(dir, BRIDGE_REQUEST_FILE), 'utf8'))
 
     await (mode === 'turn'
-      ? runTurn(request as BridgeTurnRequest, emit, controller.signal)
+      ? runTurn(request as BridgeTurnRequest, dir, emit, controller.signal)
       : runLogin(
           request as BridgeLoginRequest,
           emit,
