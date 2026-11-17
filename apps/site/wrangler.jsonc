@@ -11,6 +11,6 @@
   "r2_buckets": [{ "binding": "RELEASES", "bucket_name": "shuttle-releases" }],
   "vars": {
     // What /download/mac sends people to. Change it when a new build is uploaded.
-    "LATEST_MAC": "Shuttle-0.0.2-arm64.dmg",
+    "LATEST_MAC": "Shuttle-0.0.3-arm64.dmg",
   },
 }

@@ -1,6 +1,6 @@
 {
   "name": "@shuttle/desktop",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": true,
   "description": "Shuttle desktop app: the session UI, with a sandbox on this machine",
   "license": "Apache-2.0",
