@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Build your own ADE · Shuttle</title>
+    <meta
+      name="description"
+      content="Shuttle's interface is a set of React parts, published as @swirls/shuttle. Put them together into a development environment of your own."
+    />
+    <meta property="og:title" content="Build your own ADE with Shuttle" />
+    <meta
+      property="og:description"
+      content="Shuttle's interface as React parts: your layout, your own parts beside ours, your own kinds of tab."
+    />
+    <meta property="og:image" content="https://shuttle.codes/shuttle-mac.png" />
+    <meta name="theme-color" content="#f2efe9" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/site.css" />
+  </head>
+  <body>
+    <header class="top">
+      <a class="mark" href="/" aria-label="Shuttle">
+        <svg viewBox="0 0 48 48" aria-hidden="true">
+          <rect class="tile" width="48" height="48" rx="11" />
+          <g transform="translate(6 6) scale(0.75)">
+            <g class="warp">
+              <rect x="11.5" y="5" width="9" height="20.5" rx="2.25" />
+              <rect x="11.5" y="38.5" width="9" height="4.5" rx="2.25" />
+              <rect x="27.5" y="5" width="9" height="4.5" rx="2.25" />
+              <rect x="27.5" y="22.5" width="9" height="20.5" rx="2.25" />
+            </g>
+            <g class="weft">
+              <rect x="5" y="11.5" width="4.5" height="9" rx="2.25" />
+              <rect x="22.5" y="11.5" width="20.5" height="9" rx="2.25" />
+              <rect x="5" y="27.5" width="20.5" height="9" rx="2.25" />
+              <rect x="38.5" y="27.5" width="4.5" height="9" rx="2.25" />
+            </g>
+          </g>
+        </svg>
+        Shuttle
+      </a>
+      <nav>
+        <a href="/docs/" aria-current="page">Docs</a>
+        <a href="https://github.com/ByteSliceHQ/shuttle">GitHub</a>
+        <a class="wide" href="https://app.shuttle.codes">Sign in</a>
+        <a href="/download/mac">Download</a>
+      </nav>
+    </header>
+
+    <main class="docs">
+      <aside class="toc" aria-label="On this page">
+        <p class="toc-title">On this page</p>
+        <ol>
+          <li><a href="#install">Install</a></li>
+          <li><a href="#shape">How it fits together</a></li>
+          <li><a href="#first">A first ADE</a></li>
+          <li><a href="#parts">The parts</a></li>
+          <li><a href="#own-part">A part of your own</a></li>
+          <li><a href="#artifacts">Your own kinds of tab</a></li>
+          <li><a href="#host">Fitting it into your app</a></li>
+          <li><a href="#styles">Styles</a></li>
+          <li><a href="#needs">What it needs</a></li>
+          <li><a href="#links">Source and links</a></li>
+        </ol>
+      </aside>
+
+      <article class="prose">
+        <p class="kicker">@swirls/shuttle</p>
+        <h1>Build your own ADE</h1>
+        <p class="pitch">
+          Shuttle's interface is a set of React parts: a session, its conversation, the composer,
+          the artifacts pane, the agents. Shuttle's own web and desktop apps are only one way of
+          putting them together. Install the parts and put them together your way, with your own
+          layout, your own parts beside ours, and your own kinds of tab.
+        </p>
+        <div class="links-row">
+          <a class="button" href="https://github.com/ByteSliceHQ/shuttle">View on GitHub</a>
+          <a class="text-link" href="https://www.npmjs.com/package/@swirls/shuttle"
+            >@swirls/shuttle on npm</a
+          >
+          <a
+            class="text-link"
+            href="https://github.com/ByteSliceHQ/shuttle/tree/main/examples/custom-ade"
+            >The example</a
+          >
+        </div>
+
+        <h2 id="install">Install</h2>
+        <p>One package, with an entry point for each layer.</p>
+        <pre><code class="language-bash">bun add @swirls/shuttle @tanstack/react-query</code></pre>
+        <div class="table">
+          <table>
+            <thead>
+              <tr>
+                <th>Import</th>
+                <th>What it is</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>@swirls/shuttle/react</code></td>
+                <td>
+                  The <code>Shuttle</code> parts, <code>useSession()</code> and
+                  <code>createShuttleHost</code>
+                </td>
+              </tr>
+              <tr>
+                <td><code>@swirls/shuttle/react/ui</code></td>
+                <td>The plain controls the parts are drawn with</td>
+              </tr>
+              <tr>
+                <td><code>@swirls/shuttle/react/theme.css</code></td>
+                <td>Tokens and styles, imported after Tailwind</td>
+              </tr>
+              <tr>
+                <td><code>@swirls/shuttle/api</code></td>
+                <td>The backend's HTTP API as a zod contract</td>
+              </tr>
+              <tr>
+                <td><code>@swirls/shuttle/core/workspace</code></td>
+                <td>The workspace run's events and schemas</td>
+              </tr>
+              <tr>
+                <td><code>@swirls/shuttle/core/pulls</code></td>
+                <td>The pulls run's events and schemas</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="shape">How it fits together</h2>
+        <p>
+          There are three layers. A <strong>host</strong> says how to reach the backend. The
+          <strong>provider</strong> gives every part the host, your router and who is signed in. A
+          <strong>session</strong> follows one session's run, folds its events once, and hands the
+          result to every part inside it. The parts take no session props of their own, so you can
+          arrange them however you like.
+        </p>
+        <figure
+          class="layers"
+          aria-label="The layers: a provider holds a session, which holds the parts"
+        >
+          <div class="layer">
+            <span class="layer-name">&lt;Shuttle.Provider host router identity&gt;</span>
+            <div class="layer">
+              <span class="layer-name">&lt;Shuttle.Session id artifactTypes&gt;</span>
+              <div class="tiles">
+                <span>SessionHeader</span>
+                <span>Agents</span>
+                <span>Conversation</span>
+                <span>Composer</span>
+                <span>Artifacts</span>
+                <span>Events</span>
+                <span>Palette</span>
+                <span class="yours">YourOwnPart</span>
+              </div>
+            </div>
+          </div>
+          <figcaption>
+            Anything inside the session can read it with <code>useSession()</code>, the stock parts
+            and yours alike.
+          </figcaption>
+        </figure>
+
+        <h2 id="first">A first ADE</h2>
+        <p>
+          A conversation on the left, artifacts on the right, and no sidebar. This is all it takes
+          once you have a backend to point at.
+        </p>
+        <pre><code class="language-tsx">import { createShuttleHost, Shuttle } from '@swirls/shuttle/react'
+
+const host = createShuttleHost({ baseUrl: 'https://shuttle.example.com' })
+
+export function MyADE({ sessionId }: { sessionId: string }) {
+  return (
+    &lt;Shuttle.Provider host={host} router={router} identity={identity}&gt;
+      &lt;Shuttle.Session id={sessionId}&gt;
+        &lt;div className="grid h-dvh grid-cols-[1fr_420px] grid-rows-[auto_1fr]"&gt;
+          &lt;div className="col-span-2"&gt;
+            &lt;Shuttle.SessionHeader /&gt;
+          &lt;/div&gt;
+          &lt;main className="flex min-h-0 flex-col"&gt;
+            &lt;Shuttle.Conversation /&gt;
+            &lt;Shuttle.Composer /&gt;
+          &lt;/main&gt;
+          &lt;aside className="min-h-0 border-l"&gt;
+            &lt;Shuttle.Artifacts /&gt;
+          &lt;/aside&gt;
+        &lt;/div&gt;
+        &lt;Shuttle.Palette /&gt;
+      &lt;/Shuttle.Session&gt;
+    &lt;/Shuttle.Provider&gt;
+  )
+}</code></pre>
+        <p>
+          The provider expects a TanStack <code>QueryClientProvider</code> above it. Where the
+          <code>router</code> and <code>identity</code> come from is covered in
+          <a href="#host">Fitting it into your app</a>.
+        </p>
+
+        <h2 id="parts">The parts</h2>
+        <div class="table">
+          <table>
+            <thead>
+              <tr>
+                <th>Part</th>
+                <th>What it does</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>Shuttle.Provider</code></td>
+                <td>
+                  Gives the parts the host, the router and who is signed in. Everything goes inside
+                  it.
+                </td>
+              </tr>
+              <tr>
+                <td><code>Shuttle.Session</code></td>
+                <td>Follows one session and gives it to the parts inside.</td>
+              </tr>
+              <tr>
+                <td><code>Shuttle.SessionHeader</code></td>
+                <td>The session's title, status and controls.</td>
+              </tr>
+              <tr>
+                <td><code>Shuttle.Conversation</code></td>
+                <td>
+                  The conversation with the agents, with turns streaming in as they are written.
+                </td>
+              </tr>
+              <tr>
+                <td><code>Shuttle.Composer</code></td>
+                <td>Where you write to the agents and steer them while they work.</td>
+              </tr>
+              <tr>
+                <td><code>Shuttle.Agents</code></td>
+                <td>The session's agents as a tree of threads.</td>
+              </tr>
+              <tr>
+                <td><code>Shuttle.Artifacts</code></td>
+                <td>
+                  The tabbed pane: files, changes, previews, terminals, and any kinds you add.
+                </td>
+              </tr>
+              <tr>
+                <td><code>Shuttle.Events</code></td>
+                <td>The run's raw event history.</td>
+              </tr>
+              <tr>
+                <td><code>Shuttle.Palette</code></td>
+                <td>The command palette.</td>
+              </tr>
+              <tr>
+                <td><code>Shuttle.SessionLayout</code></td>
+                <td>
+                  Shuttle's own arrangement of all of the above, for when you want the whole thing.
+                </td>
+              </tr>
+              <tr>
+                <td><code>Shuttle.Shell</code></td>
+                <td>
+                  The frame with folders and sessions down the side. Leave it out if your app has
+                  its own navigation.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          You can start with <code>Shuttle.SessionLayout</code> and take it apart later, or start
+          from the individual parts. Both work with nothing above them but the provider.
+        </p>
+
+        <h2 id="own-part">A part of your own</h2>
+        <p>
+          <code>useSession()</code> returns what the stock parts read: the title, the status, the
+          conversation, the agents and the raw events. A component of yours that calls it can sit
+          anywhere inside <code>&lt;Shuttle.Session&gt;</code>.
+        </p>
+        <pre><code class="language-tsx">import { useSession } from '@swirls/shuttle/react'
+
+function StatusStrip() {
+  const { status, identities, events } = useSession()
+
+  return (
+    &lt;div className="border-b px-3 py-1 text-[11px] text-muted-foreground"&gt;
+      {status} · {identities.size} agents · {events.length} events
+    &lt;/div&gt;
+  )
+}</code></pre>
+
+        <h2 id="artifacts">Your own kinds of tab</h2>
+        <p>
+          The artifacts pane knows only the kinds of tab it is given. Add yours to Shuttle's and it
+          shows up in the pane's menu and in the command palette like any other.
+        </p>
+        <pre><code class="language-tsx">import { defaultArtifactTypes, type ArtifactType } from '@swirls/shuttle/react'
+
+const designs: ArtifactType = {
+  kind: 'acme:designs',
+  label: 'Designs',
+  icon: &lt;PenTool size={14} /&gt;,
+  launcher: { keywords: 'figma mockups', starter: true },
+  render: ({ tab, runId }) =&gt; &lt;DesignBoard runId={runId} id={tab.target} /&gt;,
+}
+
+&lt;Shuttle.Session id={sessionId} artifactTypes={[...defaultArtifactTypes, designs]}&gt;</code></pre>
+        <ul>
+          <li>
+            Name your kinds <code>namespace:name</code>, as in <code>acme:designs</code>, so they
+            never collide with Shuttle's.
+          </li>
+          <li>
+            The backend keeps your tabs, with their title and <code>target</code>, without knowing
+            what they show. What <code>target</code> means (an id, a URL, a path) is up to you.
+          </li>
+          <li>
+            <code>single: true</code> keeps one tab of the kind at most. Leave
+            <code>launcher</code> out to open tabs only from your own code, such as a link in a
+            message.
+          </li>
+          <li>
+            Someone who opens the session in an app that doesn't have your kind sees a note saying
+            so, not an empty pane.
+          </li>
+        </ul>
+
+        <h2 id="host">Fitting it into your app</h2>
+        <p>The parts never assume where they are running. Your app gives them three things.</p>
+
+        <h3>The host</h3>
+        <p>
+          <code>createShuttleHost</code> is called once, outside React, so your route loaders and
+          the parts share one client and one cache. <code>baseUrl</code> points at the backend (left
+          out, it is the page's own origin), and <code>fetch</code> lets you add your own
+          credentials to every request.
+        </p>
+        <pre><code class="language-tsx">const host = createShuttleHost({
+  baseUrl: 'https://shuttle.example.com',
+  fetch: (input, init) =&gt; fetch(input, { ...init, credentials: 'include' }),
+})</code></pre>
+
+        <h3>The router</h3>
+        <p>
+          Parts link to destinations, never to paths: <code>{ page: 'session', sessionId }</code>,
+          <code>{ page: 'home' }</code> and so on. Your router says where each one is in your app.
+          Here is the whole adapter for an app with a single page:
+        </p>
+        <pre><code class="language-tsx">const router: ShuttleRouter = {
+  Link: ({ to, ...rest }) =&gt; (
+    &lt;a {...rest} href={to.page === 'session' ? `?session=${to.sessionId}` : '#'} /&gt;
+  ),
+  navigate: () =&gt; {},
+  location: { page: 'session', sessionId },
+}</code></pre>
+
+        <h3>Who is signed in</h3>
+        <p>
+          <code>identity</code> is the signed-in person and their organization, as the backend
+          returns them, and a way to list the people in it for names and sharing.
+        </p>
+        <pre><code class="language-tsx">const tenant = useQuery({ queryKey: ['me'], queryFn: () =&gt; host.client.tenant.me() }).data
+const identity = tenant ? { tenant, listPeople: async () =&gt; [] } : null</code></pre>
+
+        <h2 id="styles">Styles</h2>
+        <p>
+          The parts are styled with Tailwind CSS 4. Import the theme after Tailwind and it tells
+          Tailwind to read the package's files, so there is nothing to add to your config.
+        </p>
+        <pre><code class="language-css">@import 'tailwindcss';
+@import '@swirls/shuttle/react/theme.css';</code></pre>
+
+        <h2 id="needs">What it needs</h2>
+        <ul>
+          <li>
+            A Shuttle backend to talk to. It is the Worker in
+            <a href="https://github.com/ByteSliceHQ/shuttle/tree/main/apps/worker"
+              ><code>apps/worker</code></a
+            >, which runs on your own Cloudflare account, or locally with <code>bun run dev</code>.
+          </li>
+          <li>React 19, TanStack Query 5 and Tailwind CSS 4.</li>
+          <li>A bundler such as Vite.</li>
+        </ul>
+
+        <h2 id="links">Source and links</h2>
+        <p>Shuttle is open source under the Apache 2.0 license.</p>
+        <ul class="link-list">
+          <li>
+            <a href="https://github.com/ByteSliceHQ/shuttle">ByteSliceHQ/shuttle</a>
+            <span>The repository: the parts, the backend and the apps</span>
+          </li>
+          <li>
+            <a href="https://github.com/ByteSliceHQ/shuttle/tree/main/examples/custom-ade"
+              >examples/custom-ade</a
+            >
+            <span>A complete custom ADE in one file, with a part and a tab kind of its own</span>
+          </li>
+          <li>
+            <a href="https://github.com/ByteSliceHQ/shuttle/tree/main/packages/react"
+              >packages/react</a
+            >
+            <span>The parts' source</span>
+          </li>
+          <li>
+            <a href="https://github.com/ByteSliceHQ/shuttle/blob/main/packages/shuttle/CHANGELOG.md"
+              >Changelog</a
+            >
+            <span>What changed in each release</span>
+          </li>
+          <li>
+            <a href="https://github.com/ByteSliceHQ/shuttle/issues">Issues</a>
+            <span>Bugs, questions and requests</span>
+          </li>
+          <li>
+            <a href="https://www.npmjs.com/package/@swirls/shuttle">@swirls/shuttle</a>
+            <span>The package on npm</span>
+          </li>
+        </ul>
+      </article>
+    </main>
+
+    <footer class="foot">
+      <span>Shuttle is made by ByteSlice.</span>
+      <a href="https://github.com/ByteSliceHQ/shuttle">Source on GitHub</a>
+    </footer>
+  </body>
+</html>

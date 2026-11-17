@@ -49,7 +49,9 @@
         Shuttle
       </a>
       <nav>
-        <a href="https://app.shuttle.codes">Sign in</a>
+        <a href="/docs/">Docs</a>
+        <a href="https://github.com/ByteSliceHQ/shuttle">GitHub</a>
+        <a class="wide" href="https://app.shuttle.codes">Sign in</a>
         <a href="/download/mac">Download</a>
       </nav>
     </header>
@@ -154,6 +156,35 @@
         </p>
       </section>
 
+      <section class="parts">
+        <div>
+          <h2>Build your own ADE from Shuttle's parts.</h2>
+          <p>
+            Everything in the app is a React component you can install from npm as
+            <code>@swirls/shuttle</code>: the session, the conversation, the composer, the artifacts
+            pane. Lay them out your way, put your own parts beside them, and add your own kinds of
+            tab.
+          </p>
+          <div class="get">
+            <a class="button" href="/docs/">Read the docs</a>
+            <a class="text-link" href="https://github.com/ByteSliceHQ/shuttle"
+              >ByteSliceHQ/shuttle on GitHub</a
+            >
+          </div>
+        </div>
+        <div class="snippets">
+          <pre><code class="language-bash">bun add @swirls/shuttle</code></pre>
+          <pre><code class="language-tsx">&lt;Shuttle.Provider host={host} router={router} identity={identity}&gt;
+  &lt;Shuttle.Session id={sessionId}&gt;
+    &lt;Shuttle.SessionHeader /&gt;
+    &lt;Shuttle.Conversation /&gt;
+    &lt;Shuttle.Composer /&gt;
+    &lt;Shuttle.Artifacts /&gt;
+  &lt;/Shuttle.Session&gt;
+&lt;/Shuttle.Provider&gt;</code></pre>
+        </div>
+      </section>
+
       <section class="last">
         <div class="get">
           <a class="button" href="/download/mac">Download for Mac</a>
@@ -177,7 +208,11 @@
 
     <footer class="foot">
       <span>Shuttle is made by ByteSlice.</span>
-      <a href="https://app.shuttle.codes">Open Shuttle in the browser</a>
+      <span class="foot-links">
+        <a href="/docs/">Docs</a>
+        <a href="https://github.com/ByteSliceHQ/shuttle">GitHub</a>
+        <a href="https://app.shuttle.codes">Open Shuttle in the browser</a>
+      </span>
     </footer>
 
     <script src="/site.js" defer></script>

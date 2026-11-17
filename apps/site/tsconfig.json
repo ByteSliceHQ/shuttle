@@ -4,5 +4,5 @@
     "types": ["@cloudflare/workers-types", "bun"],
     "noEmit": true
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "scripts/**/*"]
 }

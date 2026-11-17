@@ -378,10 +378,329 @@ a:focus-visible {
   text-underline-offset: 3px;
 }
 
+/* Build with the parts (home) */
+
+.parts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: clamp(28px, 5vw, 80px);
+  align-items: start;
+  margin-top: clamp(64px, 9vw, 128px);
+  padding-top: 26px;
+  border-top: 1px solid var(--ink);
+}
+
+.parts h2 {
+  margin: 0;
+  font-size: clamp(26px, 3.4vw, 44px);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+  font-weight: 500;
+}
+
+.parts p {
+  margin: 18px 0 0;
+  max-width: 30em;
+  color: #2b2a2e;
+}
+
+.parts .get {
+  margin-top: 26px;
+}
+
+.text-link {
+  font-family: var(--mono);
+  font-size: 13px;
+  text-underline-offset: 3px;
+}
+
+.text-link:hover {
+  color: var(--thread);
+}
+
+/* Code */
+
+pre {
+  margin: 20px 0 0;
+  padding: 18px 20px;
+  overflow-x: auto;
+  background: var(--ink);
+  color: #e9e6df;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.6;
+  tab-size: 2;
+}
+
+/* Shiki's colours, on the site's ink rather than the theme's own background. */
+pre.shiki {
+  background-color: var(--ink) !important;
+}
+
+pre code {
+  font: inherit;
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.82em;
+  background: rgb(24 23 26 / 6%);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.snippets {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.parts pre {
+  margin: 0;
+}
+
+/* Docs */
+
+.top nav a[aria-current='page'] {
+  border-bottom-color: var(--ink);
+}
+
+.docs {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: clamp(28px, 5vw, 80px);
+  align-items: start;
+  padding-top: clamp(24px, 5vw, 64px);
+}
+
+.toc {
+  position: sticky;
+  top: 28px;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.toc-title {
+  margin: 0 0 12px;
+  color: var(--soft);
+}
+
+.toc ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  border-left: 1px solid var(--rule);
+}
+
+.toc a {
+  display: block;
+  padding-left: 14px;
+  margin-left: -1px;
+  border-left: 1px solid transparent;
+  text-decoration: none;
+  color: var(--soft);
+}
+
+.toc a:hover {
+  color: var(--ink);
+  border-left-color: var(--ink);
+}
+
+.prose {
+  max-width: 760px;
+}
+
+.kicker {
+  margin: 0 0 18px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--thread);
+}
+
+.prose h1 {
+  font-size: clamp(42px, 6.4vw, 84px);
+  line-height: 0.95;
+}
+
+.links-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 24px;
+  margin-top: 34px;
+}
+
+.prose h2 {
+  margin: clamp(56px, 7vw, 88px) 0 0;
+  padding-top: 22px;
+  border-top: 1px solid var(--ink);
+  font-size: clamp(24px, 2.6vw, 32px);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-weight: 500;
+  scroll-margin-top: 24px;
+}
+
+.prose h3 {
+  margin: 36px 0 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.prose p,
+.prose ul {
+  margin: 16px 0 0;
+  color: #2b2a2e;
+}
+
+.prose ul {
+  padding-left: 1.2em;
+}
+
+.prose li + li {
+  margin-top: 8px;
+}
+
+.prose a:not(.button) {
+  text-underline-offset: 3px;
+}
+
+.prose a:not(.button):hover {
+  color: var(--thread);
+}
+
+.table {
+  margin-top: 20px;
+  overflow-x: auto;
+}
+
+.table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15.5px;
+}
+
+.table th {
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--soft);
+  padding: 0 16px 10px 0;
+  border-bottom: 1px solid var(--ink);
+}
+
+.table td {
+  padding: 11px 16px 11px 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+
+.table td:first-child {
+  white-space: nowrap;
+}
+
+.layers {
+  margin: 24px 0 0;
+}
+
+.layer {
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  padding: 14px;
+}
+
+.layer .layer {
+  margin-top: 12px;
+  border-style: dashed;
+}
+
+.layer-name {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tiles span {
+  padding: 6px 10px;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.tiles .yours {
+  background: none;
+  color: var(--thread);
+  box-shadow: inset 0 0 0 1px var(--thread);
+}
+
+.layers figcaption {
+  margin-top: 12px;
+  font-size: 15px;
+  color: var(--soft);
+}
+
+.link-list {
+  list-style: none;
+  padding: 0 !important;
+}
+
+.link-list li {
+  display: grid;
+  grid-template-columns: 14em 1fr;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.link-list li + li {
+  margin-top: 0;
+}
+
+.link-list a {
+  font-family: var(--mono);
+  font-size: 13.5px;
+}
+
+.link-list span {
+  color: var(--soft);
+  font-size: 16px;
+}
+
 @media (max-width: 820px) {
   .three,
-  .last {
+  .last,
+  .parts,
+  .docs {
     grid-template-columns: 1fr;
+  }
+
+  .docs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .toc {
+    display: none;
+  }
+
+  .link-list li {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
 
   .three {
@@ -404,7 +723,11 @@ a:focus-visible {
   }
 
   .top nav {
-    gap: 18px;
+    gap: 16px;
+  }
+
+  .top nav .wide {
+    display: none;
   }
 
   .weft {
@@ -419,4 +742,10 @@ a:focus-visible {
   .button {
     transition: none;
   }
+}
+
+.foot-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
 }
