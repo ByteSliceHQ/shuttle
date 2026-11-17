@@ -10,7 +10,7 @@ test('the committed migrations create the schema the auth configuration expects'
   const database = new Database(':memory:')
 
   for (const file of readdirSync(directory).toSorted()) {
-    database.exec(readFileSync(join(directory, file), 'utf8'))
+    database.run(readFileSync(join(directory, file), 'utf8'))
   }
 
   // Anything left to create means the configuration changed without a new migration. Run

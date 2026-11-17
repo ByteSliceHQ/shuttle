@@ -272,7 +272,7 @@ export function createReasoningLlm(options: ReasoningLlmOptions): LlmAdapter {
             })
 
         try {
-          for await (const part of result.fullStream) {
+          for await (const part of result.stream) {
             guard.touch()
             await handlePart(part)
           }
@@ -285,10 +285,10 @@ export function createReasoningLlm(options: ReasoningLlmOptions): LlmAdapter {
         guard.done()
 
         try {
-          const [text, rawToolCalls, reasoningText, usage] = await Promise.all([
+          const [text, rawToolCalls, { reasoningText }, usage] = await Promise.all([
             result.text,
             result.toolCalls,
-            result.reasoningText,
+            result.finalStep,
             result.usage,
           ])
 
@@ -339,8 +339,10 @@ export function createReasoningLlm(options: ReasoningLlmOptions): LlmAdapter {
             abortSignal: args.signal,
           })
 
-      if (!thinking.trim() && result.reasoningText?.trim()) {
-        await noteThinking(result.reasoningText)
+      const { reasoningText } = result.finalStep
+
+      if (!thinking.trim() && reasoningText?.trim()) {
+        await noteThinking(reasoningText)
       }
 
       finishThinking()

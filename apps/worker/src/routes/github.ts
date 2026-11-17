@@ -1,7 +1,7 @@
 import { ensurePullsQuietly, ensureWorkspaceQuietly } from '../bootstrap'
 import { pullsRunId, workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
-import { getInstallation, listInstallationRepos, signState, verifyState } from '../github/app'
+import { getInstallation, signState, verifyState } from '../github/app'
 import {
   exchangeGithubCode,
   githubAuthorizeUrl,
@@ -46,6 +46,10 @@ export async function handleGithubPublicRoutes(
   return null
 }
 
+/**
+ * Sends a signed-in person to GitHub to connect it. This answers with a redirect, so it is not
+ * on the API contract; the JSON routes are in `api/github.ts`.
+ */
 export async function handleGithubRoutes(
   request: Request,
   env: ShuttleEnv,
@@ -55,10 +59,6 @@ export async function handleGithubRoutes(
 
   if (request.method === 'GET' && url.pathname === '/github/install') {
     return startInstall(env, actor.orgId, url.searchParams.has('add'))
-  }
-
-  if (request.method === 'GET' && url.pathname === '/github/repos') {
-    return searchRepos(url, env, actor.orgId)
   }
 
   return null
@@ -398,69 +398,4 @@ export async function finishSetup(url: URL, env: ShuttleEnv): Promise<Response> 
     console.error('github setup failed', error)
     return Response.redirect(`${webUrl}/?github=error`, 302)
   }
-}
-
-async function searchRepos(url: URL, env: ShuttleEnv, orgId: string): Promise<Response> {
-  await ensureWorkspaceQuietly(env, orgId)
-
-  const query = (url.searchParams.get('q') ?? '').trim().toLowerCase()
-  const tree = await readWorkspaceTree(env, orgId)
-
-  const installationIds = Object.values(tree.installations).map(
-    (installation) => installation.installationId,
-  )
-
-  if (installationIds.length === 0) {
-    return Response.json({ repos: [], note: 'No GitHub App installations connected.' })
-  }
-
-  const repos = (
-    await Promise.all(installationIds.map((id) => listInstallationRepos(env, id)))
-  ).flat()
-
-  const filtered = query
-    ? repos.filter(
-        (repo) =>
-          repo.fullName.toLowerCase().includes(query) ||
-          repo.name.toLowerCase().includes(query) ||
-          repo.owner.toLowerCase().includes(query),
-      )
-    : repos
-
-  return Response.json({
-    repos: filtered.slice(0, 50).map((repo) => ({
-      installationId: repo.installationId,
-      owner: repo.owner,
-      name: repo.name,
-      fullName: repo.fullName,
-      defaultBranch: repo.defaultBranch,
-      private: repo.private,
-    })),
-  })
-}
-
-async function readWorkspaceTree(
-  env: ShuttleEnv,
-  orgId: string,
-): Promise<{
-  installations: Record<string, { installationId: number }>
-}> {
-  const runId = workspaceRunId(env, orgId)
-  const stub = loomsStub(env.LOOMS_RUN, runId)
-
-  const request = new Request(`https://shuttle.internal/runs/${runId}/projections/workspaceTree`, {
-    method: 'GET',
-  })
-
-  const response = await stub.fetch(request)
-
-  if (!response.ok) {
-    return { installations: {} }
-  }
-
-  const body = (await response.json()) as {
-    value?: { installations?: Record<string, { installationId: number }> }
-  }
-
-  return { installations: body.value?.installations ?? {} }
 }

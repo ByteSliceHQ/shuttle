@@ -53,7 +53,7 @@ export function fakeD1(sqlite = new Database(':memory:')): D1Database {
       return results
     },
     exec: async (sql: string) => {
-      sqlite.exec(sql)
+      sqlite.run(sql)
       return { count: 1, duration: 0 }
     },
   }
