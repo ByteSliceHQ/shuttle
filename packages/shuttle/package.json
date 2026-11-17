@@ -1,0 +1,102 @@
+{
+  "name": "@swirls/shuttle",
+  "version": "0.0.0",
+  "description": "Shuttle as parts: React components for a development environment built around coding agents, with the API contract and run events they speak",
+  "homepage": "https://github.com/ByteSliceHQ/shuttle#readme",
+  "bugs": {
+    "url": "https://github.com/ByteSliceHQ/shuttle/issues"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ByteSliceHQ/shuttle.git",
+    "directory": "packages/shuttle"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "exports": {
+    "./api": {
+      "types": "./dist/api/index.d.ts",
+      "import": "./dist/api/index.js"
+    },
+    "./core/pulls": {
+      "types": "./dist/core/pulls.d.ts",
+      "import": "./dist/core/pulls.js"
+    },
+    "./core/workspace": {
+      "types": "./dist/core/workspace.d.ts",
+      "import": "./dist/core/workspace.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js"
+    },
+    "./react/ui": {
+      "types": "./dist/react/ui.d.ts",
+      "import": "./dist/react/ui.js"
+    },
+    "./react/theme.css": "./dist/react/theme.css"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "bun run scripts/assemble.ts"
+  },
+  "dependencies": {
+    "@orpc/client": "1.16.2",
+    "@orpc/contract": "1.16.2",
+    "@orpc/openapi-client": "1.16.2",
+    "@orpc/tanstack-query": "1.16.2",
+    "@pierre/diffs": "1.6.4",
+    "@swirls/looms": "^0.17.0",
+    "@tanstack/react-virtual": "^3.14.26",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-webgl": "^0.19.0",
+    "@xterm/xterm": "^6.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "effect": "4.0.0-rc.112",
+    "lucide-react": "^1.70.0",
+    "radix-ui": "^1.8.1",
+    "react-markdown": "^10.1.0",
+    "react-resizable-panels": "^4.21.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.7.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@shuttle/api": "workspace:*",
+    "@shuttle/core": "workspace:*",
+    "@shuttle/react": "workspace:*"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "^5.107.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^4.3.3"
+  },
+  "peerDependenciesMeta": {
+    "@tanstack/react-query": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "tailwindcss": {
+      "optional": true
+    }
+  }
+}

@@ -9,11 +9,12 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "build": "bun x tsc -p tsconfig.build.json",
     "check-types": "bun x tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@orpc/contract": "1.16.2",
-    "zod": "^4.5.4"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "typescript": "7.0.2"

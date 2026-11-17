@@ -49,6 +49,8 @@ apps/desktop             Electron app: the session UI plus a sandbox on this mac
 apps/runner              Keeps that local sandbox and connects it to Shuttle
 packages/react           The UI as React parts (@shuttle/react), which apps/web assembles
 packages/core            The runs' event catalogues, shared by the Worker and the UI
+packages/api             The Worker's HTTP API as a zod contract
+packages/shuttle         @swirls/shuttle, the one published package, put together from api, core and react
 examples/custom-ade      A development environment put together from the parts, in one file
 packages/runner-protocol What the worker and a runner say to each other
 ```
