@@ -6,9 +6,9 @@ import {
   attentionChanges,
   attentionCount,
   attentionMessage,
-} from '@/features/sessions/attention'
-import { useWorkspace } from '@/features/workspace/workspace-context'
-import { useTenant } from '@/shuttle'
+  useTenant,
+  useWorkspace,
+} from '@shuttle/react'
 
 import { desktop } from './desktop'
 

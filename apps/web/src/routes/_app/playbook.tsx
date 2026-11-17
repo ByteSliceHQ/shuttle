@@ -1,8 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 
-import { PlaybookPage } from '@/features/playbook/playbook-page'
-import { playbookQuery } from '@/features/playbook/playbook-query'
 import { host } from '@/host'
+import { PlaybookPage, playbookQuery } from '@shuttle/react'
 
 export const Route = createFileRoute('/_app/playbook')({
   loader: ({ context: { queryClient } }) =>

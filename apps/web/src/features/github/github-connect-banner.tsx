@@ -2,8 +2,7 @@ import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import { Check, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/cn'
+import { Button, cn } from '@shuttle/react/ui'
 
 /** The signed-in layout, which is where the `github` search param is declared and checked. */
 const appRoute = getRouteApi('/_app')

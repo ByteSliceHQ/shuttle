@@ -1,16 +1,15 @@
 import { Check, ChevronsUpDown, Copy, LogOut, Plus, UserPlus } from 'lucide-react'
 import { useState, type SubmitEvent } from 'react'
 
-import { Button } from '@/components/ui/button'
+import { forgetEventCache, useTenant } from '@shuttle/react'
 import {
+  Button,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -19,10 +18,8 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { Input } from '@/components/ui/input'
-import { forgetEventCache } from '@/features/events/event-cache'
-import { useTenant } from '@/shuttle'
+  Input,
+} from '@shuttle/react/ui'
 
 import { authClient } from './auth-client'
 import { invitationLink, rememberTenant } from './tenant'

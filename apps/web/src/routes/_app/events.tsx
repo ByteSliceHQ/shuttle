@@ -11,29 +11,34 @@ import {
 } from 'lucide-react'
 import { useCallback, useDeferredValue, useMemo, useState } from 'react'
 
-import { FollowList } from '@/components/follow-list'
-import { Button } from '@/components/ui/button'
 import {
+  eventFamilies,
+  EventInspector,
+  eventMeta,
+  EventRow,
+  type EventRowColumns,
+  familyColor,
+  type GlobalEventFrame,
+  type GlobalRunKind,
+  latestEventsQuery,
+  useGlobalEvents,
+  useWorkspace,
+} from '@shuttle/react'
+import {
+  Button,
+  cn,
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { Input } from '@/components/ui/input'
-import { PanelHeader, PanelTitle } from '@/components/ui/panel'
-import { eventFamilies, eventMeta, familyColor } from '@/features/events/event-catalog'
-import { EventInspector } from '@/features/events/event-inspector'
-import { EventRow, type EventRowColumns } from '@/features/events/event-row'
-import {
-  latestEventsQuery,
-  useGlobalEvents,
-  type GlobalEventFrame,
-  type GlobalRunKind,
-} from '@/features/events/global-events'
-import { useWorkspace } from '@/features/workspace/workspace-context'
-import { cn, shortId } from '@/lib/cn'
-import { useWidthBucket } from '@/lib/use-width-bucket'
+  FollowList,
+  Input,
+  PanelHeader,
+  PanelTitle,
+  shortId,
+  useWidthBucket,
+} from '@shuttle/react/ui'
 
 export const Route = createFileRoute('/_app/events')({
   // The log opens on the most recent events, read before the page shows. The socket that

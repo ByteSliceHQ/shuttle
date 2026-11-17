@@ -1,7 +1,7 @@
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
 import { useCallback, useMemo } from 'react'
 
-import type { ShuttleDestination, ShuttleLinkProps, ShuttleRouter } from '@/shuttle'
+import { type ShuttleDestination, type ShuttleLinkProps, type ShuttleRouter } from '@shuttle/react'
 
 /**
  * Where each of Shuttle's destinations is in this app. Written out per page so the router

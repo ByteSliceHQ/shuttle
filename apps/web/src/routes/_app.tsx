@@ -12,19 +12,19 @@ import { z } from 'zod'
 
 import { api } from '@/api/client'
 import { RouteError } from '@/components/route-error'
-import { Button } from '@/components/ui/button'
+import { AccountMenu } from '@/features/auth/account-menu'
 import { authClient } from '@/features/auth/auth-client'
 import { acceptInvitation, InvitationError } from '@/features/auth/invitation'
 import { listOrgMembers, orgMembersQuery } from '@/features/auth/org-people'
 import { tenantQuery } from '@/features/auth/tenant'
-import { connectionsQuery } from '@/features/connections/queries'
+import { DesktopAttention } from '@/features/desktop/desktop-attention'
+import { LocalSandboxStatus } from '@/features/desktop/local-sandbox-status'
 import { GithubConnectBanner } from '@/features/github/github-connect-banner'
-import { AppSidebarShell } from '@/features/workspace/app-sidebar'
 import { host } from '@/host'
 import { whenRunSynced } from '@/lib/run-stores'
-import { Shuttle } from '@/parts'
-import type { ShuttleIdentity } from '@/shuttle'
 import { useShuttleRouter } from '@/shuttle-router'
+import { connectionsQuery, Shuttle, type ShuttleIdentity } from '@shuttle/react'
+import { Button } from '@shuttle/react/ui'
 
 const AppSearch = z.object({
   /** An invitation link: `/?invite=<id>`. Accepted on the way in. */
@@ -122,14 +122,18 @@ function AppLayout() {
 
   return (
     <Shuttle.Provider host={host} router={router} identity={identity}>
-      <AppSidebarShell>
+      <Shuttle.Shell
+        status={<LocalSandboxStatus />}
+        account={<AccountMenu />}
+        background={<DesktopAttention />}
+      >
         <div className="flex h-full min-h-0 flex-col">
           <GithubConnectBanner />
           <div className="min-h-0 flex-1">
             <Outlet />
           </div>
         </div>
-      </AppSidebarShell>
+      </Shuttle.Shell>
     </Shuttle.Provider>
   )
 }

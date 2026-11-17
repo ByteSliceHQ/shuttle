@@ -3,11 +3,9 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useCallback } from 'react'
 import { z } from 'zod'
 
-import { connectionsQuery } from '@/features/connections/queries'
-import { sessionQueries } from '@/features/sessions/session-queries'
 import { host } from '@/host'
 import { whenRunSynced } from '@/lib/run-stores'
-import { Shuttle } from '@/parts'
+import { connectionsQuery, sessionQueries, Shuttle } from '@shuttle/react'
 
 const SessionSearch = z.object({
   /** Agent thread to inspect on open, e.g. the one that opened a linked PR. */

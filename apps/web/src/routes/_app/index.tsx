@@ -10,29 +10,33 @@ import {
 } from 'lucide-react'
 import { useMemo, useState, type KeyboardEvent } from 'react'
 
-import { Button } from '@/components/ui/button'
-import { EmptyState, Kbd } from '@/components/ui/panel'
+import { host } from '@/host'
 import {
+  createWorkspaceFolder,
+  HarnessSwitcher,
+  orderedFolders,
+  preferredFolderId,
+  rememberLastFolder,
+  rememberSession,
+  repoCountLabel,
+  SignInGate,
+  startWorkspaceSession,
+  useAgentGate,
+  useDefaultHarness,
+  useStartPlace,
+  useWorkspace,
+} from '@shuttle/react'
+import {
+  Button,
+  EmptyState,
+  Kbd,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
-import { SignInGate, useAgentGate, useStartPlace } from '@/features/connections/agent-sign-in'
-import { HarnessSwitcher, useDefaultHarness } from '@/features/sessions/harness-switcher'
-import { rememberSession } from '@/features/sessions/recent-sessions'
-import {
-  createWorkspaceFolder,
-  orderedFolders,
-  preferredFolderId,
-  rememberLastFolder,
-  repoCountLabel,
-  startWorkspaceSession,
-} from '@/features/workspace/workspace'
-import { useWorkspace } from '@/features/workspace/workspace-context'
-import { host } from '@/host'
+  Textarea,
+} from '@shuttle/react/ui'
 
 export const Route = createFileRoute('/_app/')({
   component: HomePage,

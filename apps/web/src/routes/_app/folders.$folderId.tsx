@@ -5,34 +5,44 @@ import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 
 import { api } from '@/api/client'
 import { NotFound } from '@/components/not-found'
-import { Button } from '@/components/ui/button'
-import { EmptyState, Kbd } from '@/components/ui/panel'
-import { Textarea } from '@/components/ui/textarea'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { SignInGate, useAgentGate, useStartPlace } from '@/features/connections/agent-sign-in'
-import { PullInboxPanel, PullInboxSheetButton, usePullInbox } from '@/features/pulls/pull-inbox'
-import { HarnessSwitcher, useDefaultHarness } from '@/features/sessions/harness-switcher'
-import { rememberSession } from '@/features/sessions/recent-sessions'
-import { isSessionUnread, useSeenSessions } from '@/features/sessions/seen-sessions'
+import { host } from '@/host'
 import {
+  ActivityDot,
+  HarnessSwitcher,
+  isSessionUnread,
+  LinkRepoDialog,
+  PullInboxPanel,
+  PullInboxSheetButton,
+  rememberLastFolder,
+  rememberSession,
+  RepoChip,
   resolveSessionIndicator,
   sessionIndicatorLabel,
-} from '@/features/sessions/session-activity'
-import { ActivityDot } from '@/features/workspace/activity-dot'
-import { LinkRepoDialog } from '@/features/workspace/link-repo-dialog'
-import { RepoChip } from '@/features/workspace/repo-chip'
-import {
-  rememberLastFolder,
   sessionsForFolder,
+  SignInGate,
   startWorkspaceSession,
+  useAgentGate,
+  useDefaultHarness,
+  usePullInbox,
+  useSeenSessions,
+  useStartPlace,
+  useWorkspace,
   type WorkspaceFolder,
   type WorkspaceTree,
-} from '@/features/workspace/workspace'
-import { useWorkspace } from '@/features/workspace/workspace-context'
-import { host } from '@/host'
-import { compactRelativeTime, fullDateTime } from '@/lib/time'
-import { useMediaQuery } from '@/lib/use-media-query'
-import { useNow } from '@/lib/use-now'
+} from '@shuttle/react'
+import {
+  Button,
+  compactRelativeTime,
+  EmptyState,
+  fullDateTime,
+  Kbd,
+  Textarea,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  useMediaQuery,
+  useNow,
+} from '@shuttle/react/ui'
 
 export const Route = createFileRoute('/_app/folders/$folderId')({
   component: FolderPage,

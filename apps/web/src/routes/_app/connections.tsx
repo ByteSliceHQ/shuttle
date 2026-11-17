@@ -3,11 +3,10 @@ import { createFileRoute } from '@tanstack/react-router'
 import { Check } from 'lucide-react'
 
 import { api } from '@/api/client'
-import { ConnectionsPanel } from '@/features/connections/connections-panel'
-import { connectionsQuery } from '@/features/connections/queries'
 import { host } from '@/host'
-import { cn } from '@/lib/cn'
 import type { Connection, HarnessId } from '@shuttle/api'
+import { ConnectionsPanel, connectionsQuery } from '@shuttle/react'
+import { cn } from '@shuttle/react/ui'
 
 export const Route = createFileRoute('/_app/connections')({
   loader: ({ context }) =>

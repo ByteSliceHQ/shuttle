@@ -1,4 +1,4 @@
-import { peopleQuery, type ShuttlePerson } from '@/shuttle'
+import { peopleQuery, type ShuttlePerson } from '@shuttle/react'
 
 import { authClient } from './auth-client'
 

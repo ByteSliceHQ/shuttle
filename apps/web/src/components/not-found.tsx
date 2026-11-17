@@ -2,8 +2,7 @@ import { Link, useCanGoBack, useLocation, useRouter } from '@tanstack/react-rout
 import { ArrowLeft } from 'lucide-react'
 import type { ReactNode } from 'react'
 
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/cn'
+import { Button, cn } from '@shuttle/react/ui'
 
 const PATH_MAX = 60
 

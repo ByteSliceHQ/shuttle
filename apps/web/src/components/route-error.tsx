@@ -2,8 +2,7 @@ import { useQueryErrorResetBoundary } from '@tanstack/react-query'
 import { useRouter, type ErrorComponentProps } from '@tanstack/react-router'
 import { useEffect } from 'react'
 
-import { Button } from '@/components/ui/button'
-import { errorMessage } from '@/lib/cn'
+import { Button, errorMessage } from '@shuttle/react/ui'
 
 /** Shown in a page's place when one of its loaders or queries fails. */
 export function RouteError({ error, reset }: ErrorComponentProps) {

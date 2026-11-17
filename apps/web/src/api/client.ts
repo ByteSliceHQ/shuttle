@@ -1,6 +1,6 @@
 import { host } from '@/host'
 
-export { isSignedOut, statusOf, type CallContext } from '@/shuttle'
+export { isSignedOut, statusOf, type CallContext } from '@shuttle/react'
 
 /**
  * The Worker's API for the app's own code: route loaders, sign-in, the pages. Components under
