@@ -1,5 +1,6 @@
 import { cn } from '@/lib/cn'
-import { statusClass, statusDotClass, statusLabel, statusTone } from '@/lib/status'
+
+import { statusClass, statusDotClass, statusLabel, statusTone } from './status'
 
 /** Thread and header indicator; only genuinely executing work animates. */
 export function StatusDot({ status, className }: { status: string; className?: string }) {

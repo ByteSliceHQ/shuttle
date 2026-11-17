@@ -10,9 +10,8 @@ import {
   type UIEvent,
 } from 'react'
 
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/cn'
-
-import { ScrollArea } from './ui/scroll-area'
 
 const FOLLOW_THRESHOLD = 24
 const USER_INPUT_WINDOW = 400
@@ -73,6 +72,11 @@ export function FollowList<T>({
     overscan,
     paddingStart,
     paddingEnd,
+    // A list that follows its end starts there. Without this the first frame shows the top and
+    // the next one jumps to the bottom, which reads as a flash on every page that opens on a
+    // long list. Row heights are estimates at this point; following settles the exact spot.
+    initialOffset: () =>
+      follow && items.length > 0 ? paddingStart + items.length * estimateSize + paddingEnd : 0,
     getItemKey: (index) => {
       const item = items[index]
       return item === undefined ? index : getKey(item, index)

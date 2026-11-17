@@ -1,12 +1,33 @@
+import type { QueryClient } from '@tanstack/react-query'
 import { createRouter } from '@tanstack/react-router'
 
-import { desktop } from './lib/desktop'
-import { reportTiming } from './lib/timing'
+import { queryClient } from '@/api/query-client'
+import { RouteError } from '@/components/route-error'
+import { RoutePending } from '@/components/route-pending'
+import { desktop } from '@/features/desktop/desktop'
+import { reportTiming } from '@/lib/timing'
+
 import { routeTree } from './routeTree.gen'
+
+/** What every route's `beforeLoad` and `loader` are given. */
+export interface RouterContext {
+  readonly queryClient: QueryClient
+}
 
 const router = createRouter({
   routeTree,
+  context: { queryClient } satisfies RouterContext,
+  // Pointing at a link runs the page's loaders, so its data is usually there before the click.
   defaultPreload: 'intent',
+  // The query cache decides what is fresh. The router asks every time and never keeps its own copy.
+  defaultPreloadStaleTime: 0,
+  // A page change waits for its loaders with the page being left still on screen (see
+  // `NavigationProgress`). Only a wait this long swaps in the pending page.
+  defaultPendingMs: 1000,
+  defaultPendingMinMs: 300,
+  defaultPendingComponent: RoutePending,
+  defaultErrorComponent: RouteError,
+  scrollRestoration: true,
 })
 
 // The desktop app sends the page places: a menu item, a notification, a `shuttle://` link.

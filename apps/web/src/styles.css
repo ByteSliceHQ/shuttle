@@ -475,3 +475,35 @@
     display: inline;
   }
 }
+
+/*
+ * The global page-change indicator: see `components/navigation-progress.tsx`. NProgress adds
+ * `#nprogress` to the body and moves `.bar` across it. Unlayered, so it sits above the app's
+ * fixed chrome (the sidebar, dialogs' overlays) whatever layer those are in.
+ */
+#nprogress {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 99999;
+  pointer-events: none;
+}
+
+#nprogress .bar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--color-brand);
+}
+
+/* The glow at the bar's leading edge, which is what makes slow progress read as movement. */
+#nprogress .peg {
+  position: absolute;
+  right: 0;
+  width: 100px;
+  height: 100%;
+  opacity: 1;
+  box-shadow:
+    0 0 10px var(--color-brand),
+    0 0 5px var(--color-brand);
+  transform: rotate(3deg) translate(0, -4px);
+}
