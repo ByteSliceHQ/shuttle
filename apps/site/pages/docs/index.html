@@ -108,7 +108,10 @@
             <tbody>
               <tr>
                 <td><code>@swirls/shuttle/react</code></td>
-                <td>The <code>Shuttle</code> parts, <code>useSession()</code> and <code>createShuttleHost</code></td>
+                <td>
+                  The <code>Shuttle</code> parts, <code>useSession()</code> and
+                  <code>createShuttleHost</code>
+                </td>
               </tr>
               <tr>
                 <td><code>@swirls/shuttle/react/ui</code></td>
@@ -139,10 +142,13 @@
           There are three layers. A <strong>host</strong> says how to reach the backend. The
           <strong>provider</strong> gives every part the host, your router and who is signed in. A
           <strong>session</strong> follows one session's run, folds its events once, and hands the
-          result to every part inside it. The parts take no session props of their own, so you
-          can arrange them however you like.
+          result to every part inside it. The parts take no session props of their own, so you can
+          arrange them however you like.
         </p>
-        <figure class="layers" aria-label="The layers: a provider holds a session, which holds the parts">
+        <figure
+          class="layers"
+          aria-label="The layers: a provider holds a session, which holds the parts"
+        >
           <div class="layer">
             <span class="layer-name">&lt;Shuttle.Provider host router identity&gt;</span>
             <div class="layer">
@@ -167,10 +173,10 @@
 
         <h2 id="first">A first ADE</h2>
         <p>
-          A conversation on the left, artifacts on the right, and no sidebar. This is all it
-          takes once you have a backend to point at.
+          A conversation on the left, artifacts on the right, and no sidebar. This is all it takes
+          once you have a backend to point at.
         </p>
-<pre><code class="language-tsx">import { createShuttleHost, Shuttle } from '@swirls/shuttle/react'
+        <pre><code class="language-tsx">import { createShuttleHost, Shuttle } from '@swirls/shuttle/react'
 
 const host = createShuttleHost({ baseUrl: 'https://shuttle.example.com' })
 
@@ -213,7 +219,10 @@ export function MyADE({ sessionId }: { sessionId: string }) {
             <tbody>
               <tr>
                 <td><code>Shuttle.Provider</code></td>
-                <td>Gives the parts the host, the router and who is signed in. Everything goes inside it.</td>
+                <td>
+                  Gives the parts the host, the router and who is signed in. Everything goes inside
+                  it.
+                </td>
               </tr>
               <tr>
                 <td><code>Shuttle.Session</code></td>
@@ -225,7 +234,9 @@ export function MyADE({ sessionId }: { sessionId: string }) {
               </tr>
               <tr>
                 <td><code>Shuttle.Conversation</code></td>
-                <td>The conversation with the agents, with turns streaming in as they are written.</td>
+                <td>
+                  The conversation with the agents, with turns streaming in as they are written.
+                </td>
               </tr>
               <tr>
                 <td><code>Shuttle.Composer</code></td>
@@ -237,7 +248,9 @@ export function MyADE({ sessionId }: { sessionId: string }) {
               </tr>
               <tr>
                 <td><code>Shuttle.Artifacts</code></td>
-                <td>The tabbed pane: files, changes, previews, terminals, and any kinds you add.</td>
+                <td>
+                  The tabbed pane: files, changes, previews, terminals, and any kinds you add.
+                </td>
               </tr>
               <tr>
                 <td><code>Shuttle.Events</code></td>
@@ -249,11 +262,16 @@ export function MyADE({ sessionId }: { sessionId: string }) {
               </tr>
               <tr>
                 <td><code>Shuttle.SessionLayout</code></td>
-                <td>Shuttle's own arrangement of all of the above, for when you want the whole thing.</td>
+                <td>
+                  Shuttle's own arrangement of all of the above, for when you want the whole thing.
+                </td>
               </tr>
               <tr>
                 <td><code>Shuttle.Shell</code></td>
-                <td>The frame with folders and sessions down the side. Leave it out if your app has its own navigation.</td>
+                <td>
+                  The frame with folders and sessions down the side. Leave it out if your app has
+                  its own navigation.
+                </td>
               </tr>
             </tbody>
           </table>
@@ -269,7 +287,7 @@ export function MyADE({ sessionId }: { sessionId: string }) {
           conversation, the agents and the raw events. A component of yours that calls it can sit
           anywhere inside <code>&lt;Shuttle.Session&gt;</code>.
         </p>
-<pre><code class="language-tsx">import { useSession } from '@swirls/shuttle/react'
+        <pre><code class="language-tsx">import { useSession } from '@swirls/shuttle/react'
 
 function StatusStrip() {
   const { status, identities, events } = useSession()
@@ -283,10 +301,10 @@ function StatusStrip() {
 
         <h2 id="artifacts">Your own kinds of tab</h2>
         <p>
-          The artifacts pane knows only the kinds of tab it is given. Add yours to Shuttle's and
-          it shows up in the pane's menu and in the command palette like any other.
+          The artifacts pane knows only the kinds of tab it is given. Add yours to Shuttle's and it
+          shows up in the pane's menu and in the command palette like any other.
         </p>
-<pre><code class="language-tsx">import { defaultArtifactTypes, type ArtifactType } from '@swirls/shuttle/react'
+        <pre><code class="language-tsx">import { defaultArtifactTypes, type ArtifactType } from '@swirls/shuttle/react'
 
 const designs: ArtifactType = {
   kind: 'acme:designs',
@@ -323,11 +341,11 @@ const designs: ArtifactType = {
         <h3>The host</h3>
         <p>
           <code>createShuttleHost</code> is called once, outside React, so your route loaders and
-          the parts share one client and one cache. <code>baseUrl</code> points at the backend
-          (left out, it is the page's own origin), and <code>fetch</code> lets you add your own
+          the parts share one client and one cache. <code>baseUrl</code> points at the backend (left
+          out, it is the page's own origin), and <code>fetch</code> lets you add your own
           credentials to every request.
         </p>
-<pre><code class="language-tsx">const host = createShuttleHost({
+        <pre><code class="language-tsx">const host = createShuttleHost({
   baseUrl: 'https://shuttle.example.com',
   fetch: (input, init) =&gt; fetch(input, { ...init, credentials: 'include' }),
 })</code></pre>
@@ -338,7 +356,7 @@ const designs: ArtifactType = {
           <code>{ page: 'home' }</code> and so on. Your router says where each one is in your app.
           Here is the whole adapter for an app with a single page:
         </p>
-<pre><code class="language-tsx">const router: ShuttleRouter = {
+        <pre><code class="language-tsx">const router: ShuttleRouter = {
   Link: ({ to, ...rest }) =&gt; (
     &lt;a {...rest} href={to.page === 'session' ? `?session=${to.sessionId}` : '#'} /&gt;
   ),
@@ -351,7 +369,7 @@ const designs: ArtifactType = {
           <code>identity</code> is the signed-in person and their organization, as the backend
           returns them, and a way to list the people in it for names and sharing.
         </p>
-<pre><code class="language-tsx">const tenant = useQuery({ queryKey: ['me'], queryFn: () =&gt; host.client.tenant.me() }).data
+        <pre><code class="language-tsx">const tenant = useQuery({ queryKey: ['me'], queryFn: () =&gt; host.client.tenant.me() }).data
 const identity = tenant ? { tenant, listPeople: async () =&gt; [] } : null</code></pre>
 
         <h2 id="styles">Styles</h2>
@@ -359,7 +377,7 @@ const identity = tenant ? { tenant, listPeople: async () =&gt; [] } : null</code
           The parts are styled with Tailwind CSS 4. Import the theme after Tailwind and it tells
           Tailwind to read the package's files, so there is nothing to add to your config.
         </p>
-<pre><code class="language-css">@import 'tailwindcss';
+        <pre><code class="language-css">@import 'tailwindcss';
 @import '@swirls/shuttle/react/theme.css';</code></pre>
 
         <h2 id="needs">What it needs</h2>
