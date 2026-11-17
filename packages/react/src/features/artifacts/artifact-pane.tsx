@@ -10,6 +10,7 @@ import type { SessionEvent } from '../events/event-catalog'
 import type { AgentIdentity } from '../sessions/agents'
 import type { SessionMedia } from '../sessions/media'
 import type { SessionTabsController } from '../sessions/use-session-tabs'
+import type { ArtifactTab } from '../workspace/workspace'
 import {
   artifactTypeFor,
   defaultArtifactTypes,
@@ -154,12 +155,35 @@ export function ArtifactPane({
                   media,
                   identities,
                   retarget: (title, target) => void retargetTab(tab.tabId, title, target),
-                })}
+                }) ?? (
+                  <UnknownArtifact tab={tab} known={Boolean(artifactTypeFor(types, tab.kind))} />
+                )}
               </div>
             )
           })}
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Stands in for a tab no registered type draws. A tab is kept with the session, so one opened
+ * where a host's own artifact type is installed is still there where it is not.
+ */
+function UnknownArtifact({ tab, known }: { tab: ArtifactTab; known: boolean }) {
+  // A type that is registered and draws nothing has said so on purpose.
+  if (known) {
+    return null
+  }
+
+  return (
+    <EmptyState icon={<LayoutPanelTop />} title="This tab can't be shown here">
+      <span className="block">
+        It was opened as <code className="font-mono">{tab.kind}</code>, which is not something this
+        app knows how to show. It is still part of the session, and shows wherever that kind of tab
+        is supported.
+      </span>
+    </EmptyState>
   )
 }
