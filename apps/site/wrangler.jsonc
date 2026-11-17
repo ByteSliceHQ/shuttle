@@ -10,7 +10,7 @@
   // Desktop builds and update metadata, published by .github/workflows/deploy.yml.
   "r2_buckets": [{ "binding": "RELEASES", "bucket_name": "shuttle-releases" }],
   "vars": {
-    // Fallback for /download/mac before the first update manifest is published.
+    // Fallback for /download/mac before the first manual download pointer is published.
     "LATEST_MAC": "Shuttle-0.0.1-arm64.dmg",
   },
 }

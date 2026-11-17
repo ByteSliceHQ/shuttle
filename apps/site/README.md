@@ -9,13 +9,17 @@ bun run deploy   # to shuttle.codes
 
 ## Desktop releases
 
-The [production workflow](../../.github/workflows/deploy.yml) uploads signed desktop builds and
-`latest-mac.yml` into `shuttle-releases` after each deployment. See
+The [production workflow](../../.github/workflows/deploy.yml) uploads desktop builds and
+`latest-mac.json` into `shuttle-releases` after each deployment. See
 [deployment setup](../../docs/deployments.md) for credentials and configuration.
 
-The app updater reads `/download/latest-mac.yml`. This mutable manifest is served without caching;
+Ad hoc builds are available for manual download without Apple credentials. Signing is optional
+and explicitly enabled with `SHUTTLE_SIGN_DESKTOP=true` once Apple credentials are configured.
+Only signed releases publish `latest-mac.yml`; ad hoc builds cannot replace that feed.
+
+The signed app updater reads `/download/latest-mac.yml`. This mutable manifest is served without caching;
 versioned DMG, ZIP, and blockmap downloads can be cached. `/download/mac` resolves the DMG in the
-same manifest, falling back to `LATEST_MAC` before the first automated release. Keep old versioned
+manual download pointer `latest-mac.json`, falling back to `LATEST_MAC` before the first automated release. Keep old versioned
 files: an installed app may need a previous blockmap for differential downloads.
 
 For a manual release, upload the versioned binaries first and the manifest last. Use the R2 S3

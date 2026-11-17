@@ -3,11 +3,12 @@
 `.github/workflows/deploy.yml` runs on pushes to `main` (including merged pull requests). It can
 also be rerun manually from `main`. It verifies the repository, builds the hosted session UI,
 applies pending auth D1 migrations, and deploys the app Worker and `shuttle.codes` download Worker.
-After that succeeds, an Apple Silicon macOS job packages, signs, and notarizes a desktop release.
-A final job uploads the release binaries to R2, then publishes `latest-mac.yml` last.
+After that succeeds, an Apple Silicon macOS job packages a desktop release. By default this is
+an ad hoc build for manual installation, without Apple Developer credentials. A final job uploads
+the binaries to R2, then publishes the manual download pointer `latest-mac.json` last.
 
 Hosted UI changes reach the desktop's next page load. Changes to Electron or the bundled runner
-reach installed apps through the update prompt. A Cloudflare deployment alone cannot replace an
+are available as new downloads; signed builds can also install them through the update prompt. A Cloudflare deployment alone cannot replace an
 installed desktop binary.
 
 ## GitHub configuration
@@ -19,12 +20,19 @@ Cloudflare; it does not copy local `.dev.vars` files or create infrastructure.
 
 Repository variables:
 
+`SHUTTLE_SIGN_DESKTOP` defaults to unset/false. Set it to `true` only after adding all Apple
+signing and notarization secrets listed below. CI then signs and notarizes the app, enables its
+automatic updater, and publishes `latest-mac.yml`. Unsigned builds show a manual download link
+in the sidebar and never replace the signed update manifest.
+
 | Name                    | Value                                                                                                                                                                                                                                       |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SHUTTLE_WEB_URL`       | The production HTTPS app URL, also embedded in desktop builds.                                                                                                                                                                              |
 | `SHUTTLE_DEPLOY_VARS`   | JSON object containing the current production Worker vars, including sandbox configuration and preview hostname. These override development defaults; the workflow sets `SHUTTLE_WEB_URL` from the variable above. Do not put secrets here. |
 | `SHUTTLE_DEPLOY_ROUTES` | Optional JSON array of Wrangler custom-domain routes; defaults to `[]`.                                                                                                                                                                     |
 | `SHUTTLE_SANDBOX_IMAGE` | Optional fallback image embedded in desktop builds.                                                                                                                                                                                         |
+
+Apple secrets below are optional until `SHUTTLE_SIGN_DESKTOP` is enabled.
 
 Repository secrets:
 
@@ -40,8 +48,8 @@ Repository secrets:
 | `APPLE_APP_SPECIFIC_PASSWORD`               | App-specific notarization password for that account.                                                                                                                                   |
 | `APPLE_TEAM_ID`                             | Apple Developer team ID matching the signing certificate.                                                                                                                              |
 
-Cloudflare deployment fails clearly if its configuration is missing. Missing signing credentials
-fail the desktop job rather than publishing an ad hoc build. The hosted app may already have
+Cloudflare deployment fails clearly if its configuration is missing. When signing is explicitly
+enabled, missing Apple credentials fail the desktop job rather than silently falling back. The hosted app may already have
 deployed when a later desktop job fails; an incomplete desktop release never replaces the public
 update manifest.
 
@@ -55,9 +63,10 @@ release process, and choose a higher major/minor version if starting a new seque
 Release jobs run in a single concurrency group without canceling an in-flight publication.
 GitHub may replace pending runs with newer pushes, so the newest queued revision is deployed
 next. Uploaded artifacts are retained with the workflow run. The download button follows the
-DMG in the public manifest, and existing installed apps discover new versions at their next
-background check or a manual check.
+DMG in `latest-mac.json`. Signed installed apps discover new versions at their next background
+check or a manual check. Ad hoc builds require downloading and replacing the app manually;
+macOS may require Open Anyway in System Settings → Privacy & Security.
 
-The original desktop build needs one manual upgrade to acquire the updater and public feed.
+A manual upgrade to the first Developer ID build will be needed to enable automatic updates.
 Signed Mac installation and the real Cloudflare deployment must be tested after the credentials
 are configured; neither can run in the Linux development sandbox.

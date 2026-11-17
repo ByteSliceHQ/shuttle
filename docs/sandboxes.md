@@ -209,13 +209,16 @@ Open Anyway under System Settings, Privacy & Security.
 
 ### Desktop updates
 
-Packaged apps check `https://shuttle.codes/download/latest-mac.yml` shortly after launch and every
+Developer ID builds check `https://shuttle.codes/download/latest-mac.yml` shortly after launch and every
 four hours. The bottom-left sidebar also offers a manual check. People choose when to download
 and when to restart; the app never installs an update on quit automatically. Development builds
 do not check for updates.
 
-The release workflow builds and signs a new Apple Silicon version for each push to `main`, then
-uploads it to the existing `shuttle-releases` R2 bucket. The ZIP and DMG are uploaded before the
+The release workflow builds a new Apple Silicon version for each push to `main`, then
+uploads it to the existing `shuttle-releases` R2 bucket. Builds are ad hoc by default, with a
+manual download link in the sidebar and no automatic installation. Once Apple credentials exist,
+set `SHUTTLE_SIGN_DESKTOP=true` to enable signed releases and the automatic updater.
+The ZIP and DMG are uploaded before the
 update manifest, so an available update always points to uploaded binaries. The public feed works
 without giving desktop apps credentials for the private source repository. See
 [deployment setup](deployments.md) for required GitHub variables and secrets.

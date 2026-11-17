@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 
 import { startUpdates } from './updates'
 
-function setup(packaged = true) {
+function setup(packaged = true, automatic = true) {
   const app = Object.assign(new EventEmitter(), { isPackaged: packaged, getVersion: () => '1.0.0' })
   let checks = 0
   let downloads = 0
@@ -39,6 +39,7 @@ function setup(packaged = true) {
     app as unknown as Parameters<typeof startUpdates>[0],
     updater as unknown as Parameters<typeof startUpdates>[1],
     () => {},
+    automatic,
   )
 
   return {
@@ -53,6 +54,20 @@ function setup(packaged = true) {
 }
 
 describe('desktop updates', () => {
+  test('ad hoc builds offer manual downloads without checking or installing', async () => {
+    const fixture = setup(true, false)
+
+    try {
+      await fixture.service.check()
+      await fixture.service.download()
+      fixture.service.install()
+      expect(fixture.service.status().status).toBe('manual')
+      expect(fixture.counts()).toEqual({ checks: 0, downloads: 0, installs: 0 })
+    } finally {
+      fixture.close()
+    }
+  })
+
   test('checks without downloading and installs only after an explicit request', async () => {
     const fixture = setup()
 

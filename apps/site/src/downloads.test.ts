@@ -21,6 +21,7 @@ function env(objects: Record<string, string>): SiteEnv {
                   name.endsWith('.yml') ? 'application/yaml' : 'application/octet-stream',
                 ),
               text: async () => value,
+              json: async () => JSON.parse(value),
             }
       },
     } as unknown as R2Bucket,
@@ -58,11 +59,16 @@ test('serves updater metadata without caching and versioned files with caching',
   expect(head.headers.get('content-length')).toBe('3')
 })
 
-test('download button follows the published manifest and retains its initial fallback', async () => {
+test('download button follows the manual download pointer and retains its initial fallback', async () => {
   const request = new Request('https://shuttle.codes/download/mac')
 
   expect(
-    (await site.fetch(request, env({ 'latest-mac.yml': manifest }))).headers.get('location'),
+    (
+      await site.fetch(
+        request,
+        env({ 'latest-mac.json': JSON.stringify({ file: 'Shuttle-0.1.20-arm64.dmg' }) }),
+      )
+    ).headers.get('location'),
   ).toBe('https://shuttle.codes/download/Shuttle-0.1.20-arm64.dmg')
 
   expect((await site.fetch(request, env({}))).headers.get('location')).toBe(
@@ -80,4 +86,23 @@ test('only exposes the update manifest and plain release filenames', () => {
   for (const name of ['secret.yml', '../latest-mac.yml', 'a/b.zip', '.env']) {
     expect(releaseName(`/download/${name}`)).toBeNull()
   }
+})
+
+test('manual download pointer rejects paths outside versioned DMGs', async () => {
+  const request = new Request('https://shuttle.codes/download/mac')
+
+  for (const file of ['../secret.dmg', 'https://evil.example/app.dmg', 'notes.txt']) {
+    const response = await site.fetch(request, env({ 'latest-mac.json': JSON.stringify({ file }) }))
+
+    expect(response.headers.get('location')).toBe(
+      'https://shuttle.codes/download/Shuttle-0.0.1-arm64.dmg',
+    )
+  }
+
+  const response = await site.fetch(
+    new Request('https://shuttle.codes/download/latest-mac.json'),
+    env({ 'latest-mac.json': '{}' }),
+  )
+
+  expect(response.headers.get('cache-control')).toBe('no-store')
 })

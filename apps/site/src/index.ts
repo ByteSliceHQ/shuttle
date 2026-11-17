@@ -19,7 +19,9 @@ const RELEASE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.(dmg|zip|exe|AppImage|b
 export function releaseName(pathname: string): string | null {
   const name = pathname.slice('/download/'.length)
 
-  return name === 'latest-mac.yml' || RELEASE_NAME.test(name) ? name : null
+  return name === 'latest-mac.json' || name === 'latest-mac.yml' || RELEASE_NAME.test(name)
+    ? name
+    : null
 }
 
 async function download(request: Request, env: SiteEnv, name: string): Promise<Response> {
@@ -35,8 +37,12 @@ async function download(request: Request, env: SiteEnv, name: string): Promise<R
   headers.set('etag', object.httpEtag)
   headers.set('accept-ranges', 'bytes')
   headers.set('content-disposition', `attachment; filename="${name}"`)
+
   // A build never changes under its name; a new one gets a new name.
-  headers.set('cache-control', name === 'latest-mac.yml' ? 'no-store' : 'public, max-age=86400')
+  headers.set(
+    'cache-control',
+    name.startsWith('latest-mac.') ? 'no-store' : 'public, max-age=86400',
+  )
 
   if (!('body' in object)) {
     return new Response(null, { status: 304, headers })
@@ -70,12 +76,14 @@ export default {
     const url = new URL(request.url)
 
     if (url.pathname === '/download/mac') {
-      // Resolve the same manifest the updater uses, so the download button follows releases.
-      const manifest = await env.RELEASES.get('latest-mac.yml')
-      const text = manifest ? await manifest.text() : ''
+      // The manual download also advances for ad hoc builds that cannot auto-install.
+      const pointer = await env.RELEASES.get('latest-mac.json')
+      const data = pointer ? await pointer.json<{ file?: unknown }>().catch(() => null) : null
 
       const name =
-        text.match(/^\s*(?:-\s*)?url:\s*(Shuttle-[A-Za-z0-9._-]+\.dmg)\s*$/m)?.[1] ?? env.LATEST_MAC
+        typeof data?.file === 'string' && /^Shuttle-[A-Za-z0-9._-]+\.dmg$/.test(data.file)
+          ? data.file
+          : env.LATEST_MAC
 
       return Response.redirect(new URL(`/download/${name}`, url).toString(), 302)
     }

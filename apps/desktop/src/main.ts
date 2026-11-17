@@ -174,11 +174,16 @@ if (!app.requestSingleInstanceLock()) {
       rejected: () => forgetMachineToken(store, APP_URL),
     })
 
-    const updates = startUpdates(app, autoUpdater, (status) => {
-      for (const window of BrowserWindow.getAllWindows()) {
-        window.webContents.send(CHANNELS.updateStatusChanged, status)
-      }
-    })
+    const updates = startUpdates(
+      app,
+      autoUpdater,
+      (status) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          window.webContents.send(CHANNELS.updateStatusChanged, status)
+        }
+      },
+      PACKAGED.autoUpdate === true,
+    )
 
     ipcMain.handle(CHANNELS.updateStatus, () => updates.status())
     ipcMain.handle(CHANNELS.checkForUpdates, () => updates.check())

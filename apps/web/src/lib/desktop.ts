@@ -57,6 +57,7 @@ export function isolationLabel(isolation: string | undefined): string {
 
 export interface DesktopUpdateStatus {
   readonly status:
+    | 'manual'
     | 'disabled'
     | 'idle'
     | 'checking'

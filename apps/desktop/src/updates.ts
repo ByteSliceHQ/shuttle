@@ -16,9 +16,10 @@ export function startUpdates(
     | 'quitAndInstall'
   >,
   changed: (status: UpdateStatus) => void,
+  automatic = true,
 ) {
   let state: UpdateStatus = {
-    status: app.isPackaged ? 'idle' : 'disabled',
+    status: app.isPackaged ? (automatic ? 'idle' : 'manual') : 'disabled',
     version: app.getVersion(),
   }
 
@@ -52,7 +53,12 @@ export function startUpdates(
   )
 
   async function check() {
-    if (!app.isPackaged || busy || ['available', 'downloading', 'ready'].includes(state.status)) {
+    if (
+      !automatic ||
+      !app.isPackaged ||
+      busy ||
+      ['available', 'downloading', 'ready'].includes(state.status)
+    ) {
       return
     }
 
@@ -68,7 +74,7 @@ export function startUpdates(
   }
 
   async function download() {
-    if (state.status !== 'available' || busy) {
+    if (!automatic || state.status !== 'available' || busy) {
       return
     }
 
@@ -97,7 +103,7 @@ export function startUpdates(
     check,
     download,
     install: () => {
-      if (state.status === 'ready') {
+      if (automatic && state.status === 'ready') {
         autoUpdater.quitAndInstall()
       }
     },

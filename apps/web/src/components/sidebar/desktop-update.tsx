@@ -21,6 +21,23 @@ export function DesktopUpdate() {
     return null
   }
 
+  if (status.status === 'manual') {
+    return (
+      <div className="shrink-0 border-t px-3 py-2">
+        <a
+          href="https://shuttle.codes/download/mac"
+          target="_blank"
+          rel="noreferrer"
+          title={`Shuttle ${status.version} · Install updates manually until Apple signing is available`}
+          className="text-muted-foreground hover:text-foreground flex items-center gap-2 rounded px-1 py-1.5 text-xs"
+        >
+          <ArrowDownToLine className="size-3.5 shrink-0" />
+          Download latest Shuttle
+        </a>
+      </div>
+    )
+  }
+
   const pending = status.status === 'checking' || status.status === 'downloading'
 
   const label =

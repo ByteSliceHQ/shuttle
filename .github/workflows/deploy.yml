@@ -69,6 +69,8 @@ jobs:
     # Packaging currently bundles the Apple Silicon sandbox runtime only.
     runs-on: macos-15
     timeout-minutes: 60
+    outputs:
+      signed: ${{ steps.signing.outputs.signed }}
     env:
       SHUTTLE_DESKTOP_URL: ${{ vars.SHUTTLE_WEB_URL }}
       SHUTTLE_SANDBOX_IMAGE: ${{ vars.SHUTTLE_SANDBOX_IMAGE }}
@@ -83,12 +85,24 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
-      - name: Validate signing credentials and architecture
+      - name: Select signing mode and validate architecture
+        id: signing
+        env:
+          SIGN_DESKTOP: ${{ vars.SHUTTLE_SIGN_DESKTOP }}
         run: |
           test "$(uname -m)" = arm64 || { echo 'An Apple Silicon runner is required'; exit 1; }
-          for name in CSC_NAME CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-            test -n "$(printenv "$name")" || { echo "Missing signing credential: $name"; exit 1; }
-          done
+          if [ "$SIGN_DESKTOP" = true ]; then
+            for name in CSC_NAME CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+              test -n "$(printenv "$name")" || { echo "Missing signing credential: $name"; exit 1; }
+            done
+            echo 'signed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'Publishing an ad hoc build for manual installation'
+            echo 'signed=false' >> "$GITHUB_OUTPUT"
+            for name in CSC_NAME CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+              echo "$name=" >> "$GITHUB_ENV"
+            done
+          fi
       - run: bun install --frozen-lockfile
       - name: Version this desktop release
         run: |
@@ -98,8 +112,14 @@ jobs:
             pkg.version = `0.1.${process.env.GITHUB_RUN_NUMBER}`;
             await Bun.write(path, JSON.stringify(pkg, null, 2) + "\n");
           '
-      - name: Build, sign, and notarize
+      - name: Build desktop (sign and notarize when enabled)
         run: bun run --cwd apps/desktop package
+      - name: Write manual download pointer
+        run: |
+          bun -e '
+            const pkg = await Bun.file("apps/desktop/package.json").json();
+            await Bun.write("apps/desktop/release/latest-mac.json", JSON.stringify({ file: `Shuttle-${pkg.version}-arm64.dmg` }));
+          '
       - name: Retain release files
         uses: actions/upload-artifact@v4
         with:
@@ -110,6 +130,7 @@ jobs:
             apps/desktop/release/*.zip
             apps/desktop/release/*.blockmap
             apps/desktop/release/latest-mac.yml
+            apps/desktop/release/latest-mac.json
 
   publish:
     needs: desktop
@@ -136,7 +157,12 @@ jobs:
           aws s3 cp release/ s3://shuttle-releases/ --recursive \
             --exclude '*' --include '*.dmg' --include '*.zip' --include '*.blockmap' \
             --cache-control 'public, max-age=31536000, immutable' --only-show-errors
-      - name: Publish update manifest last
+      - name: Publish signed update manifest
+        if: needs.desktop.outputs.signed == 'true'
         run: |
           aws s3 cp release/latest-mac.yml s3://shuttle-releases/latest-mac.yml \
             --content-type application/yaml --cache-control no-store --only-show-errors
+      - name: Publish manual download pointer last
+        run: |
+          aws s3 cp release/latest-mac.json s3://shuttle-releases/latest-mac.json \
+            --content-type application/json --cache-control no-store --only-show-errors

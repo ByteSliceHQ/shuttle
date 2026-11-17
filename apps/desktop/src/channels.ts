@@ -36,6 +36,7 @@ export interface RunnerStatus {
 
 export interface UpdateStatus {
   readonly status:
+    | 'manual'
     | 'disabled'
     | 'idle'
     | 'checking'
