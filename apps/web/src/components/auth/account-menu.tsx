@@ -23,7 +23,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { authClient } from '@/lib/auth-client'
 import { forgetEventCache } from '@/lib/event-cache'
-import { invitationLink, useTenant } from '@/lib/tenant'
+import { invitationLink, rememberTenant, useTenant } from '@/lib/tenant'
 
 /** Everything on the page belongs to one organization, so changing it starts the app again. */
 function restart() {
@@ -45,6 +45,8 @@ export function AccountMenu() {
     }
 
     await authClient.organization.setActive({ organizationId })
+    // The app opens as whoever it remembers, and that is now the wrong organization.
+    rememberTenant(null)
     restart()
   }
 
@@ -52,6 +54,7 @@ export function AccountMenu() {
     await authClient.signOut()
     // Sessions kept on this device for quick opening go with the sign-in.
     forgetEventCache(tenant.user.id)
+    rememberTenant(null)
     restart()
   }
 

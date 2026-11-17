@@ -45,6 +45,61 @@ export async function fetchTenant(): Promise<TenantResult> {
   return { kind: 'signed-in', tenant: (await response.json()) as Tenant }
 }
 
+const REMEMBERED_KEY = 'shuttle.tenant'
+
+/** Whether `record` is an object whose `fields` are all text. */
+function hasTexts(record: unknown, fields: readonly string[]): boolean {
+  if (!record || typeof record !== 'object') {
+    return false
+  }
+
+  const entries: Record<string, unknown> = { ...record }
+
+  return fields.every((field) => typeof entries[field] === 'string')
+}
+
+function isTenant(value: unknown): value is Tenant {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const { user, org, runs }: { user?: unknown; org?: unknown; runs?: unknown } = value
+
+  return (
+    hasTexts(user, ['id', 'name', 'email']) &&
+    hasTexts(org, ['id', 'role']) &&
+    hasTexts(runs, ['workspace', 'pulls', 'playbook'])
+  )
+}
+
+/**
+ * Who this browser was last signed in as, so the app can open at once and check with the Worker
+ * behind it. It names a person and their runs and grants nothing: every request still carries
+ * the sign-in cookie, and the Worker's answer replaces this as soon as it arrives.
+ */
+export function rememberedTenant(): Tenant | null {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(REMEMBERED_KEY) ?? 'null')
+
+    return isTenant(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+/** Keeps `tenant` for the next launch, or forgets the last one when given null. */
+export function rememberTenant(tenant: Tenant | null): void {
+  try {
+    if (tenant) {
+      localStorage.setItem(REMEMBERED_KEY, JSON.stringify(tenant))
+    } else {
+      localStorage.removeItem(REMEMBERED_KEY)
+    }
+  } catch {
+    // No storage. The app simply asks the Worker first, as it always did.
+  }
+}
+
 export async function fetchSignInProviders(): Promise<SignInProviders> {
   const response = await fetch('/auth/providers')
 
