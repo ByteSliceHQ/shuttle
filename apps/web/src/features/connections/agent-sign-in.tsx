@@ -2,10 +2,15 @@ import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/reac
 import { AlertCircle, Check, Copy, ExternalLink, Loader2 } from 'lucide-react'
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 
-import { api, client } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { desktop, type DesktopRunnerStatus } from '@/features/desktop/desktop'
+import {
+  type DeviceRunnerStatus,
+  type ShuttleDevice,
+  useApi,
+  useDevice,
+  useShuttleHost,
+} from '@/shuttle'
 import type { Connection, SandboxPlace } from '@shuttle/api'
 
 import { loginOutcome, loginSettled, mergeProgress } from './login'
@@ -35,8 +40,11 @@ export function useSignIn(
   place: SignInPlace,
   onDone?: () => Promise<unknown> | void,
 ) {
+  const host = useShuttleHost()
+  const api = useApi()
+  const { client } = useShuttleHost()
   const queryClient = useQueryClient()
-  const context = placeContext(place)
+  const context = placeContext(host, place)
 
   // Goes up with every sign-in asked for and every one given up, so a sign-in that finishes
   // starting can tell whether it is still the one wanted.
@@ -290,8 +298,10 @@ export function SignInProgress({
 
 /** The viewer's connections, for something that sits in another page and must not hold it up. */
 function useConnections() {
+  const host = useShuttleHost()
+
   return useQuery({
-    ...connectionsQuery(),
+    ...connectionsQuery(host),
     // A sign-in made elsewhere, such as in another window, shows when the page is back.
     refetchOnWindowFocus: 'always',
   })
@@ -302,8 +312,8 @@ function useConnections() {
  * to take new sessions, otherwise in the cloud. Mirrors `startsOnThisMachine` in workspace.ts.
  */
 export function useStartPlace(): SignInPlace {
-  const app = desktop()
-  const [runner, setRunner] = useState<DesktopRunnerStatus | null>(null)
+  const app = useDevice()
+  const [runner, setRunner] = useState<DeviceRunnerStatus | null>(null)
   const [wanted, setWanted] = useState(true)
 
   // The desktop app's runner is outside the page: it is asked once, then tells of each change.
@@ -402,6 +412,7 @@ export function useAgentGate(
   reload: () => Promise<void>
   connections: readonly Connection[] | null
 } {
+  const api = useApi()
   const queryClient = useQueryClient()
   const { data } = useConnections()
   const connection = data?.connections.find((entry) => entry.harness === harness)
@@ -417,9 +428,7 @@ export function useAgentGate(
   }
 }
 
-function signInPlaceOf(place: SandboxPlace): SignInPlace | null {
-  const app = desktop()
-
+function signInPlaceOf(place: SandboxPlace, app: ShuttleDevice | null): SignInPlace | null {
   if (place.sandbox.location === 'cloud') {
     return 'cloud'
   }
@@ -435,6 +444,8 @@ export function useSessionRunsAt(runId: string): {
   place: SignInPlace | null
   moveToCloud: () => Promise<void>
 } {
+  const api = useApi()
+  const device = useDevice()
   const queryClient = useQueryClient()
   const placeKey = api.sandbox.place.get.queryKey({ input: { id: runId } })
 
@@ -455,7 +466,7 @@ export function useSessionRunsAt(runId: string): {
   )
 
   return {
-    place: data ? signInPlaceOf(data) : null,
+    place: data ? signInPlaceOf(data, device) : null,
     moveToCloud: async () => {
       await move.mutateAsync({ id: runId, to: 'cloud' })
     },

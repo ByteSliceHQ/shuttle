@@ -2,9 +2,9 @@ import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-q
 import { Cloud, Laptop } from 'lucide-react'
 import type { ReactNode } from 'react'
 
-import { api } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/cn'
+import { useApi, useShuttleHost } from '@/shuttle'
 import type { Connection } from '@shuttle/api'
 
 import { SignInProgress, useSignIn } from './agent-sign-in'
@@ -19,7 +19,8 @@ import { connectionsQuery } from './queries'
  * The page's loader has the connections ready before this renders.
  */
 export function ConnectionsPanel() {
-  const { data: state, error } = useSuspenseQuery(connectionsQuery())
+  const host = useShuttleHost()
+  const { data: state, error } = useSuspenseQuery(connectionsQuery(host))
 
   const places: readonly SignInPlace[] = state.machine ? ['local', 'cloud'] : ['cloud']
 
@@ -91,6 +92,8 @@ function PlaceRow({
   showPlace: boolean
   disabled: boolean
 }) {
+  const host = useShuttleHost()
+  const api = useApi()
   const queryClient = useQueryClient()
   const flow = useSignIn(connection.harness, place)
   const signedIn = signedInAt(connection, place) === true
@@ -98,7 +101,7 @@ function PlaceRow({
 
   const disconnect = useMutation(
     api.connections.disconnect.mutationOptions({
-      context: placeContext(place),
+      context: placeContext(host, place),
       // Whether or not it worked, show where the agent is signed in now.
       onSettled: () => queryClient.invalidateQueries({ queryKey: api.connections.key() }),
     }),

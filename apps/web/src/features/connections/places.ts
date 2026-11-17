@@ -1,5 +1,4 @@
-import type { CallContext } from '@/api/client'
-import { deviceContext } from '@/features/desktop/desktop'
+import { type CallContext, type ShuttleHost } from '@/shuttle'
 import type { Connection } from '@shuttle/api'
 
 /** Where a session runs, and so which sign-in it uses. */
@@ -35,6 +34,6 @@ export function atPlace(place: SignInPlace): string {
  * What a sign-in, disconnect or follow at `place` sends. One at `local` names this machine, so
  * it happens in this machine's sandbox. One at `cloud` names none, even from the desktop app.
  */
-export function placeContext(place: SignInPlace): CallContext {
-  return place === 'local' ? deviceContext() : {}
+export function placeContext(host: ShuttleHost, place: SignInPlace): CallContext {
+  return place === 'local' ? host.deviceContext() : {}
 }

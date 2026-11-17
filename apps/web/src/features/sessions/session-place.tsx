@@ -2,10 +2,15 @@ import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/reac
 import { Check, Cloud, Laptop, LoaderCircle } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
-import { api } from '@/api/client'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { desktop, isolationLabel, type DesktopRunnerStatus } from '@/features/desktop/desktop'
 import { cn } from '@/lib/cn'
+import {
+  type DeviceRunnerStatus,
+  isolationLabel,
+  useApi,
+  useDevice,
+  useShuttleHost,
+} from '@/shuttle'
 
 import { sessionQueries } from './session-queries'
 
@@ -68,14 +73,16 @@ function Row({
  * Give it the session as its `key` so it starts fresh when the page moves to another session.
  */
 export function SessionPlace({ runId, working }: { runId: string; working: boolean }) {
-  const app = desktop()
+  const host = useShuttleHost()
+  const api = useApi()
+  const app = useDevice()
   const [open, setOpen] = useState(false)
-  const [runner, setRunner] = useState<DesktopRunnerStatus | null>(null)
+  const [runner, setRunner] = useState<DeviceRunnerStatus | null>(null)
   const queryClient = useQueryClient()
 
   // The session page's loader starts this read without waiting on it. A move that is waiting
   // happens shortly after the turn ends, without the page being told, so it is asked after.
-  const placeQuery = sessionQueries(runId).place
+  const placeQuery = sessionQueries(host, runId).place
   const placeKey = placeQuery.queryKey
 
   const { data: place } = useQuery({

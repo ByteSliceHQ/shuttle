@@ -64,5 +64,13 @@ Every JSON route the Worker serves is declared once, in `packages/api` (`@shuttl
   renders (required data throws to the route's error component; optional data is awaited with
   `.catch(noop)` and read with `useQuery`). The only loading indicator is `NavigationProgress`.
   Data behind an interaction (a popover, a tab, a picker) loads when it is opened.
+- **Host boundary:** Shuttle's components are meant to be put together by other hosts too, so
+  nothing under `src/features` (other than `auth`, `desktop` and `github`, which belong to this
+  app) imports the app's router, `@/api/client`, `@/host`, the sign-in client or
+  `window.shuttleDesktop`. They ask `@/shuttle` instead: `useApi()`, `useShuttleHost()`,
+  `useTenant()`, `useDevice()`, `Link`, `useNavigate()`, `useLocation()`. Links name a
+  destination (`{ page: 'session', sessionId }`), never a path. A function that is not a hook
+  takes the `ShuttleHost` as its first argument. Routes and loaders use `@/host` and
+  `@/api/client`, and `routes/_app.tsx` gives all of it to `<Shuttle.Provider>`.
 - **Layout:** `src/routes` holds thin route files; `src/features/<name>` holds a feature's
   components, logic and tests; `src/components` and `src/lib` hold only what features share.

@@ -1,9 +1,9 @@
-import { Link } from '@tanstack/react-router'
 import { ArrowRight } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import { useWorkspace } from '@/features/workspace/workspace-context'
 import { cn } from '@/lib/cn'
+import { Link } from '@/shuttle'
 
 import type { LinkedSession } from './pulls'
 
@@ -24,9 +24,7 @@ export function LinkedSessionLink({
 }) {
   return (
     <Link
-      to="/sessions/$sessionId"
-      params={{ sessionId: session.runId }}
-      search={session.threadId ? { thread: session.threadId } : {}}
+      to={{ page: 'session', sessionId: session.runId, thread: session.threadId }}
       className={cn('group inline-flex min-w-0 items-center gap-1', className)}
     >
       {children}

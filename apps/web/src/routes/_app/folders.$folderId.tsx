@@ -29,6 +29,7 @@ import {
   type WorkspaceTree,
 } from '@/features/workspace/workspace'
 import { useWorkspace } from '@/features/workspace/workspace-context'
+import { host } from '@/host'
 import { compactRelativeTime, fullDateTime } from '@/lib/time'
 import { useMediaQuery } from '@/lib/use-media-query'
 import { useNow } from '@/lib/use-now'
@@ -88,7 +89,7 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
     async mutationFn(trimmed: string) {
       await agent.save()
 
-      return startWorkspaceSession({ folderId: folder.folderId, goal: trimmed })
+      return startWorkspaceSession(host, { folderId: folder.folderId, goal: trimmed })
     },
     onSuccess({ runId: sessionId }, trimmed) {
       rememberSession({ runId: sessionId, goal: trimmed })

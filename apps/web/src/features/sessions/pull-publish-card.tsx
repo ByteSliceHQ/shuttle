@@ -8,6 +8,7 @@ import { cn } from '@/lib/cn'
 import { jsonText } from '@/lib/json'
 import { clockTime } from '@/lib/time'
 import { useNow } from '@/lib/use-now'
+import { useShuttleHost } from '@/shuttle'
 
 import type { AgentIdentity } from './agents'
 import { agentRole } from './agents'
@@ -29,6 +30,7 @@ export function PullPublishCard({
   context: PullPublishCardContext
   className?: string
 }) {
+  const host = useShuttleHost()
   const identity = context.identities.get(item.threadId)
 
   const [title, setTitle] = useState(jsonText(item.defaults?.title) ?? '')
@@ -37,11 +39,11 @@ export function PullPublishCard({
   const decide = useMutation({
     mutationFn: (actionId: 'draft' | 'publish' | 'discard') =>
       actionId === 'discard'
-        ? decideStructuredApproval(context.runId, item.approvalId, {
+        ? decideStructuredApproval(host, context.runId, item.approvalId, {
             actionId: 'discard',
             outcome: 'reject',
           })
-        : decideStructuredApproval(context.runId, item.approvalId, {
+        : decideStructuredApproval(host, context.runId, item.approvalId, {
             actionId,
             outcome: 'approve',
             payload: {

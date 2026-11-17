@@ -16,13 +16,10 @@ import {
 } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 
-import { api } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { EmptyState, Kbd } from '@/components/ui/panel'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { useOrgPeople } from '@/features/auth/org-people'
-import { useTenant } from '@/features/auth/tenant'
 import {
   authoredPullsForSession,
   pullInbox,
@@ -42,6 +39,7 @@ import { cn } from '@/lib/cn'
 import { fullDateTime, relativeTime } from '@/lib/time'
 import { useNow } from '@/lib/use-now'
 import { useWidthBucket } from '@/lib/use-width-bucket'
+import { useApi, useOrgPeople, useShuttleHost, useTenant } from '@/shuttle'
 import type { ChangeStatus, SandboxWorkspace } from '@shuttle/api'
 import { useProjection, useRunStore } from '@swirls/looms/react'
 
@@ -146,6 +144,8 @@ export function WorkspaceViewer({
   /** When the file-search shortcut was last pressed, in milliseconds. Zero if never. */
   searchToken?: number
 }) {
+  const api = useApi()
+
   // The workspace is read again every few seconds while the tab's window is in front, and at
   // once when a save, a stray moved in, or the session's events say its files changed.
   const { data: workspace, error } = useQuery(
@@ -605,12 +605,14 @@ function StrayNotice({
   runId: string
   stray: { readonly path: string; readonly files: number }
 }) {
+  const host = useShuttleHost()
+  const api = useApi()
   const queryClient = useQueryClient()
 
   // What was moved in shows up among the workspace's files, and the notice about it goes.
   const adopt = useMutation(
     api.sandbox.adopt.mutationOptions({
-      onSuccess: () => invalidateWorktree(queryClient, runId),
+      onSuccess: () => invalidateWorktree(host, queryClient, runId),
     }),
   )
 

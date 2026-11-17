@@ -10,6 +10,7 @@ import type { SessionMedia } from '@/features/sessions/media'
 import type { SessionTabsController } from '@/features/sessions/use-session-tabs'
 import type { ArtifactTab, ArtifactTabKind } from '@/features/workspace/workspace'
 import { cn } from '@/lib/cn'
+import { useShuttleHost } from '@/shuttle'
 
 import { BrowserViewer } from './browser-viewer'
 import { MediaViewer } from './media-viewer'
@@ -45,6 +46,8 @@ export function ArtifactPane({
   /** Asks the page to show the pane, for a shortcut that opens a tab while it is closed. */
   onReveal?: () => void
 }) {
+  const host = useShuttleHost()
+
   const { tabs, activeTabId, setActiveTabId, openTab, closeTab, reorderTabs, retargetTab } =
     controller
 
@@ -66,9 +69,9 @@ export function ArtifactPane({
 
   useEffect(() => {
     if (toolEvents > 0) {
-      void invalidateWorktree(queryClient, runId)
+      void invalidateWorktree(host, queryClient, runId)
     }
-  }, [queryClient, runId, toolEvents])
+  }, [host, queryClient, runId, toolEvents])
 
   // Go to file, on the shortcut editors use for it. It brings the Files tab forward and opens
   // its search, from anywhere on the page.

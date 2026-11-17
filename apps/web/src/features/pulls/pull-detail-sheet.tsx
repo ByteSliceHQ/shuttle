@@ -1,13 +1,12 @@
 import { useMutation } from '@tanstack/react-query'
-import { Link, useNavigate } from '@tanstack/react-router'
 import { ExternalLink, GitPullRequest, LoaderCircle, MessageSquareReply } from 'lucide-react'
 
-import { api } from '@/api/client'
 import { Markdown } from '@/components/markdown'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { compactRelativeTime, fullDateTime } from '@/lib/time'
 import { useNow } from '@/lib/use-now'
+import { Link, useApi, useNavigate } from '@/shuttle'
 
 import { LinkedSessionRow } from './linked-session'
 import {
@@ -69,6 +68,7 @@ function PullDetail({
   stack: PullStack | null
   onOpenPull: (key: string) => void
 }) {
+  const api = useApi()
   const navigate = useNavigate()
   const now = useNow()
   const review = reviewLabel(pull.reviewDecision)
@@ -81,8 +81,7 @@ function PullDetail({
   // The review is a session of its own, so starting one goes straight to it.
   const startReview = useMutation(
     api.workspace.pulls.review.mutationOptions({
-      onSuccess: ({ runId }) =>
-        navigate({ to: '/sessions/$sessionId', params: { sessionId: runId } }),
+      onSuccess: ({ runId }) => navigate({ page: 'session', sessionId: runId }),
     }),
   )
 
@@ -218,7 +217,7 @@ function PullDetail({
           <div className="ml-auto flex items-center gap-2">
             {pull.reviewDecision === 'changes_requested' && authoringRunId ? (
               <Button variant="outline" size="sm" asChild>
-                <Link to="/sessions/$sessionId" params={{ sessionId: authoringRunId }}>
+                <Link to={{ page: 'session', sessionId: authoringRunId }}>
                   <MessageSquareReply />
                   Address feedback
                 </Link>
@@ -226,7 +225,7 @@ function PullDetail({
             ) : null}
             {pull.reviewingRunId ? (
               <Button variant="brand" size="sm" asChild>
-                <Link to="/sessions/$sessionId" params={{ sessionId: pull.reviewingRunId }}>
+                <Link to={{ page: 'session', sessionId: pull.reviewingRunId }}>
                   <GitPullRequest />
                   Open review
                 </Link>

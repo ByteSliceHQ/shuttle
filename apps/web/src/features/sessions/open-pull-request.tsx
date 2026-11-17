@@ -2,9 +2,9 @@ import { useMutation } from '@tanstack/react-query'
 import { GitPullRequestArrow, LoaderCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
-import { api } from '@/api/client'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/cn'
+import { useApi } from '@/shuttle'
 
 import type { SessionFeed } from './session-feed'
 
@@ -59,6 +59,8 @@ export function OpenPullRequestButton({
   /** The agents are mid-turn: a pull request now could catch half-written work. */
   working: boolean
 }) {
+  const api = useApi()
+
   // Asking answers with the id of the publish card, which then arrives on the session's feed.
   const request = useMutation(api.sessions.pullRequest.mutationOptions())
   const [requested, setRequested] = useState<string | null>(null)

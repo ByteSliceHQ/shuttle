@@ -2,7 +2,6 @@ import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query'
 import { Check, GitBranch, LoaderCircle, Lock, Plus, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
-import { api } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -14,6 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/cn'
+import { useApi, useShuttleHost } from '@/shuttle'
 
 import { RepoName } from './repo-chip'
 import { useDebounced } from './use-debounced'
@@ -45,6 +45,8 @@ export function LinkRepoDialog({
   tree: WorkspaceTree
   linked: readonly LinkedRepo[]
 }) {
+  const host = useShuttleHost()
+  const api = useApi()
   const hasInstall = Object.keys(tree.installations).length > 0
   const [query, setQuery] = useState('')
   const term = useDebounced(query, SEARCH_DELAY_MS)
@@ -69,7 +71,7 @@ export function LinkRepoDialog({
   const loading = search.isFetching
 
   const link = useMutation({
-    mutationFn: (picks: readonly LinkedRepo[]) => linkFolderRepos(folderId, picks),
+    mutationFn: (picks: readonly LinkedRepo[]) => linkFolderRepos(host, folderId, picks),
     onSuccess: () => handleOpenChange(false),
   })
 

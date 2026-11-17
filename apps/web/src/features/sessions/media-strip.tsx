@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/cn'
+import { useShuttleHost } from '@/shuttle'
 
 import { formatBytes, mediaKind, mediaUrl, type MediaAsset, type MediaKind } from './media'
 
@@ -29,13 +30,14 @@ export function FileChip({
   asset: MediaAsset
   className?: string
 }) {
+  const host = useShuttleHost()
   const kind = mediaKind(asset.mediaType)
   // A PDF opens in the browser's own viewer. Other files have nothing to show them, so they save.
   const opens = kind === 'pdf'
 
   return (
     <a
-      href={mediaUrl(runId, asset.id, !opens)}
+      href={mediaUrl(host, runId, asset.id, !opens)}
       {...(opens ? { target: '_blank', rel: 'noreferrer' } : { download: asset.name })}
       className={cn(
         'bg-card hover:bg-accent/60 ease-snappy flex max-w-full min-w-0 items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors duration-150',
@@ -74,9 +76,10 @@ export function MediaTile({
   size?: 'md' | 'fill'
   className?: string
 }) {
+  const host = useShuttleHost()
   const kind = mediaKind(asset.mediaType)
   const [broken, setBroken] = useState(false)
-  const url = mediaUrl(runId, asset.id)
+  const url = mediaUrl(host, runId, asset.id)
 
   if (broken) {
     return <FileChip runId={runId} asset={asset} className={className} />
@@ -200,6 +203,7 @@ function ImageLightbox({
   asset: MediaAsset
   children: ReactNode
 }) {
+  const host = useShuttleHost()
   const [open, setOpen] = useState(false)
 
   return (
@@ -217,7 +221,7 @@ function ImageLightbox({
               {formatBytes(asset.size)}
             </DialogDescription>
             <a
-              href={mediaUrl(runId, asset.id, true)}
+              href={mediaUrl(host, runId, asset.id, true)}
               download={asset.name}
               aria-label={`Download ${asset.name}`}
               className="text-muted-foreground hover:bg-accent hover:text-foreground flex size-7 shrink-0 items-center justify-center rounded-md transition-colors duration-150"
@@ -232,7 +236,7 @@ function ImageLightbox({
             </DialogClose>
           </div>
           <img
-            src={mediaUrl(runId, asset.id)}
+            src={mediaUrl(host, runId, asset.id)}
             alt={asset.name}
             className="min-h-0 max-w-full flex-1 rounded-md object-contain"
           />

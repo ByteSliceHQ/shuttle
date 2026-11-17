@@ -22,9 +22,10 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { forgetEventCache } from '@/features/events/event-cache'
+import { useTenant } from '@/shuttle'
 
 import { authClient } from './auth-client'
-import { invitationLink, rememberTenant, useTenant } from './tenant'
+import { invitationLink, rememberTenant } from './tenant'
 
 /** Everything on the page belongs to one organization, so changing it starts the app again. */
 function restart() {

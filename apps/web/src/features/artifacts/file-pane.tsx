@@ -5,10 +5,10 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { FileCode2, FileQuestion, Pencil } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { api, statusOf } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/panel'
 import { cn } from '@/lib/cn'
+import { statusOf, useApi, useShuttleHost } from '@/shuttle'
 import {
   MAX_DIAGNOSTICS_CHARS,
   type ChangeStatus,
@@ -186,6 +186,8 @@ export default function FilePane({
   /** Told when there is an unsaved edit, and when there no longer is. */
   onDirtyChange: (dirty: boolean) => void
 }) {
+  const host = useShuttleHost()
+  const api = useApi()
   const name = path.split('/').pop() ?? path
   const queryClient = useQueryClient()
   const [chosenView, setChosenView] = useState<FileView>('diff')
@@ -370,7 +372,7 @@ export default function FilePane({
         }
 
         // The workspace's list of changes, this file's diff and its problems follow the save.
-        void invalidateWorktree(queryClient, runId)
+        void invalidateWorktree(host, queryClient, runId)
       },
     }),
   )

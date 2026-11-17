@@ -2,11 +2,11 @@ import { useMutation } from '@tanstack/react-query'
 import { ChevronRight, Cog, Layers, LoaderCircle, Square } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 
-import { api } from '@/api/client'
 import { statusLabel } from '@/components/status'
 import { StatusDot } from '@/components/status-dot'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/cn'
+import { useApi } from '@/shuttle'
 import type { ThreadNode } from '@swirls/looms/core'
 
 import type { AgentIdentity } from './agents'
@@ -226,6 +226,7 @@ function TreeRow({
   /** The session this thread can be stopped in. Left out, the row has no stop button. */
   stopIn?: string
 }) {
+  const api = useApi()
   const { node, depth } = row
   // Stops the thread and everything beneath it.
   const stopThread = useMutation(api.sessions.stopThread.mutationOptions())

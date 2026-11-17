@@ -32,6 +32,7 @@ import {
   startWorkspaceSession,
 } from '@/features/workspace/workspace'
 import { useWorkspace } from '@/features/workspace/workspace-context'
+import { host } from '@/host'
 
 export const Route = createFileRoute('/_app/')({
   component: HomePage,
@@ -59,7 +60,7 @@ function HomePage() {
       return selectedFolderId
     }
 
-    const created = await createWorkspaceFolder(runId, 'General')
+    const created = await createWorkspaceFolder(host, runId, 'General')
     setFolderId(created)
     return created
   }
@@ -72,7 +73,7 @@ function HomePage() {
 
       rememberLastFolder(resolvedFolderId)
 
-      return startWorkspaceSession({ folderId: resolvedFolderId, goal: trimmed })
+      return startWorkspaceSession(host, { folderId: resolvedFolderId, goal: trimmed })
     },
     onSuccess({ runId: sessionId }, trimmed) {
       rememberSession({ runId: sessionId, goal: trimmed })

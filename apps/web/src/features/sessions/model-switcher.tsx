@@ -10,7 +10,6 @@ import {
   type ReactNode,
 } from 'react'
 
-import { api } from '@/api/client'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/cn'
+import { useApi } from '@/shuttle'
 import type {
   HarnessId,
   Team,
@@ -73,6 +73,8 @@ interface VendorModelList {
 function useVendorModels(
   harnesses: readonly VendorHarnessId[],
 ): ReadonlyMap<VendorHarnessId, VendorModelList> {
+  const api = useApi()
+
   return useQueries({
     queries: harnesses.map((harness) =>
       api.connections.models.queryOptions({ input: { harness } }),
@@ -129,6 +131,7 @@ export function ModelSwitcher({
   onVendorChoiceChange: (harness: VendorHarnessId, choice: VendorModelChoice) => void
   disabled?: boolean
 }) {
+  const api = useApi()
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [picked, setPicked] = useState<ModelSection | null>(null)

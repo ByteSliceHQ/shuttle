@@ -1,8 +1,6 @@
-import { client } from '@/api/client'
-import { signalRun } from '@/api/looms'
-import { desktop } from '@/features/desktop/desktop'
 import type { WorkspaceEvent } from '@/features/events/shuttle-events'
 import { mutateSessionTabs } from '@/features/sessions/tab-set'
+import { type ShuttleHost } from '@/shuttle'
 import type {
   ArtifactTabKind,
   SessionTabsState,
@@ -471,11 +469,11 @@ export const sessionTabs = defineProjection<SessionTabsState, WorkspaceEvent>({
 })
 
 /**
- * In the desktop app a new session starts on this machine whenever its sandbox is up. It can be
+ * On a host with a machine (the desktop app) a new session starts on this machine whenever its sandbox is up. It can be
  * moved to the cloud from the session's title bar at any point after that.
  */
-async function startsOnThisMachine(): Promise<{ deviceId?: string }> {
-  const app = desktop()
+async function startsOnThisMachine(host: ShuttleHost): Promise<{ deviceId?: string }> {
+  const app = host.device
 
   if (!app) {
     return {}
@@ -490,17 +488,17 @@ async function startsOnThisMachine(): Promise<{ deviceId?: string }> {
 }
 
 /** Starts a session in a folder, on this machine when the desktop app has its sandbox up. */
-export async function startWorkspaceSession(input: {
-  folderId: string
-  goal: string
-}): Promise<{ runId: string }> {
-  return client.workspace.createSession({ ...input, ...(await startsOnThisMachine()) })
+export async function startWorkspaceSession(
+  host: ShuttleHost,
+  input: { folderId: string; goal: string },
+): Promise<{ runId: string }> {
+  return host.client.workspace.createSession({ ...input, ...(await startsOnThisMachine(host)) })
 }
 
-export async function createWorkspaceFolder(runId: string, name: string) {
+export async function createWorkspaceFolder(host: ShuttleHost, runId: string, name: string) {
   const folderId = crypto.randomUUID()
 
-  await signalRun(runId, 'workspace/createFolder', {
+  await host.signalRun(runId, 'workspace/createFolder', {
     folderId,
     name,
     createdAt: Date.now(),
@@ -509,15 +507,21 @@ export async function createWorkspaceFolder(runId: string, name: string) {
   return folderId
 }
 
-export async function renameWorkspaceFolder(runId: string, folderId: string, name: string) {
-  await signalRun(runId, 'workspace/renameFolder', { folderId, name })
+export async function renameWorkspaceFolder(
+  host: ShuttleHost,
+  runId: string,
+  folderId: string,
+  name: string,
+) {
+  await host.signalRun(runId, 'workspace/renameFolder', { folderId, name })
 }
 
-export async function archiveWorkspaceFolder(runId: string, folderId: string) {
-  await signalRun(runId, 'workspace/archiveFolder', { folderId })
+export async function archiveWorkspaceFolder(host: ShuttleHost, runId: string, folderId: string) {
+  await host.signalRun(runId, 'workspace/archiveFolder', { folderId })
 }
 
 export async function openSessionTab(
+  host: ShuttleHost,
   workspaceRunId: string,
   input: {
     runId: string
@@ -528,40 +532,44 @@ export async function openSessionTab(
     at?: number
   },
 ) {
-  await signalRun(workspaceRunId, 'workspace/openTab', {
+  await host.signalRun(workspaceRunId, 'workspace/openTab', {
     ...input,
     at: input.at ?? Date.now(),
   })
 }
 
 export async function closeSessionTab(
+  host: ShuttleHost,
   workspaceRunId: string,
   input: { runId: string; tabId: string },
 ) {
-  await signalRun(workspaceRunId, 'workspace/closeTab', input)
+  await host.signalRun(workspaceRunId, 'workspace/closeTab', input)
 }
 
 export async function reorderSessionTabs(
+  host: ShuttleHost,
   workspaceRunId: string,
   input: { runId: string; tabIds: string[] },
 ) {
-  await signalRun(workspaceRunId, 'workspace/reorderTabs', input)
+  await host.signalRun(workspaceRunId, 'workspace/reorderTabs', input)
 }
 
 export async function retargetSessionTab(
+  host: ShuttleHost,
   workspaceRunId: string,
   input: { runId: string; tabId: string; title: string; target: string },
 ) {
-  await signalRun(workspaceRunId, 'workspace/retargetTab', input)
+  await host.signalRun(workspaceRunId, 'workspace/retargetTab', input)
 }
 
 /** Links repositories to a folder one after another, stopping at the first the Worker refuses. */
 export async function linkFolderRepos(
+  host: ShuttleHost,
   folderId: string,
   repos: readonly { installationId: number; owner: string; name: string }[],
 ) {
   for (const repo of repos) {
-    await client.workspace.repos.link({
+    await host.client.workspace.repos.link({
       folderId,
       installationId: repo.installationId,
       owner: repo.owner,

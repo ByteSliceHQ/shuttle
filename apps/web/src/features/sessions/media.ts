@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { jsonFields, jsonNumber, jsonText } from '@/lib/json'
+import { type ShuttleHost } from '@/shuttle'
 import type { JsonValue } from '@swirls/looms/core'
 
 /** A file in a session's media: one a person attached, or one an agent shared. */
@@ -39,8 +40,15 @@ export function mediaKind(mediaType: string): MediaKind {
   return mediaType === 'application/pdf' ? 'pdf' : 'file'
 }
 
-export function mediaUrl(runId: string, assetId: string, download = false): string {
-  const url = `/sessions/${encodeURIComponent(runId)}/assets/${encodeURIComponent(assetId)}`
+export function mediaUrl(
+  host: ShuttleHost,
+  runId: string,
+  assetId: string,
+  download = false,
+): string {
+  const url = host.url(
+    `/sessions/${encodeURIComponent(runId)}/assets/${encodeURIComponent(assetId)}`,
+  )
 
   return download ? `${url}?download` : url
 }
@@ -123,6 +131,7 @@ const UploadAnswer = z.object({
  * The file's bytes are the request body, so a large file is never held in memory twice.
  */
 export function uploadAsset(
+  host: ShuttleHost,
   runId: string,
   file: File,
   options: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {},
@@ -132,7 +141,9 @@ export function uploadAsset(
 
     request.open(
       'POST',
-      `/sessions/${encodeURIComponent(runId)}/assets?name=${encodeURIComponent(file.name)}`,
+      host.url(
+        `/sessions/${encodeURIComponent(runId)}/assets?name=${encodeURIComponent(file.name)}`,
+      ),
     )
 
     request.setRequestHeader('content-type', file.type || 'application/octet-stream')

@@ -1,8 +1,8 @@
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
-import { api } from '@/api/client'
 import type { SessionActivity } from '@/features/sessions/session-activity'
+import { useApi } from '@/shuttle'
 import { useRunEvents, useRunStore, useRunSummary } from '@swirls/looms/react'
 
 import {
@@ -140,6 +140,8 @@ function useWorkspaceSource(snapshot: WorkspaceSnapshot) {
  * then folds live delta events strictly past `tail`.
  */
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
+  const api = useApi()
+
   // The signed-in layout's loader read the snapshot before this rendered. It is only where the
   // event stream starts from, and the stream keeps it current from then on, so it is never read
   // again for being old. If something does read it again, the fold starts over from the new one.

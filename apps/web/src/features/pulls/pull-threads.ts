@@ -1,8 +1,8 @@
 import { ORPCError } from '@orpc/client'
 import type { PullComment, PullThread, PullThreadsState } from '@worker/pulls/threads'
 
-import { client } from '@/api/client'
 import type { PullsEvent } from '@/features/events/shuttle-events'
+import { type ShuttleHost } from '@/shuttle'
 import { defineProjection } from '@swirls/looms/core'
 
 import { pullKey } from './pulls'
@@ -119,11 +119,12 @@ export const pullThreads = defineProjection<PullThreadsState, PullsEvent>({
 
 /** Asks the worker to fetch a pull request's threads from GitHub into the mirror. */
 export function syncPullThreads(
+  host: ShuttleHost,
   folderId: string,
   fullName: string,
   number: number,
 ): Promise<{ threads: number; changed: boolean }> {
-  return client.workspace.pulls.syncThreads({ folderId, fullName, number })
+  return host.client.workspace.pulls.syncThreads({ folderId, fullName, number })
 }
 
 /** The person has no GitHub account connected, so nothing can be posted as them yet. */
@@ -185,6 +186,7 @@ export type CommentTarget =
 
 /** Posts a comment on the pull request as the signed-in person. */
 export async function postPullComment(
+  host: ShuttleHost,
   folderId: string,
   fullName: string,
   number: number,
@@ -192,7 +194,7 @@ export async function postPullComment(
   body: string,
 ): Promise<void> {
   try {
-    await client.workspace.pulls.comment({ folderId, fullName, number, ...target, body })
+    await host.client.workspace.pulls.comment({ folderId, fullName, number, ...target, body })
   } catch (cause) {
     throw asGithubNotConnected(cause)
   }
@@ -200,6 +202,7 @@ export async function postPullComment(
 
 /** Resolves or reopens a thread on the pull request as the signed-in person. */
 export async function setPullThreadResolved(
+  host: ShuttleHost,
   folderId: string,
   fullName: string,
   number: number,
@@ -207,7 +210,13 @@ export async function setPullThreadResolved(
   resolved: boolean,
 ): Promise<void> {
   try {
-    await client.workspace.pulls.resolveThread({ folderId, fullName, number, rootId, resolved })
+    await host.client.workspace.pulls.resolveThread({
+      folderId,
+      fullName,
+      number,
+      rootId,
+      resolved,
+    })
   } catch (cause) {
     throw asGithubNotConnected(cause)
   }

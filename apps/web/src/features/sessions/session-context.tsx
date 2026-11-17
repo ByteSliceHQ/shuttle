@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
 import { ArrowRight, BookOpen, FileText, LoaderCircle } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
@@ -13,6 +12,7 @@ import { playbookQuery } from '@/features/playbook/playbook-query'
 import { cn, shortId } from '@/lib/cn'
 import { fullDateTime, relativeTime } from '@/lib/time'
 import { useNow } from '@/lib/use-now'
+import { Link, useShuttleHost } from '@/shuttle'
 import type { PlaybookLesson } from '@shuttle/api'
 
 import {
@@ -51,6 +51,7 @@ function quote(text: string): string {
  * the playbook lessons the session started with. The version shows only once it was amended.
  */
 export function SessionContextButtons({ feed }: { feed: SessionFeed }) {
+  const host = useShuttleHost()
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<ContextTab>('brief')
   const brief = currentBrief(feed)
@@ -58,7 +59,7 @@ export function SessionContextButtons({ feed }: { feed: SessionFeed }) {
 
   // Read only once the playbook tab is showing lessons to say more about.
   const playbook = useQuery({
-    ...playbookQuery,
+    ...playbookQuery(host),
     enabled: open && tab === 'playbook' && lessons.length > 0,
   })
 
@@ -330,8 +331,7 @@ function LessonCard({
               {sources.map(({ runId, seqs }) => (
                 <Link
                   key={runId}
-                  to="/sessions/$sessionId"
-                  params={{ sessionId: runId }}
+                  to={{ page: 'session', sessionId: runId }}
                   className="hover:text-foreground hover:bg-accent inline-flex h-5 items-center gap-1 rounded-full border px-2 transition-colors duration-100"
                   title={`${runId}\nEvents ${seqs.map((seq) => `#${seq}`).join(', ')}`}
                 >
@@ -364,7 +364,7 @@ function evidenceByRun(evidence: PlaybookLesson['evidence']): { runId: string; s
 function OpenPlaybookLink() {
   return (
     <Button variant="ghost" size="sm" className="self-start" asChild>
-      <Link to="/playbook">
+      <Link to={{ page: 'playbook' }}>
         Open playbook
         <ArrowRight />
       </Link>

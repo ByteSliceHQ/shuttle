@@ -1,5 +1,4 @@
 import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
 import { BookOpen, Check, Inbox, LoaderCircle, RefreshCw, Sparkles, X } from 'lucide-react'
 import type { ReactNode } from 'react'
 
@@ -8,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/panel'
 import { decideApproval } from '@/features/sessions/signals'
 import { cn, shortId } from '@/lib/cn'
+import { Link, useShuttleHost } from '@/shuttle'
 import type { PlaybookLesson } from '@shuttle/api'
 
 import { playbookQuery } from './playbook-query'
@@ -16,12 +16,14 @@ type Decision = 'approve' | 'reject'
 
 /** The playbook page. Its route's loader has read the playbook before this renders. */
 export function PlaybookPage() {
+  const host = useShuttleHost()
+
   const {
     data: { runId, playbook },
     error,
     isFetching,
     refetch,
-  } = useSuspenseQuery(playbookQuery)
+  } = useSuspenseQuery(playbookQuery(host))
 
   const proposed = Object.entries(playbook.proposed ?? {})
   const lessons = playbook.lessons
@@ -96,12 +98,13 @@ function ProposedLesson({
   lessonId: string
   lesson: Omit<PlaybookLesson, 'id'>
 }) {
+  const host = useShuttleHost()
   const queryClient = useQueryClient()
 
   const decide = useMutation({
-    mutationFn: (decision: Decision) => decideApproval(runId, `lesson_${lessonId}`, decision),
+    mutationFn: (decision: Decision) => decideApproval(host, runId, `lesson_${lessonId}`, decision),
     // The buttons stay busy until the playbook has been read again and the lesson has moved.
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: playbookQuery.queryKey }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: playbookQuery(host).queryKey }),
   })
 
   const deciding = decide.isPending ? decide.variables : undefined
@@ -194,8 +197,7 @@ function LessonCard({
         {lesson.evidence.map((item) => (
           <Link
             key={`${item.runId}_${item.seq}`}
-            to="/sessions/$sessionId"
-            params={{ sessionId: item.runId }}
+            to={{ page: 'session', sessionId: item.runId }}
             className="text-muted-foreground hover:text-foreground hover:bg-accent inline-flex h-5 items-center rounded-full border px-2 font-mono text-[10px] transition-colors duration-150"
             title={`${item.runId} · event #${item.seq}`}
           >

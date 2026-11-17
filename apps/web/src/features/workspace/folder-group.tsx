@@ -1,5 +1,4 @@
 import { useMutation } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
 import {
   Archive,
   ChevronRight,
@@ -12,7 +11,6 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 
-import { api } from '@/api/client'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,6 +25,7 @@ import {
   resolveSessionIndicator,
 } from '@/features/sessions/session-activity'
 import { cn } from '@/lib/cn'
+import { Link, type ShuttleDestination, useApi, useShuttleHost } from '@/shuttle'
 
 import { ActivityDot } from './activity-dot'
 import { InlineNameInput } from './inline-name-input'
@@ -48,7 +47,7 @@ export function FolderGroup({
   sessions,
   open,
   onToggle,
-  pathname,
+  location,
   activeRunId,
   seenSnapshot,
   now,
@@ -61,7 +60,7 @@ export function FolderGroup({
   sessions: readonly WorkspaceSession[]
   open: boolean
   onToggle: () => void
-  pathname: string
+  location: ShuttleDestination | null
   activeRunId: string | null
   seenSnapshot: SeenSessionsSnapshot
   now: number
@@ -70,6 +69,8 @@ export function FolderGroup({
   pullCounts: ReadonlyMap<string, number>
   onLinkRepo: () => void
 }) {
+  const host = useShuttleHost()
+  const api = useApi()
   const [renaming, setRenaming] = useState(false)
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null)
   const [showAll, setShowAll] = useState(false)
@@ -77,11 +78,11 @@ export function FolderGroup({
   // Nothing waits on these: the sidebar shows the new name, or the row gone, when the
   // workspace's own events say so.
   const renameFolder = useMutation({
-    mutationFn: (name: string) => renameWorkspaceFolder(runId, folder.folderId, name),
+    mutationFn: (name: string) => renameWorkspaceFolder(host, runId, folder.folderId, name),
   })
 
   const archiveFolder = useMutation({
-    mutationFn: () => archiveWorkspaceFolder(runId, folder.folderId),
+    mutationFn: () => archiveWorkspaceFolder(host, runId, folder.folderId),
   })
 
   const renameSession = useMutation(api.sessions.rename.mutationOptions())
@@ -89,7 +90,7 @@ export function FolderGroup({
 
   const visible = showAll ? sessions : sessions.slice(0, SESSION_PREVIEW)
   const hidden = sessions.length - visible.length
-  const folderActive = pathname === `/folders/${folder.folderId}`
+  const folderActive = location?.page === 'folder' && location.folderId === folder.folderId
   const FolderIcon = folder.archived ? Archive : open ? FolderOpen : Folder
   const repoCount = folder.repos.length
 
@@ -158,8 +159,7 @@ export function FolderGroup({
         ) : (
           <>
             <Link
-              to="/folders/$folderId"
-              params={{ folderId: folder.folderId }}
+              to={{ page: 'folder', folderId: folder.folderId }}
               title={folder.name}
               onClick={() => rememberLastFolder(folder.folderId)}
               onDoubleClick={(event) => {
@@ -188,8 +188,7 @@ export function FolderGroup({
               <div className={cn('absolute inset-y-0 right-0 flex items-center', revealOnRowHover)}>
                 {folder.archived ? null : (
                   <Link
-                    to="/folders/$folderId"
-                    params={{ folderId: folder.folderId }}
+                    to={{ page: 'folder', folderId: folder.folderId }}
                     aria-label={`New session in ${folder.name}`}
                     title="New session"
                     onClick={() => rememberLastFolder(folder.folderId)}
@@ -267,8 +266,7 @@ export function FolderGroup({
 
           {sessions.length === 0 && !folder.archived ? (
             <Link
-              to="/folders/$folderId"
-              params={{ folderId: folder.folderId }}
+              to={{ page: 'folder', folderId: folder.folderId }}
               onClick={() => rememberLastFolder(folder.folderId)}
               className="text-muted-foreground/70 hover:text-foreground flex h-7 items-center gap-2 rounded-md px-2 text-[11.5px] transition-colors duration-100"
             >
@@ -326,8 +324,7 @@ function FolderMeta({
       </span>
       {pullAttention > 0 ? (
         <Link
-          to="/folders/$folderId"
-          params={{ folderId }}
+          to={{ page: 'folder', folderId: folderId }}
           title={pullLabel}
           aria-label={pullLabel}
           onClick={() => {

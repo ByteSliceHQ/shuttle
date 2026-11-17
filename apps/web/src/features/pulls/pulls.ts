@@ -1,6 +1,6 @@
-import { useTenant } from '@/features/auth/tenant'
 import type { PullsEvent } from '@/features/events/shuttle-events'
 import type { PublishedPull, PullStackPosition } from '@/features/sessions/session-feed'
+import { useTenant } from '@/shuttle'
 import type { AutoReviewMode } from '@shuttle/api'
 import { defineProjection } from '@swirls/looms/core'
 

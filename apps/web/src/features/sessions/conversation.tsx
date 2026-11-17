@@ -1,5 +1,4 @@
 import { useMutation } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
 import {
   ArrowRight,
   Check,
@@ -19,7 +18,6 @@ import {
 } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
-import { api } from '@/api/client'
 import { FollowList } from '@/components/follow-list'
 import { Markdown } from '@/components/markdown'
 import { statusClass, statusLabel } from '@/components/status'
@@ -35,11 +33,11 @@ import {
 import { EmptyState } from '@/components/ui/panel'
 import { Textarea } from '@/components/ui/textarea'
 import { changedPaths, previewPorts } from '@/features/artifacts/artifact-links'
-import { useTenant } from '@/features/auth/tenant'
 import { cn, compactJson } from '@/lib/cn'
 import { jsonFields, jsonText } from '@/lib/json'
 import { clockTime } from '@/lib/time'
 import { useNow } from '@/lib/use-now'
+import { Link, useApi, useShuttleHost, useTenant } from '@/shuttle'
 import type { ThreadNode } from '@swirls/looms/core'
 
 import type { AgentIdentity } from './agents'
@@ -660,6 +658,7 @@ function RouteWaitFallbackRow({
   identities: ReadonlyMap<string, AgentIdentity>
   onInspect: (threadId: string, seq?: number) => void
 }) {
+  const api = useApi()
   const stop = useMutation(api.sessions.stop.mutationOptions())
   const pending = stop.isPending
   const label = identities.get(wait.threadId)?.label ?? 'worker'
@@ -794,9 +793,11 @@ function RouteChip({
   context: ConversationContext
   onInspect: (threadId: string, seq?: number) => void
 }) {
+  const host = useShuttleHost()
+
   // What becomes of a reroute shows on the feed, as the message's new route.
   const sendReroute = useMutation({
-    mutationFn: (kind: InterjectionKind) => reroute(runId, messageId, kind),
+    mutationFn: (kind: InterjectionKind) => reroute(host, runId, messageId, kind),
   })
 
   if (!route) {
@@ -1572,12 +1573,13 @@ function AskUserCard({
   context: ConversationContext
   className?: string
 }) {
+  const host = useShuttleHost()
   const identity = context.identities.get(item.threadId)
   const [draft, setDraft] = useState('')
 
   // `null` leaves the question to the agent's judgment.
   const answer = useMutation({
-    mutationFn: (text: string | null) => answerQuestion(context.runId, item.approvalId, text),
+    mutationFn: (text: string | null) => answerQuestion(host, context.runId, item.approvalId, text),
   })
 
   // Once the session has the answer the card stays locked: the feed replaces it with the outcome.
@@ -1698,6 +1700,7 @@ function PullReviewCard({
   context: ConversationContext
   className?: string
 }) {
+  const host = useShuttleHost()
   const identity = context.identities.get(item.threadId)
   const drafts = context.feed.draftReviewComments
 
@@ -1714,11 +1717,11 @@ function PullReviewCard({
   const decide = useMutation({
     mutationFn: (actionId: 'submit' | 'discard') =>
       actionId === 'discard'
-        ? decideStructuredApproval(context.runId, item.approvalId, {
+        ? decideStructuredApproval(host, context.runId, item.approvalId, {
             actionId: 'discard',
             outcome: 'reject',
           })
-        : decideStructuredApproval(context.runId, item.approvalId, {
+        : decideStructuredApproval(host, context.runId, item.approvalId, {
             actionId: 'submit',
             outcome: 'approve',
             payload: {
@@ -1877,7 +1880,10 @@ function Notice({
           {humanize(item.text, context.identities)}
         </span>
         {item.runId ? (
-          <Link to="/playbook" className="text-foreground shrink-0 font-medium hover:underline">
+          <Link
+            to={{ page: 'playbook' }}
+            className="text-foreground shrink-0 font-medium hover:underline"
+          >
             Open playbook
           </Link>
         ) : null}

@@ -2,16 +2,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Building2, Check, Lock, UserRound } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 
-import { api } from '@/api/client'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { orgMembersQuery, type OrgMember } from '@/features/auth/org-people'
-import { useOrgPeople } from '@/features/auth/org-people'
-import { useTenant } from '@/features/auth/tenant'
 import { useFixtureMode } from '@/features/workspace/workspace-context'
 import { sessionPeopleFixture } from '@/features/workspace/workspace-fixtures'
 import { cn } from '@/lib/cn'
 import { initials } from '@/lib/initials'
+import {
+  peopleQuery,
+  type ShuttlePerson,
+  useApi,
+  useOrgPeople,
+  useShuttle,
+  useShuttleHost,
+} from '@/shuttle'
 import type { SessionAccess, SessionVisibility } from '@shuttle/api'
 
 import { sessionQueries } from './session-queries'
@@ -49,7 +53,10 @@ function Avatar({ className, children }: { className?: string; children: ReactNo
  * fresh when the page moves to another session.
  */
 export function SessionShare({ runId }: { runId: string }) {
-  const tenant = useTenant()
+  const host = useShuttleHost()
+  const api = useApi()
+  const { identity } = useShuttle()
+  const tenant = identity.tenant
   const orgPeople = useOrgPeople()
   const [open, setOpen] = useState(false)
   const queryClient = useQueryClient()
@@ -67,12 +74,12 @@ export function SessionShare({ runId }: { runId: string }) {
 
   // The session page's loader starts this read without waiting on it: the title bar shows
   // without the avatars, and they come in when it lands.
-  const accessQuery = sessionQueries(runId).access
+  const accessQuery = sessionQueries(host, runId).access
   const accessKey = accessQuery.queryKey
   const { data: access } = useQuery({ ...accessQuery, enabled: !fixture })
 
   // Only the open popover lists the organization.
-  const members = useQuery({ ...orgMembersQuery(tenant.org.id), enabled: open })
+  const members = useQuery({ ...peopleQuery(tenant.org.id, identity.listPeople), enabled: open })
 
   /** Shows the change at once and puts the old state back if the Worker refuses it. */
   const update = useMutation(
@@ -302,7 +309,7 @@ function MemberRow({
   checked,
   onToggle,
 }: {
-  member: OrgMember
+  member: ShuttlePerson
   you: boolean
   note?: string
   checked?: boolean

@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
 import { ChevronDown } from 'lucide-react'
 import { useState } from 'react'
 
@@ -17,6 +16,7 @@ import {
 import { signedInAt, type SignInPlace } from '@/features/connections/places'
 import { connectionsQuery } from '@/features/connections/queries'
 import { cn } from '@/lib/cn'
+import { Link, useShuttleHost } from '@/shuttle'
 import { HarnessId, TEAM_PRESETS, TeamPreset, type Connection, type Team } from '@shuttle/api'
 
 import { useSetSessionDefaults } from './session-queries'
@@ -102,7 +102,8 @@ export function HarnessSwitcher({
   /** Where the session runs, so the picker says whether each agent is signed in there. */
   place?: SignInPlace | null
 }) {
-  const { data: state, refetch } = useQuery(connectionsQuery())
+  const host = useShuttleHost()
+  const { data: state, refetch } = useQuery(connectionsQuery(host))
   const connections = state?.connections ?? []
 
   // An agent with no connection of its own, such as one reached over ACP, goes by its name.
@@ -235,7 +236,7 @@ export function HarnessSwitcher({
         ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <Link to="/connections">Manage connections</Link>
+          <Link to={{ page: 'connections' }}>Manage connections</Link>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -253,7 +254,8 @@ export function useDefaultHarness(): {
   setTeam: (team: Team) => void
   save: () => Promise<unknown>
 } {
-  const { data: state } = useQuery(connectionsQuery())
+  const host = useShuttleHost()
+  const { data: state } = useQuery(connectionsQuery(host))
   // What the person picked on this form. Until they pick, the form shows the saved defaults.
   const [chosen, setChosen] = useState<{ harness: HarnessId; team: Team } | null>(null)
   const { mutateAsync: saveDefaults } = useSetSessionDefaults()

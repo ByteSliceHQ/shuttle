@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 
-import { api } from '@/api/client'
+import { type ShuttleHost } from '@/shuttle'
 import type {
   ChangeStatus,
   SandboxDiffs,
@@ -26,7 +26,11 @@ export type WorkspaceRepo = SandboxWorkspaceRepo
  * the changes, and what the language server said. Views that are showing any of it read again;
  * the rest do when they are next shown.
  */
-export function invalidateWorktree(queries: QueryClient, runId: string): Promise<void> {
+export function invalidateWorktree(
+  { api }: ShuttleHost,
+  queries: QueryClient,
+  runId: string,
+): Promise<void> {
   const input = { id: runId }
 
   return Promise.all([
@@ -67,6 +71,7 @@ function sandboxBase(runId: string): string {
 }
 
 export function sandboxTerminalUrl(
+  host: ShuttleHost,
   identity: SandboxIdentity,
   options: { cwd?: string; cols?: number; rows?: number },
 ): string {
@@ -85,10 +90,8 @@ export function sandboxTerminalUrl(
   }
 
   const query = sandboxQuery(identity, params)
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = window.location.host
 
-  return `${protocol}//${host}${sandboxBase(identity.runId)}/terminal${query}`
+  return host.socketUrl(`${sandboxBase(identity.runId)}/terminal${query}`)
 }
 
 /** Preview host for sandbox ports: `p3000-<label>.localhost:8790` locally. */

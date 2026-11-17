@@ -10,6 +10,7 @@ import {
   type SessionTabSet,
 } from '@/features/workspace/workspace'
 import { useWorkspace } from '@/features/workspace/workspace-context'
+import { useShuttleHost } from '@/shuttle'
 
 import {
   applyPendingOps,
@@ -41,6 +42,7 @@ export interface SessionTabsController {
 }
 
 export function useSessionTabs(sessionRunId: string): SessionTabsController {
+  const host = useShuttleHost()
   const workspace = useWorkspace()
   const projected = workspace?.tabs[sessionRunId]
   const [pendingRaw, setPendingRaw] = useState<PendingTabOp[]>([])
@@ -104,7 +106,7 @@ export function useSessionTabs(sessionRunId: string): SessionTabsController {
       setActiveTabId(tabId)
 
       if (workspace) {
-        await openSessionTab(workspace.listingRunId(sessionRunId), {
+        await openSessionTab(host, workspace.listingRunId(sessionRunId), {
           runId: sessionRunId,
           tabId,
           kind: input.kind,
@@ -116,7 +118,7 @@ export function useSessionTabs(sessionRunId: string): SessionTabsController {
 
       return tabId
     },
-    [sessionRunId, setActiveTabId, workspace],
+    [host, sessionRunId, setActiveTabId, workspace],
   )
 
   const closeTab = useCallback(
@@ -132,10 +134,13 @@ export function useSessionTabs(sessionRunId: string): SessionTabsController {
       }
 
       if (workspace) {
-        await closeSessionTab(workspace.listingRunId(sessionRunId), { runId: sessionRunId, tabId })
+        await closeSessionTab(host, workspace.listingRunId(sessionRunId), {
+          runId: sessionRunId,
+          tabId,
+        })
       }
     },
-    [sessionRunId, workspace],
+    [host, sessionRunId, workspace],
   )
 
   const reorderTabs = useCallback(
@@ -143,13 +148,13 @@ export function useSessionTabs(sessionRunId: string): SessionTabsController {
       setPendingRaw((prev) => [...prev, { kind: 'reorder', tabIds }])
 
       if (workspace) {
-        await reorderSessionTabs(workspace.listingRunId(sessionRunId), {
+        await reorderSessionTabs(host, workspace.listingRunId(sessionRunId), {
           runId: sessionRunId,
           tabIds,
         })
       }
     },
-    [sessionRunId, workspace],
+    [host, sessionRunId, workspace],
   )
 
   const retargetTab = useCallback(
@@ -157,7 +162,7 @@ export function useSessionTabs(sessionRunId: string): SessionTabsController {
       setPendingRaw((prev) => [...prev, { kind: 'retarget', tabId, title, target }])
 
       if (workspace) {
-        await retargetSessionTab(workspace.listingRunId(sessionRunId), {
+        await retargetSessionTab(host, workspace.listingRunId(sessionRunId), {
           runId: sessionRunId,
           tabId,
           title,
@@ -165,7 +170,7 @@ export function useSessionTabs(sessionRunId: string): SessionTabsController {
         })
       }
     },
-    [sessionRunId, workspace],
+    [host, sessionRunId, workspace],
   )
 
   const focusKind = useCallback(async (kind: ArtifactTabKind) => openTab({ kind }), [openTab])

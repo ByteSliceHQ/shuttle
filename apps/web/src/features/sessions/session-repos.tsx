@@ -1,10 +1,10 @@
-import { Link } from '@tanstack/react-router'
 import { ArrowRight, ChevronDown, ExternalLink, GitBranch, Lock } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { RepoName } from '@/features/workspace/repo-chip'
 import { repoCountLabel, type LinkedRepo } from '@/features/workspace/workspace'
+import { Link } from '@/shuttle'
 
 /** One trigger for every linked repo, so its width doesn't grow with the folder. */
 export function SessionRepos({
@@ -81,8 +81,7 @@ export function SessionRepos({
         </ul>
         <div className="border-t p-1">
           <Link
-            to="/folders/$folderId"
-            params={{ folderId }}
+            to={{ page: 'folder', folderId: folderId }}
             className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:bg-accent flex h-8 items-center gap-2 rounded-md px-2 text-[12px] transition-colors duration-100 outline-none"
           >
             Manage repos

@@ -2,6 +2,7 @@ import { AlertCircle, FileAudio, FileText, FileVideo, Paperclip, X } from 'lucid
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { cn, errorMessage } from '@/lib/cn'
+import { useShuttleHost } from '@/shuttle'
 
 import {
   MAX_ATTACHMENTS,
@@ -32,6 +33,7 @@ export interface PendingAttachment {
  * keeps typing, so sending rarely has to wait.
  */
 export function useComposerAttachments(runId: string) {
+  const host = useShuttleHost()
   const [attachments, setAttachments] = useState<readonly PendingAttachment[]>([])
   const [rejection, setRejection] = useState<string | null>(null)
   /** The latest files, for callbacks that must not change identity as files come and go. */
@@ -92,7 +94,7 @@ export function useComposerAttachments(runId: string) {
         const key = crypto.randomUUID()
         const controller = new AbortController()
 
-        const uploaded = uploadAsset(runId, file, {
+        const uploaded = uploadAsset(host, runId, file, {
           signal: controller.signal,
           onProgress: (progress) => patch(key, { progress }),
         })
@@ -123,7 +125,7 @@ export function useComposerAttachments(runId: string) {
         setAttachments((current) => [...current, ...accepted])
       }
     },
-    [runId, patch],
+    [host, runId, patch],
   )
 
   const remove = useCallback((key: string) => {

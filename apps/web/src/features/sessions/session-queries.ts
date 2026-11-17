@@ -1,12 +1,12 @@
 import { useMutation, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query'
 
-import { api } from '@/api/client'
+import { type ShuttleHost, useApi, useShuttleHost } from '@/shuttle'
 
 /**
  * What the Worker keeps about one session, as queries. The session page's loader reads the ones
  * it cannot render without; the rest are read by whatever shows them.
  */
-export function sessionQueries(id: string) {
+export function sessionQueries({ api }: ShuttleHost, id: string) {
   const input = { id }
 
   return {
@@ -72,8 +72,9 @@ function optimistic<TData, TInput>(
 
 /** Changes which agent runs the session. Applies from the session's next turn. */
 export function useSetSessionHarness(runId: string, onRefused?: (cause: Error) => void) {
+  const api = useApi()
   const queryClient = useQueryClient()
-  const { queryKey } = sessionQueries(runId).harness
+  const { queryKey } = sessionQueries(useShuttleHost(), runId).harness
 
   return useMutation(
     api.sessions.harness.set.mutationOptions(
@@ -90,8 +91,9 @@ export function useSetSessionHarness(runId: string, onRefused?: (cause: Error) =
 
 /** Changes the session's team. Applies from the conductor's next turn. */
 export function useSetSessionTeam(runId: string, onRefused?: (cause: Error) => void) {
+  const api = useApi()
   const queryClient = useQueryClient()
-  const { queryKey } = sessionQueries(runId).team
+  const { queryKey } = sessionQueries(useShuttleHost(), runId).team
 
   return useMutation(
     api.sessions.team.set.mutationOptions(
@@ -108,8 +110,9 @@ export function useSetSessionTeam(runId: string, onRefused?: (cause: Error) => v
 
 /** Changes the model or effort one vendor agent runs on. Applies from that agent's next turn. */
 export function useSetSessionVendorModel(runId: string, onRefused?: (cause: Error) => void) {
+  const api = useApi()
   const queryClient = useQueryClient()
-  const { queryKey } = sessionQueries(runId).vendorModels
+  const { queryKey } = sessionQueries(useShuttleHost(), runId).vendorModels
 
   return useMutation(
     api.sessions.vendorModels.set.mutationOptions(
@@ -134,6 +137,7 @@ export function useSetSessionVendorModel(runId: string, onRefused?: (cause: Erro
  * carries those defaults, so it is read again afterwards.
  */
 export function useSetSessionDefaults(onRefused?: (cause: Error) => void) {
+  const api = useApi()
   const queryClient = useQueryClient()
 
   return useMutation(

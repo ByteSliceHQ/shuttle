@@ -2,13 +2,13 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { GitPullRequest, PanelRightClose, PanelRightOpen, RefreshCw } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 
-import { api, client } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { PanelHeader, PanelTitle } from '@/components/ui/panel'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useFixtureMode } from '@/features/workspace/workspace-context'
 import { cn } from '@/lib/cn'
+import { useApi, useShuttleHost } from '@/shuttle'
 import type { FolderSyncReport } from '@shuttle/api'
 import { useProjection, useRunStore } from '@swirls/looms/react'
 
@@ -46,6 +46,8 @@ export interface PullInboxData {
  * what makes the Worker fetch.
  */
 export function usePullInbox(folderId: string, repoNames: readonly string[]): PullInboxData {
+  const api = useApi()
+  const { client } = useShuttleHost()
   const [fixtureMode] = useFixtureMode()
   const store = useRunStore(usePullsRunId())
   const liveInbox = useProjection(store, pullInbox)

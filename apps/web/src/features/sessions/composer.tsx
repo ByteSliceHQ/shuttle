@@ -12,7 +12,6 @@ import {
   type ReactNode,
 } from 'react'
 
-import { api } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -25,10 +24,10 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Kbd } from '@/components/ui/panel'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { useTenant } from '@/features/auth/tenant'
 import { SignInGate, useAgentGate, useSessionRunsAt } from '@/features/connections/agent-sign-in'
 import { connectionsQuery } from '@/features/connections/queries'
 import { cn, errorMessage } from '@/lib/cn'
+import { useApi, useShuttleHost, useTenant } from '@/shuttle'
 import type { HarnessId, Team, VendorHarnessId, VendorModelChoice } from '@shuttle/api'
 import { useRunStore } from '@swirls/looms/react'
 
@@ -112,6 +111,8 @@ export function Composer({
   /** What the session works from (repos, brief), shown under the composer on the left. */
   context?: ReactNode
 }) {
+  const host = useShuttleHost()
+  const api = useApi()
   const [text, setText] = useState('')
   const [kind, setKind] = useState<InterjectionKind | typeof AUTO>(AUTO)
   const [target, setTarget] = useState<string>(targetThreadId ?? AUTO)
@@ -128,7 +129,7 @@ export function Composer({
 
   // The session page's loader has read these, so they are here from the first render. A change
   // made below is written to the same queries, which is how the page naming the agent sees it.
-  const session = sessionQueries(runId)
+  const session = sessionQueries(host, runId)
   const { harness } = useSuspenseQuery(session.harness).data
   const { team } = useSuspenseQuery(session.team).data
   const { choices: vendorChoices } = useSuspenseQuery(session.vendorModels).data
@@ -182,7 +183,7 @@ export function Composer({
   // message box offers to sign in there first.
   const gate = useAgentGate(harness, runsAt.place)
   // Until the connections are in, the team shows as saved.
-  const connections = useQuery(connectionsQuery()).data?.connections
+  const connections = useQuery(connectionsQuery(host)).data?.connections
   const activeTeam = connections ? effectiveTeam(team, connections, runsAt.place) : team
   const mentions = harness === 'shuttle' ? teamMentions(activeTeam) : []
   const hybrid = mentions.some((member) => member !== 'worker')

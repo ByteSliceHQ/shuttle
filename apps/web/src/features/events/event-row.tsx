@@ -1,6 +1,5 @@
-import { Link } from '@tanstack/react-router'
-
 import { cn, shortId } from '@/lib/cn'
+import { Link } from '@/shuttle'
 
 import { eventMeta, familyColor, type SessionEvent } from './event-catalog'
 
@@ -75,9 +74,7 @@ export function EventRow({
       {(columns?.session ?? true) && (runLabel || runId) ? (
         runId ? (
           <Link
-            to="/sessions/$sessionId"
-            params={{ sessionId: runId }}
-            search={event.threadId ? { thread: event.threadId } : {}}
+            to={{ page: 'session', sessionId: runId, thread: event.threadId ?? undefined }}
             onClick={(click) => click.stopPropagation()}
             className="text-muted-foreground hover:text-foreground max-w-28 shrink-0 truncate font-sans underline-offset-2 hover:underline"
             title={runId}

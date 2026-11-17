@@ -3,12 +3,10 @@ import { RotateCw, SquareTerminal } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { z } from 'zod'
 
-import { api } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/panel'
-import { possessive, useOrgPeople } from '@/features/auth/org-people'
-import { useTenant } from '@/features/auth/tenant'
 import { cn } from '@/lib/cn'
+import { possessive, useApi, useOrgPeople, useShuttleHost, useTenant } from '@/shuttle'
 import type { SandboxPlace } from '@shuttle/api'
 
 import { sandboxTerminalUrl } from './sandbox'
@@ -32,6 +30,8 @@ export function TerminalViewer({
   folderId?: string
   cwd: string
 }) {
+  const host = useShuttleHost()
+  const api = useApi()
   const containerRef = useRef<HTMLDivElement>(null)
   const reconnectRef = useRef<() => void>(() => {})
   const [status, setStatus] = useState<Status>('connecting')
@@ -54,7 +54,7 @@ export function TerminalViewer({
     let socket: WebSocket | null = null
     let dispose = () => {}
 
-    async function start(host: HTMLDivElement) {
+    async function start(element: HTMLDivElement) {
       const [{ Terminal }, { FitAddon }, { WebglAddon }] = await Promise.all([
         import('@xterm/xterm'),
         import('@xterm/addon-fit'),
@@ -93,7 +93,7 @@ export function TerminalViewer({
       const fit = new FitAddon()
 
       term.loadAddon(fit)
-      term.open(host)
+      term.open(element)
 
       // The GPU renderer draws box characters and dense output cleanly. Where a browser has no
       // WebGL, or loses the context, xterm's own renderer carries on.
@@ -108,7 +108,7 @@ export function TerminalViewer({
 
       const refit = () => {
         // A hidden tab has no size; fitting to it would shrink the shell to nothing.
-        if (host.clientWidth > 0 && host.clientHeight > 0) {
+        if (element.clientWidth > 0 && element.clientHeight > 0) {
           fit.fit()
         }
       }
@@ -128,6 +128,7 @@ export function TerminalViewer({
 
         const opened = new WebSocket(
           sandboxTerminalUrl(
+            host,
             { runId, folderId },
             { cwd: cwd || undefined, cols: term.cols, rows: term.rows },
           ),
@@ -213,7 +214,7 @@ export function TerminalViewer({
         frame = requestAnimationFrame(refit)
       })
 
-      resizeObserver.observe(host)
+      resizeObserver.observe(element)
 
       dispose = () => {
         cancelAnimationFrame(frame)
@@ -235,7 +236,7 @@ export function TerminalViewer({
       socket?.close()
       dispose()
     }
-  }, [runId, folderId, cwd])
+  }, [host, runId, folderId, cwd])
 
   if (unsupported) {
     return (

@@ -1,4 +1,3 @@
-import { Link } from '@tanstack/react-router'
 import { GitPullRequest, MoreHorizontal } from 'lucide-react'
 
 import {
@@ -10,6 +9,7 @@ import {
 import { resolveSessionIndicator } from '@/features/sessions/session-activity'
 import { cn } from '@/lib/cn'
 import { compactRelativeTime, fullDateTime } from '@/lib/time'
+import { Link } from '@/shuttle'
 
 import { ActivityDot } from './activity-dot'
 
@@ -65,8 +65,7 @@ export function SessionRow({
   return (
     <div className={cn(sidebarRowClass(active), 'float-in', dimmed && 'opacity-60')}>
       <Link
-        to="/sessions/$sessionId"
-        params={{ sessionId: runId }}
+        to={{ page: 'session', sessionId: runId }}
         title={title}
         className="focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md pr-1 pl-1.5 outline-none focus-visible:ring-2"
       >

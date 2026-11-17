@@ -1,5 +1,4 @@
 import { useMutation } from '@tanstack/react-query'
-import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
 import {
   Archive,
   BookOpen,
@@ -21,7 +20,6 @@ import { Kbd } from '@/components/ui/panel'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { AccountMenu } from '@/features/auth/account-menu'
-import { useTenant } from '@/features/auth/tenant'
 import { DesktopAttention } from '@/features/desktop/desktop-attention'
 import { LocalSandboxStatus } from '@/features/desktop/local-sandbox-status'
 import {
@@ -43,10 +41,17 @@ import {
   resolveSessionIndicator,
 } from '@/features/sessions/session-activity'
 import { cn } from '@/lib/cn'
-import { runStoreOptions } from '@/lib/run-stores'
 import { useMediaQuery } from '@/lib/use-media-query'
 import { useNow } from '@/lib/use-now'
-import { LoomsProvider, useProjection, useRunStore } from '@swirls/looms/react'
+import {
+  Link,
+  type ShuttleDestination,
+  useLocation,
+  useNavigate,
+  useShuttleHost,
+  useTenant,
+} from '@/shuttle'
+import { useProjection, useRunStore } from '@swirls/looms/react'
 
 import { ActivityDot } from './activity-dot'
 import { FixtureToggle } from './fixture-toggle'
@@ -78,35 +83,28 @@ function readExpanded(): Record<string, boolean> {
   }
 }
 
-function activeSessionRunId(pathname: string): string | null {
-  const match = pathname.match(/^\/sessions\/([^/]+)$/)
-  return match?.[1] ? decodeURIComponent(match[1]) : null
-}
-
 export function AppSidebarShell({ children }: { children: React.ReactNode }) {
-  const userId = useTenant().user.id
-
   return (
-    <LoomsProvider {...runStoreOptions(userId)}>
-      <WorkspaceProvider>
-        <DesktopAttention />
-        <div className="flex h-dvh min-h-0">
-          <AppSidebar />
-          <div className="min-w-0 flex-1">{children}</div>
-        </div>
-        {import.meta.env.DEV ? <FixtureToggle /> : null}
-      </WorkspaceProvider>
-    </LoomsProvider>
+    <WorkspaceProvider>
+      <DesktopAttention />
+      <div className="flex h-dvh min-h-0">
+        <AppSidebar />
+        <div className="min-w-0 flex-1">{children}</div>
+      </div>
+      {import.meta.env.DEV ? <FixtureToggle /> : null}
+    </WorkspaceProvider>
   )
 }
 
 function AppSidebar() {
   const navigate = useNavigate()
-  const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const location = useLocation()
+  // Names the page on screen, to tell whether the drawer was opened from it.
+  const here = JSON.stringify(location)
   const narrow = useMediaQuery('(max-width: 767px)')
   const workspace = useWorkspace()
   const seenSnapshot = useSeenSessions()
-  const activeRunId = activeSessionRunId(pathname)
+  const activeRunId = location?.page === 'session' ? location.sessionId : null
   const activeSession = activeRunId ? workspace.tree.sessions[activeRunId] : undefined
 
   useEffect(() => {
@@ -129,12 +127,12 @@ function AppSidebar() {
 
   /** On narrow screens the drawer stays open only on the page it was opened from. */
   const [drawerPath, setDrawerPath] = useState<string | null>(null)
-  const drawerOpen = narrow && drawerPath === pathname
+  const drawerOpen = narrow && drawerPath === here
   const collapsed = narrow ? !drawerOpen : collapsedPref
 
   function toggle() {
     if (narrow) {
-      setDrawerPath(drawerOpen ? null : pathname)
+      setDrawerPath(drawerOpen ? null : here)
       return
     }
 
@@ -155,7 +153,7 @@ function AppSidebar() {
 
     if (mod && event.shiftKey && key === 'o') {
       event.preventDefault()
-      void navigate({ to: '/' })
+      void navigate({ page: 'home' })
     }
 
     if (key === 'escape' && drawerOpen && !event.defaultPrevented) {
@@ -170,7 +168,7 @@ function AppSidebar() {
 
   const rail = (
     <SidebarRail
-      pathname={pathname}
+      location={location}
       activeRunId={activeRunId}
       workspace={workspace}
       seenSnapshot={seenSnapshot}
@@ -184,7 +182,7 @@ function AppSidebar() {
 
   const panel = (
     <SidebarPanel
-      pathname={pathname}
+      location={location}
       activeRunId={activeRunId}
       seenSnapshot={seenSnapshot}
       onCollapse={toggle}
@@ -218,13 +216,13 @@ function AppSidebar() {
 }
 
 function SidebarRail({
-  pathname,
+  location,
   activeRunId,
   workspace,
   seenSnapshot,
   onExpand,
 }: {
-  pathname: string
+  location: ShuttleDestination | null
   activeRunId: string | null
   workspace: WorkspaceValue
   seenSnapshot: SeenSessionsSnapshot
@@ -296,10 +294,10 @@ function SidebarRail({
         <Button
           variant="ghost"
           size="icon-sm"
-          className={cn(pathname === '/' && 'bg-accent text-foreground')}
+          className={cn(location?.page === 'home' && 'bg-accent text-foreground')}
           asChild
         >
-          <Link to="/" aria-label="New session">
+          <Link to={{ page: 'home' }} aria-label="New session">
             <SquarePen />
           </Link>
         </Button>
@@ -308,10 +306,10 @@ function SidebarRail({
         <Button
           variant="ghost"
           size="icon-sm"
-          className={cn(pathname === '/playbook' && 'bg-accent text-foreground')}
+          className={cn(location?.page === 'playbook' && 'bg-accent text-foreground')}
           asChild
         >
-          <Link to="/playbook" aria-label="Playbook">
+          <Link to={{ page: 'playbook' }} aria-label="Playbook">
             <BookOpen />
           </Link>
         </Button>
@@ -320,10 +318,10 @@ function SidebarRail({
         <Button
           variant="ghost"
           size="icon-sm"
-          className={cn(pathname === '/events' && 'bg-accent text-foreground')}
+          className={cn(location?.page === 'events' && 'bg-accent text-foreground')}
           asChild
         >
-          <Link to="/events" aria-label="Events">
+          <Link to={{ page: 'events' }} aria-label="Events">
             <Radio />
           </Link>
         </Button>
@@ -332,10 +330,10 @@ function SidebarRail({
         <Button
           variant="ghost"
           size="icon-sm"
-          className={cn(pathname === '/connections' && 'bg-accent text-foreground')}
+          className={cn(location?.page === 'connections' && 'bg-accent text-foreground')}
           asChild
         >
-          <Link to="/connections" aria-label="Connections">
+          <Link to={{ page: 'connections' }} aria-label="Connections">
             <Plug />
           </Link>
         </Button>
@@ -345,12 +343,12 @@ function SidebarRail({
 }
 
 function SidebarPanel({
-  pathname,
+  location,
   activeRunId,
   seenSnapshot,
   onCollapse,
 }: {
-  pathname: string
+  location: ShuttleDestination | null
   activeRunId: string | null
   seenSnapshot: SeenSessionsSnapshot
   onCollapse: () => void
@@ -361,7 +359,7 @@ function SidebarPanel({
     <aside className="bg-sidebar flex w-[260px] shrink-0 flex-col border-r">
       <div className="flex h-12 shrink-0 items-center gap-2 border-b pr-2 pl-3">
         <Link
-          to="/"
+          to={{ page: 'home' }}
           className="focus-visible:ring-ring/50 flex min-w-0 flex-1 items-center gap-2 rounded-md outline-none focus-visible:ring-2"
         >
           <span className="bg-brand/15 text-foreground ring-brand/25 flex size-6 shrink-0 items-center justify-center rounded-md ring-1 ring-inset">
@@ -378,27 +376,39 @@ function SidebarPanel({
 
       <nav className="flex flex-col gap-px p-2">
         <SidebarNavLink
-          to="/"
+          to={{ page: 'home' }}
           icon={<SquarePen />}
-          active={pathname === '/'}
+          active={location?.page === 'home'}
           shortcut={['⌘', '⇧', 'O']}
         >
           New session
         </SidebarNavLink>
-        <SidebarNavLink to="/playbook" icon={<BookOpen />} active={pathname === '/playbook'}>
+        <SidebarNavLink
+          to={{ page: 'playbook' }}
+          icon={<BookOpen />}
+          active={location?.page === 'playbook'}
+        >
           Playbook
         </SidebarNavLink>
-        <SidebarNavLink to="/events" icon={<Radio />} active={pathname === '/events'}>
+        <SidebarNavLink
+          to={{ page: 'events' }}
+          icon={<Radio />}
+          active={location?.page === 'events'}
+        >
           Events
         </SidebarNavLink>
-        <SidebarNavLink to="/connections" icon={<Plug />} active={pathname === '/connections'}>
+        <SidebarNavLink
+          to={{ page: 'connections' }}
+          icon={<Plug />}
+          active={location?.page === 'connections'}
+        >
           Connections
         </SidebarNavLink>
       </nav>
 
       <FolderTree
         workspace={workspace}
-        pathname={pathname}
+        location={location}
         activeRunId={activeRunId}
         seenSnapshot={seenSnapshot}
       />
@@ -412,15 +422,16 @@ function SidebarPanel({
 
 function FolderTree({
   workspace,
-  pathname,
+  location,
   activeRunId,
   seenSnapshot,
 }: {
   workspace: WorkspaceValue
-  pathname: string
+  location: ShuttleDestination | null
   activeRunId: string | null
   seenSnapshot: SeenSessionsSnapshot
 }) {
+  const host = useShuttleHost()
   const { runId, tree, liveSessions } = workspace
   const navigate = useNavigate()
   const now = useNow()
@@ -465,11 +476,11 @@ function FolderTree({
   }
 
   const createFolder = useMutation({
-    mutationFn: (name: string) => createWorkspaceFolder(runId, name),
+    mutationFn: (name: string) => createWorkspaceFolder(host, runId, name),
     onSuccess(folderId) {
       setFolderOpen(folderId, true)
       rememberLastFolder(folderId)
-      void navigate({ to: '/folders/$folderId', params: { folderId } })
+      void navigate({ page: 'folder', folderId })
     },
   })
 
@@ -555,7 +566,7 @@ function FolderTree({
                 })}
                 open={open}
                 onToggle={() => setFolderOpen(folder.folderId, !open)}
-                pathname={pathname}
+                location={location}
                 activeRunId={activeRunId}
                 seenSnapshot={seenSnapshot}
                 now={now}
@@ -692,7 +703,7 @@ function SidebarNavLink({
   shortcut,
   children,
 }: {
-  to: '/' | '/playbook' | '/events' | '/connections'
+  to: ShuttleDestination
   icon: React.ReactNode
   active: boolean
   shortcut?: readonly string[]

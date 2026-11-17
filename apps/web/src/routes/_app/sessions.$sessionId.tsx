@@ -37,8 +37,6 @@ import { Kbd, PanelHeader, PanelTitle } from '@/components/ui/panel'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ArtifactPane } from '@/features/artifacts/artifact-pane'
-import { possessive, useOrgPeople } from '@/features/auth/org-people'
-import { useTenant } from '@/features/auth/tenant'
 import { connectionsQuery } from '@/features/connections/queries'
 import { EventStream } from '@/features/events/event-stream'
 import {
@@ -82,9 +80,11 @@ import { threadParents, threadPath } from '@/features/sessions/timeline'
 import { useSessionTabs } from '@/features/sessions/use-session-tabs'
 import type { WorkspaceFolder } from '@/features/workspace/workspace'
 import { useReportLiveSession, useWorkspace } from '@/features/workspace/workspace-context'
+import { host } from '@/host'
 import { cn, shortId } from '@/lib/cn'
 import { whenRunSynced } from '@/lib/run-stores'
 import { useWidthBucket } from '@/lib/use-width-bucket'
+import { possessive, useOrgPeople, useTenant } from '@/shuttle'
 import {
   type LoomsConnectionStatus,
   useEventCounts,
@@ -120,7 +120,7 @@ export const Route = createFileRoute('/_app/sessions/$sessionId')({
   // Everything the page shows from the Worker is read before it does, so nothing in it appears
   // late. Pointing at a session's link runs this too, so it is usually all there by the click.
   loader: async ({ context: { queryClient }, params: { sessionId } }) => {
-    const session = sessionQueries(sessionId)
+    const session = sessionQueries(host, sessionId)
 
     await Promise.all([
       // The page cannot be drawn without these: a failure is the page's failure.
@@ -131,7 +131,7 @@ export const Route = createFileRoute('/_app/sessions/$sessionId')({
       // waits for them so they do not pop in, and still opens if one cannot be read.
       queryClient.query({ ...session.access, staleTime: 'static' }).catch(noop),
       queryClient.query({ ...session.place, staleTime: 'static' }).catch(noop),
-      queryClient.query({ ...connectionsQuery(), staleTime: 'static' }).catch(noop),
+      queryClient.query({ ...connectionsQuery(host), staleTime: 'static' }).catch(noop),
     ])
   },
   component: SessionPage,
@@ -434,7 +434,7 @@ function SessionWorkspace({
   // Which agent runs the session is known before its first step, so the thread carries the
   // agent's name from the start and never shows as Shuttle's conductor first. The composer's
   // agent picker writes to the same query, so a change there renames the thread at once.
-  const { harness } = useSuspenseQuery(sessionQueries(runId).harness).data
+  const { harness } = useSuspenseQuery(sessionQueries(host, runId).harness).data
 
   const me = useTenant().user.id
   const people = useOrgPeople()

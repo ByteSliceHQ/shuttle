@@ -10,13 +10,11 @@ import {
 } from 'lucide-react'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
-import { api } from '@/api/client'
 import { Markdown } from '@/components/markdown'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/panel'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
-import { authClient } from '@/features/auth/auth-client'
 import {
   GithubNotConnectedError,
   postPullComment,
@@ -32,6 +30,7 @@ import { decideStructuredApproval } from '@/features/sessions/signals'
 import { cn, errorMessage } from '@/lib/cn'
 import { compactRelativeTime, fullDateTime } from '@/lib/time'
 import { useNow } from '@/lib/use-now'
+import { useApi, useShuttle, useShuttleHost } from '@/shuttle'
 import { useProjection, useRunStore } from '@swirls/looms/react'
 
 import { FILE_OPTIONS, SURFACE_STYLE } from './diff-style'
@@ -113,6 +112,8 @@ const plural = (count: number, one: string, many = `${one}s`) =>
   `${count} ${count === 1 ? one : many}`
 
 export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: string }) {
+  const host = useShuttleHost()
+  const api = useApi()
   const feed = useProjection(useRunStore(runId), sessionFeed)
   const pullsStore = useRunStore(usePullsRunId())
   const inbox = useProjection(pullsStore, pullInbox)
@@ -177,7 +178,7 @@ export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: st
 
   const sync = useMutation({
     mutationFn: (target: { folderId: string; fullName: string; number: number }) =>
-      syncPullThreads(target.folderId, target.fullName, target.number),
+      syncPullThreads(host, target.folderId, target.fullName, target.number),
   })
 
   const syncing = sync.isPending
@@ -200,12 +201,13 @@ export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: st
     () =>
       folderId && fullName && number !== undefined
         ? {
-            comment: (target, body) => postPullComment(folderId, fullName, number, target, body),
+            comment: (target, body) =>
+              postPullComment(host, folderId, fullName, number, target, body),
             resolve: (rootId, resolved) =>
-              setPullThreadResolved(folderId, fullName, number, rootId, resolved),
+              setPullThreadResolved(host, folderId, fullName, number, rootId, resolved),
           }
         : null,
-    [folderId, fullName, number],
+    [host, folderId, fullName, number],
   )
 
   const files = useMemo(() => (diffText ? reviewFiles(diffText) : []), [diffText])
@@ -296,7 +298,7 @@ export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: st
 
   const send = useMutation({
     mutationFn: (approval: string) =>
-      decideStructuredApproval(runId, approval, {
+      decideStructuredApproval(host, runId, approval, {
         actionId: 'submit',
         outcome: 'approve',
         payload: {
@@ -849,6 +851,7 @@ function Composer({
   onSend: (body: string) => Promise<void>
   onCancel: () => void
 }) {
+  const { connectGithub } = useShuttle().identity
   const [body, setBody] = useState('')
   const post = useMutation({ mutationFn: onSend })
   const pending = post.isPending
@@ -890,20 +893,8 @@ function Composer({
           Posts to GitHub as you
         </span>
         <div className="flex shrink-0 items-center gap-1.5">
-          {needsGithub ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                void authClient.linkSocial({
-                  provider: 'github',
-                  callbackURL: window.location.href,
-                  // A refusal comes back here too, not to a page outside the app.
-                  errorCallbackURL: window.location.href,
-                })
-              }
-            >
+          {needsGithub && connectGithub ? (
+            <Button type="button" variant="outline" size="sm" onClick={connectGithub}>
               Connect GitHub
             </Button>
           ) : null}

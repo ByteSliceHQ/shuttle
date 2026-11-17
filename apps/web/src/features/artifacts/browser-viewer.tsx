@@ -2,11 +2,11 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, RotateCw } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 
-import { api } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { EmptyState } from '@/components/ui/panel'
 import { tabTitleForKind } from '@/features/sessions/session-tabs'
+import { useApi } from '@/shuttle'
 
 import { resolveBrowserTarget } from './sandbox'
 
@@ -19,6 +19,8 @@ export function BrowserViewer({
   target: string
   onRetarget: (title: string, nextTarget: string) => void
 }) {
+  const api = useApi()
+
   // Where this session's sandbox answers previews. It does not change, so it is asked once.
   const { data: preview } = useQuery(
     api.sandbox.preview.queryOptions({ input: { id: runId }, staleTime: Infinity }),
