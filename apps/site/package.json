@@ -6,14 +6,16 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --port 8791 --inspector-port 9230",
+    "dev": "wrangler dev --port 8791 --inspector-port 9230 --local-upstream 127.0.0.1:8791",
     "deploy": "wrangler deploy",
+    "pages": "bun scripts/build-pages.ts",
     "check-types": "bun x tsc -p tsconfig.json --noEmit",
     "test": "bun test src"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260601.0",
     "@types/bun": "^1.3.9",
+    "shiki": "^4.6.0",
     "typescript": "7.0.2",
     "wrangler": "^4.159.0"
   }
