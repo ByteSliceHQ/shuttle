@@ -14,6 +14,7 @@ import {
 import { useEffect, useEffectEvent, useMemo, useState } from 'react'
 
 import { AccountMenu } from '@/components/auth/account-menu'
+import { DesktopAttention } from '@/components/desktop-attention'
 import { ShuttleMark } from '@/components/shuttle-mark'
 import { ActivityDot } from '@/components/sidebar/activity-dot'
 import { FixtureToggle } from '@/components/sidebar/fixture-toggle'
@@ -98,6 +99,7 @@ export function AppSidebarShell({ children }: { children: React.ReactNode }) {
       observer={storeTimings}
     >
       <WorkspaceProvider>
+        <DesktopAttention />
         <div className="flex h-dvh min-h-0">
           <AppSidebar />
           <div className="min-w-0 flex-1">{children}</div>

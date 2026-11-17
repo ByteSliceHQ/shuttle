@@ -1,11 +1,17 @@
 import { createRouter } from '@tanstack/react-router'
 
+import { desktop } from './lib/desktop'
 import { reportTiming } from './lib/timing'
 import { routeTree } from './routeTree.gen'
 
 const router = createRouter({
   routeTree,
   defaultPreload: 'intent',
+})
+
+// The desktop app sends the page places: a menu item, a notification, a `shuttle://` link.
+desktop()?.onNavigate?.((path) => {
+  router.history.push(path)
 })
 
 // How long a page change takes, from the click to the new page being ready to show.

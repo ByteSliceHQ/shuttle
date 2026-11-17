@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
-import { CHANNELS, type DesktopInfo, type RunnerStatus } from './channels'
+import { CHANNELS, type DesktopInfo, type DesktopNotice, type RunnerStatus } from './channels'
 
 /**
  * The only part of the app the page can reach. It is how the session UI knows it is running in
@@ -19,5 +19,14 @@ contextBridge.exposeInMainWorld('shuttleDesktop', {
     ipcRenderer.on(CHANNELS.runnerStatusChanged, handler)
 
     return () => ipcRenderer.removeListener(CHANNELS.runnerStatusChanged, handler)
+  },
+  setBadge: (count: number): void => ipcRenderer.send(CHANNELS.setBadge, count),
+  notify: (notice: DesktopNotice): void => ipcRenderer.send(CHANNELS.notify, notice),
+  onNavigate: (listener: (path: string) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, path: string) => listener(path)
+
+    ipcRenderer.on(CHANNELS.navigate, handler)
+
+    return () => ipcRenderer.removeListener(CHANNELS.navigate, handler)
   },
 })

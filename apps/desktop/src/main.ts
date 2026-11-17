@@ -3,9 +3,16 @@ import { existsSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, session, shell } from 'electron'
 
-import { CHANNELS, type DesktopInfo, type RunnerStatus } from './channels'
+import {
+  appPath,
+  CHANNELS,
+  deepLinkPath,
+  type DesktopInfo,
+  type DesktopNotice,
+  type RunnerStatus,
+} from './channels'
 import { readPackagedConfig } from './config'
 import { forgetMachineToken, machineToken } from './machine'
 import { RunnerSupervisor } from './runner'
@@ -69,6 +76,35 @@ async function signInCookie(): Promise<string> {
   return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ')
 }
 
+/** A `shuttle://` link the app was opened with before it had a window to show it in. */
+let openWith: string | null = null
+
+/** Brings the window forward and takes its page to `path`. */
+function goTo(path: string): void {
+  const [window] = BrowserWindow.getAllWindows()
+
+  if (!window) {
+    openWith = path
+    return
+  }
+
+  if (window.isMinimized()) {
+    window.restore()
+  }
+
+  window.show()
+  window.focus()
+  window.webContents.send(CHANNELS.navigate, path)
+}
+
+function openDeepLink(link: string | undefined): void {
+  const path = link ? deepLinkPath(link) : null
+
+  if (path) {
+    goTo(path)
+  }
+}
+
 function createWindow(store: Store): BrowserWindow {
   const saved = store.get('window')
 
@@ -107,7 +143,10 @@ function createWindow(store: Store): BrowserWindow {
 
   showSplash(window)
 
-  void window.loadURL(APP_URL).catch(() => {
+  const start = openWith ?? ''
+  openWith = null
+
+  void window.loadURL(`${APP_URL}${start}`).catch(() => {
     void window.loadURL(
       `data:text/html;charset=utf-8,${encodeURIComponent(
         `<body style="font:14px system-ui;background:#0e0e11;color:#ededf0;display:grid;place-items:center;height:100vh;margin:0"><div style="text-align:center"><p>Shuttle is not reachable at ${APP_URL}.</p><p style="color:#9a9aa6">Start it, then choose View &gt; Reload.</p></div></body>`,
@@ -180,7 +219,14 @@ if (!app.requestSingleInstanceLock()) {
       Menu.setApplicationMenu(
         Menu.buildFromTemplate([
           ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
-          { role: 'fileMenu' },
+          {
+            label: 'File',
+            submenu: [
+              { label: 'New Session', accelerator: 'CmdOrCtrl+N', click: () => goTo('/') },
+              { type: 'separator' as const },
+              { role: process.platform === 'darwin' ? ('close' as const) : ('quit' as const) },
+            ],
+          },
           { role: 'editMenu' },
           { role: 'viewMenu' },
           {
@@ -236,6 +282,32 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle(CHANNELS.runnerStatus, () => runner.status())
     ipcMain.handle(CHANNELS.startsLocally, () => startsLocally())
 
+    ipcMain.on(CHANNELS.setBadge, (_event, count: unknown) => {
+      app.setBadgeCount(
+        typeof count === 'number' && count > 0 ? Math.min(Math.round(count), 99) : 0,
+      )
+    })
+
+    ipcMain.on(CHANNELS.notify, (_event, notice: Partial<DesktopNotice> | null) => {
+      if (
+        !Notification.isSupported() ||
+        typeof notice?.title !== 'string' ||
+        typeof notice.body !== 'string'
+      ) {
+        return
+      }
+
+      const shown = new Notification({
+        title: notice.title.slice(0, 120),
+        body: notice.body.slice(0, 300),
+      })
+
+      const path = appPath(notice.path)
+
+      shown.on('click', () => goTo(path ?? '/'))
+      shown.show()
+    })
+
     // The runner serves whoever is signed in, so it follows sign-in and sign-out.
     let signedInAs = ''
     let settle: ReturnType<typeof setTimeout> | null = null
@@ -278,8 +350,25 @@ if (!app.requestSingleInstanceLock()) {
     app.on('before-quit', () => runner.stop())
   })
 
-  app.on('second-instance', () => {
+  // `shuttle://sessions/<id>` opens that session. macOS hands the link to the running app;
+  // elsewhere it arrives as an argument to a second copy, which passes it on and quits.
+  app.setAsDefaultProtocolClient('shuttle')
+
+  app.on('open-url', (event, link) => {
+    event.preventDefault()
+    openDeepLink(link)
+  })
+
+  openDeepLink(process.argv.find((argument) => argument.startsWith('shuttle://')))
+
+  app.on('second-instance', (_event, argv) => {
     const [window] = BrowserWindow.getAllWindows()
+    const link = argv.find((argument) => argument.startsWith('shuttle://'))
+
+    if (link) {
+      openDeepLink(link)
+      return
+    }
 
     if (window) {
       if (window.isMinimized()) {

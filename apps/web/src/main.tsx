@@ -2,9 +2,12 @@ import { RouterProvider } from '@tanstack/react-router'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
+import { registerServiceWorker } from './lib/service-worker'
 import { getRouter } from './router'
 
 import './styles.css'
+
+registerServiceWorker()
 
 const root = document.getElementById('root')
 

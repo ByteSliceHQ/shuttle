@@ -13,6 +13,16 @@ export interface ShuttleDesktop {
   startsLocally(): Promise<boolean>
   /** Calls back whenever that changes. Returns a function that stops it. */
   onRunnerStatus(listener: (status: DesktopRunnerStatus) => void): () => void
+  /**
+   * The rest came with a later build of the app, so an older one that is still installed does
+   * not have them. Ask before calling.
+   */
+  /** How many sessions are waiting on this person, shown on the app's Dock icon. */
+  setBadge?(count: number): void
+  /** A system notification. Clicking it opens `path` in the app. */
+  notify?(notice: { title: string; body: string; path?: string }): void
+  /** Calls back when the app wants the page somewhere: a menu item, a notification, a link. */
+  onNavigate?(listener: (path: string) => void): () => void
 }
 
 export interface DesktopRunnerStatus {
