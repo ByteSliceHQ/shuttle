@@ -47,6 +47,9 @@ apps/worker              Cloudflare Worker + Durable Objects + custom Looms modu
 apps/web                 Vite + React session UI
 apps/desktop             Electron app: the session UI plus a sandbox on this machine
 apps/runner              Keeps that local sandbox and connects it to Shuttle
+packages/react           The UI as React parts (@shuttle/react), which apps/web assembles
+packages/core            The runs' event catalogues, shared by the Worker and the UI
+examples/custom-ade      A development environment put together from the parts, in one file
 packages/runner-protocol What the worker and a runner say to each other
 ```
 
@@ -76,3 +79,7 @@ bun link @swirls/looms
 | `bun run check-types` | Typecheck both apps             |
 | `bun run test`        | Worker unit/integration tests   |
 | `bun run verify`      | Types + tests                   |
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

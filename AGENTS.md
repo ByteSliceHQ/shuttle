@@ -21,7 +21,10 @@ Use one of these types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`,
 Shuttle is a Looms application, not a Looms package.
 
 - `apps/worker` owns custom Looms modules (`session`, `reflect`) and Cloudflare hosting.
-- `apps/web` is the session UI.
+- `apps/web` is the session UI, assembled from `packages/react`.
+- `packages/react` is the UI as parts (`@shuttle/react`), for this app and for other hosts.
+- `packages/core` (`@shuttle/core`) holds what the runs say: the workspace and pulls runs'
+  event catalogues and schemas, which the Worker registers and the UI reads.
 - `apps/desktop` hosts that UI in Electron and starts `apps/runner`, which keeps a sandbox on the machine.
 - Sandbox providers live in `apps/worker/src/sandbox/providers`; nothing outside it names one. See `docs/sandboxes.md`.
 - Depend on published `@swirls/looms`. Link a local Looms build only when developing SDK changes.
@@ -43,6 +46,7 @@ Every JSON route the Worker serves is declared once, in `packages/api` (`@shuttl
 ## Web app
 
 `apps/web` is TanStack Router + TanStack Query over the typed client in `src/api/client.ts`.
+Its pages are put together from the parts in `packages/react` (see "React parts").
 
 - **Reads:** `api.<domain>.<name>.queryOptions(...)`. A page's `loader` awaits
   `queryClient.query({ ...options, staleTime: 'static' })` for what it needs to render (cached
@@ -64,5 +68,51 @@ Every JSON route the Worker serves is declared once, in `packages/api` (`@shuttl
   renders (required data throws to the route's error component; optional data is awaited with
   `.catch(noop)` and read with `useQuery`). The only loading indicator is `NavigationProgress`.
   Data behind an interaction (a popover, a tab, a picker) loads when it is opened.
-- **Layout:** `src/routes` holds thin route files; `src/features/<name>` holds a feature's
-  components, logic and tests; `src/components` and `src/lib` hold only what features share.
+- **Layout:** `src/routes` holds thin route files that assemble parts from `@shuttle/react`.
+  What is left in `src/features` is this app's own: `auth` (sign-in), `desktop` (the desktop
+  app's bridge) and `github`. `src/host.ts` makes the app's `ShuttleHost`, `src/shuttle-router.tsx`
+  says where each of Shuttle's destinations is, and `routes/_app.tsx` gives both, with who is
+  signed in, to `<Shuttle.Provider>`.
+
+## React parts
+
+`packages/react` (`@shuttle/react`) is Shuttle as parts that any host puts together: this
+repository's web and desktop apps, and other products. It has three entry points: `.` (the
+`Shuttle` parts, hooks and `createShuttleHost`), `./ui` (the plain controls) and `./theme.css`.
+
+- **Host boundary:** nothing in the package knows where it is running. It reaches the backend,
+  the host's router, who is signed in and the machine through `src/shuttle`: `useApi()`,
+  `useShuttleHost()`, `useTenant()`, `useDevice()`, `Link`, `useNavigate()`, `useLocation()`.
+  Links name a destination (`{ page: 'session', sessionId }`), never a path. A function that
+  is not a hook takes the `ShuttleHost` as its first argument. It never imports a router, a
+  sign-in client, `window.shuttleDesktop`, or anything from `apps/`, other than types from
+  the Worker's source through `@worker/*` (until those live in a package of their own).
+- **Imports are relative** inside the package, so it resolves the same under any bundler.
+- **Parts:** `src/parts` is `Shuttle`. `<Shuttle.Session>` follows one session and folds its
+  run once; the parts inside (`SessionHeader`, `Agents`, `Conversation`, `Composer`,
+  `Artifacts`, `Events`, `Palette`) read it with `useSession()` and take no session props.
+  `Shuttle.SessionLayout` is Shuttle's own arrangement of them, and `Shuttle.Shell` the frame
+  with the sidebar, which takes the host's own pieces as slots. Session logic goes in
+  `features/sessions/session.tsx` or a part, never in a host's route.
+- **Artifact types:** a kind of tab in the artifacts pane is an `ArtifactType` in
+  `features/artifacts/artifact-types.tsx` (label, icon, launcher, `render`). The pane, the tab
+  strip and the command palette read that list and name no kind themselves.
+  A host's own type names its kind `<namespace>:<name>` (`acme:designs`), which the contract
+  (`CustomArtifactTabKind` in `@shuttle/api`) and the workspace run (`TabKindSchema`) both
+  accept; the two patterns must stay the same. The run keeps such a tab without reading it.
+- **No assumptions about the host:** a part works with nothing above it but the provider. In
+  particular a session works with no workspace (no `Shuttle.Shell`): read the workspace with
+  `useOptionalWorkspace()` or `useWorkspaceSessions()`, never `useWorkspace()`, in anything a
+  session part draws. The package reads no `import.meta.env`; what differs by environment is
+  an option of `createShuttleHost`. `examples/custom-ade` is a host with no workspace, and is
+  the place to try a part on its own.
+- **Outside this repository** the packages are installed, not linked: `bun run pack` builds
+  `@shuttle/api`, `@shuttle/core` and `@shuttle/react` with `tsc` and writes a tarball of each
+  to `out/packs`. A type that is exported has to be nameable in a declaration file, so give a
+  query's options an explicit type where the inferred one carries the query library's tags.
+- **Exports:** `src/index.ts` and `src/ui.ts` list what hosts may use. Add to them when a host
+  needs something; a host never reaches into `src`.
+- **Styles:** `src/theme.css` holds the tokens and the classes the parts use. It tells Tailwind
+  to read the package's files, so a host only imports it after `tailwindcss`.
+- **Layout:** `src/features/<name>` holds a feature's components, logic and tests;
+  `src/components` and `src/lib` hold only what features share.

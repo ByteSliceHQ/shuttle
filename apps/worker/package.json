@@ -23,6 +23,7 @@
     "@orpc/server": "1.16.2",
     "@pierre/sdk": "^0.1.2",
     "@shuttle/api": "workspace:*",
+    "@shuttle/core": "workspace:*",
     "@shuttle/runner-protocol": "workspace:*",
     "@swirls/looms": "^0.17.0",
     "ai": "^7.0.0",

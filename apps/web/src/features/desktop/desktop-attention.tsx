@@ -1,14 +1,14 @@
 import { useRouterState } from '@tanstack/react-router'
 import { useEffect, useRef } from 'react'
 
-import { useTenant } from '@/features/auth/tenant'
 import {
   activitySnapshot,
   attentionChanges,
   attentionCount,
   attentionMessage,
-} from '@/features/sessions/attention'
-import { useWorkspace } from '@/features/workspace/workspace-context'
+  useTenant,
+  useWorkspace,
+} from '@shuttle/react'
 
 import { desktop } from './desktop'
 

@@ -1,0 +1,22 @@
+{
+  "name": "@shuttle/core",
+  "version": "0.0.1",
+  "private": true,
+  "description": "What Shuttle's runs say: the event catalogues and schemas of the workspace and pulls runs, shared by the Worker that writes them and the UI that reads them",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./workspace": "./src/workspace.ts",
+    "./pulls": "./src/pulls.ts"
+  },
+  "scripts": {
+    "check-types": "bun x tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@swirls/looms": "^0.17.0",
+    "effect": "4.0.0-rc.112"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}

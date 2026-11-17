@@ -1,5 +1,4 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query'
-import { createContext, useContext } from 'react'
 
 import { client, isSignedOut } from '@/api/client'
 import { Tenant } from '@shuttle/api'
@@ -73,19 +72,6 @@ export function seedRememberedTenant(queryClient: QueryClient): void {
   if (remembered) {
     queryClient.setQueryData(tenantQuery.queryKey, remembered, { updatedAt: 0 })
   }
-}
-
-export const TenantContext = createContext<Tenant | null>(null)
-
-/** The signed-in person and their organization. Available to everything under the app layout. */
-export function useTenant(): Tenant {
-  const tenant = useContext(TenantContext)
-
-  if (!tenant) {
-    throw new Error('useTenant must be used inside the signed-in app layout')
-  }
-
-  return tenant
 }
 
 export function invitationLink(origin: string, invitationId: string): string {

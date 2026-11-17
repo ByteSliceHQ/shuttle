@@ -1,4 +1,4 @@
-import { ShuttleMark } from './shuttle-mark'
+import { ShuttleMark } from '@shuttle/react/ui'
 
 /** Fills a page's place while its loaders run, when there is no earlier page to keep showing. */
 export function RoutePending() {

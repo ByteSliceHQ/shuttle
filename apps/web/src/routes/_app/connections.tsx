@@ -3,14 +3,14 @@ import { createFileRoute } from '@tanstack/react-router'
 import { Check } from 'lucide-react'
 
 import { api } from '@/api/client'
-import { ConnectionsPanel } from '@/features/connections/connections-panel'
-import { connectionsQuery } from '@/features/connections/queries'
-import { cn } from '@/lib/cn'
+import { host } from '@/host'
 import type { Connection, HarnessId } from '@shuttle/api'
+import { ConnectionsPanel, connectionsQuery } from '@shuttle/react'
+import { cn } from '@shuttle/react/ui'
 
 export const Route = createFileRoute('/_app/connections')({
   loader: ({ context }) =>
-    context.queryClient.query({ ...connectionsQuery(), staleTime: 'static' }),
+    context.queryClient.query({ ...connectionsQuery(host), staleTime: 'static' }),
   component: ConnectionsPage,
 })
 
@@ -40,8 +40,8 @@ interface AgentOption {
 
 function ConnectionsPage() {
   const queryClient = useQueryClient()
-  const { data: state } = useSuspenseQuery(connectionsQuery())
-  const listKey = connectionsQuery().queryKey
+  const { data: state } = useSuspenseQuery(connectionsQuery(host))
+  const listKey = connectionsQuery(host).queryKey
 
   const setDefault = useMutation(
     api.connections.setDefault.mutationOptions({

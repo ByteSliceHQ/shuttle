@@ -1,26 +1,21 @@
 import { Schema } from 'effect'
 
-import { PullCommentSchema, pullKey, pullsModule } from './scope'
+import {
+  PullCommentSchema,
+  pullKey,
+  pullsModule,
+  type PullComment,
+  type PullThread,
+  type PullThreadsState,
+} from './scope'
+
+export type { PullComment, PullThread, PullThreadsState }
 
 /**
  * The review threads on each pull request, mirrored from GitHub: comments arrive one at a time
  * from webhooks, and a full copy of a pull request's threads replaces what was known whenever
  * one is fetched. A thread is its first comment and the replies to it.
  */
-
-export type PullComment = Schema.Schema.Type<typeof PullCommentSchema>
-
-export interface PullThread {
-  readonly rootId: number
-  readonly resolved: boolean
-  /** Oldest first; the first is the comment that started the thread. */
-  readonly comments: readonly PullComment[]
-}
-
-export interface PullThreadsState {
-  /** By `fullName#number`, each pull request's threads in the order they were started. */
-  readonly pulls: Readonly<Record<string, readonly PullThread[]>>
-}
 
 const byAge = (a: PullComment, b: PullComment) =>
   a.createdAt - b.createdAt || a.commentId - b.commentId

@@ -80,6 +80,7 @@ export const WorkspaceTree = z.object({
 })
 export type WorkspaceTree = z.infer<typeof WorkspaceTree>
 
+/** The kinds of tab Shuttle itself draws. */
 export const ARTIFACT_TAB_KINDS = [
   'events',
   'files',
@@ -91,8 +92,30 @@ export const ARTIFACT_TAB_KINDS = [
   'media',
 ] as const
 
-export const ArtifactTabKind = z.enum(ARTIFACT_TAB_KINDS)
+export const BuiltinArtifactTabKind = z.enum(ARTIFACT_TAB_KINDS)
+export type BuiltinArtifactTabKind = z.infer<typeof BuiltinArtifactTabKind>
+
+/**
+ * A kind of tab that whoever put Shuttle's components together draws themself, named
+ * `<namespace>:<name>` in lower case, as in `acme:designs`. The namespace keeps it apart from
+ * Shuttle's own kinds, present and future. The backend keeps such a tab without knowing what
+ * it shows; its `target` is the type's to give meaning to.
+ */
+export const CustomArtifactTabKind = z
+  .templateLiteral([
+    z.string().regex(/^[a-z][a-z0-9-]*$/),
+    ':',
+    z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+  ])
+  .refine((kind) => kind.length <= 64, 'A tab kind is at most 64 characters.')
+export type CustomArtifactTabKind = z.infer<typeof CustomArtifactTabKind>
+
+export const ArtifactTabKind = z.union([BuiltinArtifactTabKind, CustomArtifactTabKind])
 export type ArtifactTabKind = z.infer<typeof ArtifactTabKind>
+
+export function isCustomArtifactTabKind(kind: string): kind is CustomArtifactTabKind {
+  return CustomArtifactTabKind.safeParse(kind).success
+}
 
 /** One tab open beside a session. */
 export const ArtifactTab = z.object({

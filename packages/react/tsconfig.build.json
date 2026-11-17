@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "paths": {
+      "@shuttle/api": ["../api/dist/index.d.ts"],
+      "@shuttle/core/*": ["../core/dist/*.d.ts"]
+    }
+  },
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "dist"]
+}

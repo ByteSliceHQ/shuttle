@@ -3,10 +3,7 @@ import { GitBranch } from 'lucide-react'
 import { useState, type SubmitEvent } from 'react'
 
 import { api } from '@/api/client'
-import { ShuttleMark } from '@/components/shuttle-mark'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { cn } from '@/lib/cn'
+import { Button, cn, Input, ShuttleMark } from '@shuttle/react/ui'
 
 import { authClient } from './auth-client'
 

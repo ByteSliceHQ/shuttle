@@ -1,0 +1,456 @@
+/*
+ * What Shuttle's parts need to look right: the colour and type tokens, and the few classes the
+ * parts use that Tailwind's utilities do not cover. A host imports it after Tailwind:
+ *
+ *     @import 'tailwindcss';
+ *     @import '@shuttle/react/theme.css';
+ *
+ * and may set the tokens under `:root` again after it to give the parts its own colours. The
+ * parts ask for Inter Variable and JetBrains Mono, which the host loads.
+ */
+
+/* Tailwind reads the parts' own files for the utilities they use, wherever this is imported. */
+@source './';
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans:
+    'Inter Variable', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+
+  --color-status-running: var(--status-running);
+  --color-status-waiting: var(--status-waiting);
+  --color-status-completed: var(--status-completed);
+  --color-status-failed: var(--status-failed);
+  --color-status-cancelled: var(--status-cancelled);
+
+  --color-route-question: var(--route-question);
+  --color-route-idea: var(--route-idea);
+  --color-route-constraint: var(--route-constraint);
+  --color-route-correction: var(--route-correction);
+  --color-route-task: var(--route-task);
+  --color-route-stop: var(--route-stop);
+
+  --color-json-key: var(--json-key);
+  --color-json-string: var(--json-string);
+  --color-json-number: var(--json-number);
+  --color-json-boolean: var(--json-boolean);
+  --color-json-null: var(--json-null);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --ease-snappy: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+:root {
+  color-scheme: dark;
+  --radius: 0.625rem;
+
+  --background: oklch(0.155 0.004 265);
+  --foreground: oklch(0.94 0.006 265);
+  --card: oklch(0.185 0.005 265);
+  --card-foreground: oklch(0.94 0.006 265);
+  --popover: oklch(0.2 0.006 265);
+  --popover-foreground: oklch(0.94 0.006 265);
+  --primary: oklch(0.94 0.006 265);
+  --primary-foreground: oklch(0.2 0.006 265);
+  --secondary: oklch(0.235 0.006 265);
+  --secondary-foreground: oklch(0.94 0.006 265);
+  --muted: oklch(0.235 0.006 265);
+  --muted-foreground: oklch(0.66 0.012 265);
+  --accent: oklch(0.255 0.008 265);
+  --accent-foreground: oklch(0.96 0.006 265);
+  --destructive: oklch(0.66 0.19 25);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 11%);
+  --ring: oklch(0.62 0.12 250);
+  --sidebar: oklch(0.17 0.004 265);
+  --sidebar-foreground: oklch(0.94 0.006 265);
+  --brand: oklch(0.74 0.13 245);
+  --brand-foreground: oklch(0.18 0.03 250);
+
+  --status-running: oklch(0.74 0.13 245);
+  --status-waiting: oklch(0.8 0.14 85);
+  --status-completed: oklch(0.76 0.13 155);
+  --status-failed: oklch(0.68 0.18 25);
+  --status-cancelled: oklch(0.6 0.01 265);
+
+  --route-question: oklch(0.76 0.12 230);
+  --route-idea: oklch(0.8 0.13 85);
+  --route-constraint: oklch(0.74 0.12 300);
+  --route-correction: oklch(0.72 0.16 35);
+  --route-task: oklch(0.76 0.13 155);
+  --route-stop: oklch(0.68 0.18 20);
+
+  --json-key: oklch(0.8 0.06 280);
+  --json-string: oklch(0.8 0.1 150);
+  --json-number: oklch(0.8 0.1 230);
+  --json-boolean: oklch(0.82 0.11 70);
+  --json-null: oklch(0.6 0.01 265);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground overflow-hidden font-sans antialiased;
+    font-feature-settings:
+      'cv11' 1,
+      'ss01' 1;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: oklch(0.74 0.13 245 / 30%);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+@keyframes pop-out {
+  to {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@keyframes modal-out {
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@keyframes breathe {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes spin-ring {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Anchored overlays grow from their trigger; exits settle quicker than entrances. */
+.pop {
+  transform-origin: var(--radix-popper-transform-origin);
+  animation: pop-in 150ms var(--ease-snappy);
+}
+
+.pop[data-state='closed'] {
+  animation: pop-out 100ms var(--ease-snappy);
+}
+
+/* Modals are not anchored, so they scale from center; exits are quicker than entrances. */
+.modal[data-state='open'] {
+  animation: modal-in 200ms var(--ease-snappy);
+}
+
+.modal[data-state='closed'] {
+  animation: modal-out 150ms var(--ease-snappy);
+}
+
+.modal-backdrop[data-state='open'] {
+  animation: fade-in 200ms var(--ease-snappy);
+}
+
+.modal-backdrop[data-state='closed'] {
+  animation: fade-out 150ms var(--ease-snappy);
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes sheet-out {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Side sheets slide from the edge they live on, on the iOS drawer curve. */
+.sheet[data-state='open'] {
+  animation: sheet-in 300ms var(--ease-drawer);
+}
+
+.sheet[data-state='closed'] {
+  animation: sheet-out 200ms var(--ease-drawer);
+}
+
+/* Agents working right now; opacity only so the row never shifts. */
+.breathe {
+  animation: breathe 1.6s var(--ease-in-out-strong) infinite;
+}
+
+/* Active thread work in the sidebar; GPU-only rotation off the main thread. */
+.spinner-ring {
+  animation: spin-ring 750ms linear infinite;
+}
+
+/* Expanded thinking prose fades in without resizing the FollowList row abruptly. */
+.thinking-trace-body {
+  transition: opacity 150ms var(--ease-snappy);
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
+/* The narrow-viewport sidebar slides over content instead of squeezing it. */
+.drawer-in {
+  transition: transform 300ms var(--ease-drawer);
+
+  @starting-style {
+    transform: translateX(-100%);
+  }
+}
+
+.drawer-scrim {
+  transition: opacity 300ms var(--ease-drawer);
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
+/* The docked PR inbox eases its width so centered folder content glides instead of jumping. */
+.pull-inbox {
+  transition: width 220ms var(--ease-snappy);
+}
+
+.pull-inbox-layer {
+  transition: opacity 180ms var(--ease-snappy);
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
+/* Long lists fade out at the bottom instead of slicing a row mid-glyph. */
+.scroll-fade {
+  mask-image: linear-gradient(to bottom, black calc(100% - 20px), transparent);
+}
+
+/* Conversation rows dissolve softly into the composer deck below. */
+.conversation-fade {
+  mask-image: linear-gradient(to bottom, black calc(100% - 28px), transparent);
+}
+
+/* New feed items settle in; transitions stay interruptible as items stream. */
+.rise-in {
+  transition:
+    opacity 220ms var(--ease-snappy),
+    transform 220ms var(--ease-snappy);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.float-in {
+  transition:
+    opacity 150ms var(--ease-snappy),
+    transform 150ms var(--ease-snappy),
+    scale 150ms var(--ease-snappy),
+    color 100ms ease,
+    background-color 100ms ease;
+
+  @starting-style {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.stagger > * {
+  animation: rise-in 260ms var(--ease-snappy) both;
+}
+
+.stagger > *:nth-child(2) {
+  animation-delay: 40ms;
+}
+
+.stagger > *:nth-child(3) {
+  animation-delay: 80ms;
+}
+
+.stagger > *:nth-child(4) {
+  animation-delay: 120ms;
+}
+
+.stagger > *:nth-child(n + 5) {
+  animation-delay: 160ms;
+}
+
+/* Markdown wraps text in blocks, so the caret follows the last one. */
+.caret > :last-child::after,
+.caret:not(:has(> *))::after {
+  content: '';
+  display: inline-block;
+  width: 0.45em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.6;
+  animation: fade-in 900ms steps(2, jump-none) infinite alternate;
+}
+
+/*
+ * The conversation keeps message times out of the way: each shows while its row is hovered or
+ * holds focus. The space stays reserved, so nothing moves when one appears. Where there is no
+ * hover, as on a touch screen, times always show.
+ */
+.message-row .message-time {
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+
+.message-row:hover .message-time,
+.message-row:focus-within .message-time {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .message-row .message-time {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pop,
+  .modal[data-state='open'] {
+    animation-name: fade-in;
+  }
+
+  .pop[data-state='closed'],
+  .modal[data-state='closed'],
+  .sheet[data-state='closed'] {
+    animation-name: fade-out;
+  }
+
+  .sheet[data-state='open'] {
+    animation-name: fade-in;
+  }
+
+  .breathe,
+  .spinner-ring {
+    animation: none;
+  }
+
+  .thinking-trace-body {
+    transition: none;
+  }
+
+  .drawer-in,
+  .pull-inbox {
+    transition: none;
+  }
+
+  .rise-in,
+  .float-in {
+    transition-property: opacity;
+  }
+
+  .stagger > * {
+    animation-name: fade-in;
+  }
+
+  .caret > :last-child::after,
+  .caret:not(:has(> *))::after {
+    animation: none;
+  }
+}
+
+.event-stream {
+  container-type: inline-size;
+}
+
+.event-offset,
+.event-thread {
+  display: none;
+}
+
+@container (min-width: 22rem) {
+  .event-offset {
+    display: inline;
+  }
+}
+
+@container (min-width: 32rem) {
+  .event-thread {
+    display: inline;
+  }
+}
