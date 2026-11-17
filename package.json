@@ -16,7 +16,8 @@
     "test": "turbo run test",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
-    "lint": "oxlint . --deny-warnings",
+    "lint": "oxlint . --deny-warnings && bun run lint:deprecated",
+    "lint:deprecated": "oxlint apps packages --type-aware -A all -D typescript/no-deprecated",
     "verify": "turbo run check-types test && bun run lint && bun run fmt:check",
     "desktop": "bun run --cwd apps/desktop start"
   },
@@ -25,6 +26,7 @@
     "@types/bun": "^1.3.9",
     "oxfmt": "0.67.0",
     "oxlint": "1.81.0",
+    "oxlint-tsgolint": "^7.0.2007",
     "turbo": "^2.11.10",
     "typescript": "7.0.2"
   },

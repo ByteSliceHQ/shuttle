@@ -17,17 +17,28 @@ export interface MachineIdentity {
   readonly platform: string
 }
 
-function seal(token: string): { token: string; encrypted: boolean } {
-  return safeStorage.isEncryptionAvailable()
-    ? { token: safeStorage.encryptString(token).toString('base64'), encrypted: true }
+async function seal(token: string): Promise<{ token: string; encrypted: boolean }> {
+  return (await safeStorage.isAsyncEncryptionAvailable())
+    ? { token: (await safeStorage.encryptStringAsync(token)).toString('base64'), encrypted: true }
     : { token, encrypted: false }
 }
 
-function unseal(saved: { token: string; encrypted: boolean }): string | null {
+/**
+ * The saved token in the clear, or null when it cannot be read. `resave` says the keychain's
+ * key has changed since the token was sealed, so it should be sealed again under the new one.
+ */
+async function unseal(saved: {
+  token: string
+  encrypted: boolean
+}): Promise<{ token: string; resave: boolean } | null> {
+  if (!saved.encrypted) {
+    return { token: saved.token, resave: false }
+  }
+
   try {
-    return saved.encrypted
-      ? safeStorage.decryptString(Buffer.from(saved.token, 'base64'))
-      : saved.token
+    const opened = await safeStorage.decryptStringAsync(Buffer.from(saved.token, 'base64'))
+
+    return { token: opened.result, resave: opened.shouldReEncrypt }
   } catch {
     // Encrypted under a keychain entry that is gone. The machine is registered again.
     return null
@@ -62,10 +73,17 @@ export async function machineToken(
   // A token belongs to the person and organization it was made for, and to no one else who
   // signs in on this machine.
   if (saved && saved.userId === who.user.id && saved.orgId === who.org.id) {
-    const token = unseal(saved)
+    const opened = await unseal(saved)
 
-    if (token) {
-      return token
+    if (opened) {
+      if (opened.resave) {
+        store.set('machines', {
+          ...store.get('machines'),
+          [origin]: { ...saved, ...(await seal(opened.token)) },
+        })
+      }
+
+      return opened.token
     }
   }
 
@@ -87,7 +105,7 @@ export async function machineToken(
 
   store.set('machines', {
     ...store.get('machines'),
-    [origin]: { userId: who.user.id, orgId: who.org.id, ...seal(token) },
+    [origin]: { userId: who.user.id, orgId: who.org.id, ...(await seal(token)) },
   })
 
   return token

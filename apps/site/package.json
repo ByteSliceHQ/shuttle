@@ -6,7 +6,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --port 8791",
+    "dev": "wrangler dev --port 8791 --inspector-port 9230",
     "deploy": "wrangler deploy",
     "check-types": "bun x tsc -p tsconfig.json --noEmit",
     "test": "bun test src"
