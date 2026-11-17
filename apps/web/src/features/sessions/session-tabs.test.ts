@@ -8,6 +8,7 @@ import {
   prunePendingOps,
   resolveActiveTabId,
   resolveTabSet,
+  singletonTabId,
   tabTitleForKind,
   type PendingTabOp,
 } from './session-tabs'
@@ -94,5 +95,11 @@ describe('session-tabs', () => {
     expect(tabTitleForKind('file', '/workspace/.wt/s1/repo/src/main.ts')).toBe('main.ts')
     expect(tabTitleForKind('browser', '3000')).toBe(':3000')
     expect(tabTitleForKind('browser', 'http://127.0.0.1:5173/app')).toBe('127.0.0.1:5173')
+  })
+
+  test("a host's own kind is named after itself and can have many tabs", () => {
+    expect(tabTitleForKind('acme:designs')).toBe('designs')
+    expect(singletonTabId('acme:designs')).toBeNull()
+    expect(singletonTabId('review')).toBe('review')
   })
 })

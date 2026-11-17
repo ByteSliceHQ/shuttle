@@ -80,5 +80,8 @@ Every JSON route the Worker serves is declared once, in `packages/api` (`@shuttl
 - **Artifact types:** a kind of tab in the artifacts pane is an `ArtifactType` in
   `features/artifacts/artifact-types.tsx` (label, icon, launcher, `render`). The pane, the tab
   strip and the command palette read that list and name no kind themselves.
+  A host's own type names its kind `<namespace>:<name>` (`acme:designs`), which the contract
+  (`CustomArtifactTabKind` in `@shuttle/api`) and the workspace run (`TabKindSchema`) both
+  accept; the two patterns must stay the same. The run keeps such a tab without reading it.
 - **Layout:** `src/routes` holds thin route files; `src/features/<name>` holds a feature's
   components, logic and tests; `src/components` and `src/lib` hold only what features share.

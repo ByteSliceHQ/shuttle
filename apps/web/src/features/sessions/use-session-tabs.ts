@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
+  artifactTypeFor,
+  defaultArtifactTypes,
+  type ArtifactType,
+} from '@/features/artifacts/artifact-types'
+import {
   closeSessionTab,
   openSessionTab,
   reorderSessionTabs,
@@ -11,6 +16,7 @@ import {
 } from '@/features/workspace/workspace'
 import { useOptionalWorkspace } from '@/features/workspace/workspace-context'
 import { useShuttleHost } from '@/shuttle'
+import { isCustomArtifactTabKind } from '@shuttle/api'
 
 import {
   applyPendingOps,
@@ -41,7 +47,10 @@ export interface SessionTabsController {
   readonly focusKind: (kind: ArtifactTabKind) => Promise<string>
 }
 
-export function useSessionTabs(sessionRunId: string): SessionTabsController {
+export function useSessionTabs(
+  sessionRunId: string,
+  types: readonly ArtifactType[] = defaultArtifactTypes,
+): SessionTabsController {
   const host = useShuttleHost()
   // With no workspace above, nothing keeps the tabs: they last as long as the page does.
   const workspace = useOptionalWorkspace()
@@ -84,7 +93,13 @@ export function useSessionTabs(sessionRunId: string): SessionTabsController {
   const openTab = useCallback(
     async (input: { kind: ArtifactTabKind; title?: string; target?: string; tabId?: string }) => {
       const current = tabsRef.current
-      const singleton = singletonTabId(input.kind)
+
+      const type = isCustomArtifactTabKind(input.kind)
+        ? artifactTypeFor(types, input.kind)
+        : undefined
+
+      // One of the host's kinds says for itself whether it has one tab, and what to call it.
+      const singleton = type?.single ? input.kind : singletonTabId(input.kind)
 
       if (singleton && current.tabs[singleton]) {
         setActiveTabId(singleton)
@@ -93,7 +108,9 @@ export function useSessionTabs(sessionRunId: string): SessionTabsController {
 
       const tabId = input.tabId ?? singleton ?? crypto.randomUUID()
       const target = input.target ?? ''
-      const title = input.title ?? tabTitleForKind(input.kind, target)
+
+      const title =
+        input.title ?? type?.title?.(target) ?? type?.label ?? tabTitleForKind(input.kind, target)
 
       const tab: ArtifactTab = {
         tabId,
@@ -119,7 +136,7 @@ export function useSessionTabs(sessionRunId: string): SessionTabsController {
 
       return tabId
     },
-    [host, sessionRunId, setActiveTabId, workspace],
+    [host, sessionRunId, setActiveTabId, types, workspace],
   )
 
   const closeTab = useCallback(

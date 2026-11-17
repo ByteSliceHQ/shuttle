@@ -38,13 +38,22 @@ export interface ArtifactViewProps {
  * nothing about any kind beyond what is registered here, so the set a session is given is the
  * set it can show. `<Shuttle.Session artifactTypes={[...defaultArtifactTypes, mine]}>` adds one.
  *
- * `kind` is one of the kinds the backend's contract knows (`ArtifactTabKind` in `@shuttle/api`),
- * because open tabs are kept in the workspace run and it refuses a kind it has not heard of.
+ * A type of the host's own names its kind `<namespace>:<name>`, as in `acme:designs`, which
+ * keeps it apart from Shuttle's kinds. The backend keeps such a tab, with its title and its
+ * `target`, without knowing what it shows: `target` is the type's to give meaning to (an id, a
+ * path, an address).
  */
 export interface ArtifactType {
   readonly kind: ArtifactTabKind
   readonly label: string
   readonly icon: ReactNode
+  /**
+   * There is one tab of this kind at most: opening it again brings the one that is open
+   * forward. Left out, each opening is a new tab. Shuttle's own kinds decide this themselves.
+   */
+  readonly single?: boolean
+  /** What a new tab is called, given what it was opened on. Left out, it is the label. */
+  readonly title?: (target: string) => string
   /**
    * Offers the type wherever a tab can be opened by hand: the pane's "+" menu and the command
    * palette. Left out, tabs of this kind are only opened by something else, such as a link in

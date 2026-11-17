@@ -188,7 +188,7 @@ function SessionRoot({
   // The default view is the conversation alone. Agents and event history stay closed until
   // asked for; artifacts show once the session has something open in them, unless the reader
   // has opened or closed the pane themself.
-  const tabs = useSessionTabs(runId)
+  const tabs = useSessionTabs(runId, artifactTypes)
   const [agentsOpen, setAgentsOpen] = useAgentsOpen()
   const [eventsOpen, setEventsOpen] = useEventsOpen()
   const [artifactsChoice, setArtifactsChoice] = useArtifactsChoice(runId)

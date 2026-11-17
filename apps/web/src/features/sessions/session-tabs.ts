@@ -213,11 +213,9 @@ export function tabTitleForKind(kind: ArtifactTabKind, target?: string): string 
     case 'media':
       return 'Media'
 
-    default: {
-      const exhaustive: never = kind
-
-      return exhaustive
-    }
+    // A host's own kind: the part of its name after the namespace, until its type says better.
+    default:
+      return kind.slice(kind.indexOf(':') + 1)
   }
 }
 
@@ -252,10 +250,8 @@ export function singletonTabId(kind: ArtifactTabKind): string | null {
     case 'browser':
       return null
 
-    default: {
-      const exhaustive: never = kind
-
-      return exhaustive
-    }
+    // A host's own kind has as many tabs as are opened, unless its type says there is one.
+    default:
+      return null
   }
 }

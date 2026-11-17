@@ -41,6 +41,12 @@ export const TabKindSchema = Schema.Union([
   Schema.Literal('browser'),
   Schema.Literal('review'),
   Schema.Literal('media'),
+  // A kind the host draws itself, named `<namespace>:<name>`. See `CustomArtifactTabKind` in
+  // `@shuttle/api`, which this matches. The run keeps the tab and never looks inside it.
+  Schema.TemplateLiteral([Schema.String, ':', Schema.String]).check(
+    Schema.isPattern(/^[a-z][a-z0-9-]*:[a-z0-9][a-z0-9-]*$/),
+    Schema.isMaxLength(64),
+  ),
 ])
 
 export const workspaceCatalog = defineEventCatalog('workspace', {
@@ -200,6 +206,7 @@ export type ArtifactTabKind =
   | 'browser'
   | 'review'
   | 'media'
+  | `${string}:${string}`
 
 export type ArtifactTab = {
   readonly tabId: string
