@@ -1,6 +1,6 @@
 import { ORPCError } from '@orpc/client'
-import type { PullComment, PullThread, PullThreadsState } from '@worker/pulls/threads'
 
+import type { PullComment, PullThread, PullThreadsState } from '@shuttle/core/pulls'
 import { defineProjection } from '@swirls/looms/core'
 
 import { type ShuttleHost } from '../../shuttle'

@@ -3,11 +3,11 @@ import type { ReactNode } from 'react'
 
 import { cn } from '../../lib/cn'
 import { Link } from '../../shuttle'
-import { useWorkspace } from '../workspace/workspace-context'
+import { useWorkspaceSessions } from '../workspace/workspace-context'
 import type { LinkedSession } from './pulls'
 
 export function useSessionTitle(runId: string | undefined): string | undefined {
-  const sessions = useWorkspace().tree.sessions
+  const sessions = useWorkspaceSessions()
   return runId ? sessions[runId]?.title : undefined
 }
 
@@ -34,7 +34,7 @@ export function LinkedSessionLink({
 
 export function LinkedSessionRow({ session }: { session: LinkedSession }) {
   const title = useSessionTitle(session.runId)
-  const known = useWorkspace().tree.sessions[session.runId]
+  const known = useWorkspaceSessions()[session.runId]
 
   // Skip stale/corrupt links (e.g. a thread id recorded as the run id).
   if (!known && !title) {

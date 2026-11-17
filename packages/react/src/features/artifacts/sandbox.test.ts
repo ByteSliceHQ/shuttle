@@ -7,7 +7,7 @@ describe('resolveBrowserTarget', () => {
   const label = '9f0a7be4-4c4c-4bdc-8c3f-c9e93a7951db'
 
   test('rewrites bare ports and localhost URLs to the preview host', () => {
-    const portSuffix = import.meta.env.DEV ? ':8790' : ''
+    const portSuffix = ''
 
     expect(resolveBrowserTarget('3000', folderId, 'localhost')).toBe(
       `http://p3000-${label}.localhost${portSuffix}`,
@@ -53,6 +53,20 @@ describe('previewUrl', () => {
   test('keeps a real preview host', () => {
     expect(new URL(previewUrl(3000, folderId, 'preview.example.com')).hostname).toBe(
       `p3000-${folderId}.preview.example.com`,
+    )
+  })
+
+  test('follows the backend it is given, and the port previews have of their own', () => {
+    const backend = { origin: () => 'https://build.example.com', previewPort: null }
+
+    expect(previewUrl(3000, folderId, undefined, backend)).toBe(
+      `https://p3000-${folderId}.build.example.com`,
+    )
+
+    const local = { origin: () => 'http://127.0.0.1:5180', previewPort: '8790' }
+
+    expect(previewUrl(3000, folderId, 'localhost', local)).toBe(
+      `http://p3000-${folderId}.localhost:8790`,
     )
   })
 

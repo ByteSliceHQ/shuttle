@@ -50,6 +50,16 @@ export interface ShuttleHostOptions {
   readonly fetch?: ShuttleFetch
   /** The machine this is running on, when it has one. */
   readonly device?: ShuttleDevice | null
+  /**
+   * The port sandbox previews are served on, when it is not the backend's own: a development
+   * server that passes the API on to the backend does not pass on a preview's subdomain.
+   */
+  readonly previewPort?: string | number
+  /**
+   * Offers made-up workspaces in place of the real one, for looking at how the parts cope with
+   * the empty, the huge and the worst case. For development.
+   */
+  readonly fixtures?: boolean
   /** Added to how a run's event store is opened: an observer, a different cache. */
   readonly runStore?: (userId: string) => Partial<RunStoreOptions>
 }
@@ -65,6 +75,12 @@ export interface ShuttleHost {
   readonly api: ShuttleApi
   readonly device: ShuttleDevice | null
   readonly fetch: ShuttleFetch
+  /** The port sandbox previews are served on, or null when it is the backend's own. */
+  readonly previewPort: string | null
+  /** Whether made-up workspaces are offered in place of the real one. */
+  readonly fixtures: boolean
+  /** The backend's origin, such as `https://app.example.com`. */
+  origin(): string
   /** The address of `path` (which starts with `/`) on the backend. */
   url(path: string): string
   /** The same, for a WebSocket. */
@@ -164,6 +180,9 @@ export function createShuttleHost(options: ShuttleHostOptions = {}): ShuttleHost
     api: queryUtils(client),
     device,
     fetch: request,
+    previewPort: options.previewPort === undefined ? null : String(options.previewPort),
+    fixtures: options.fixtures ?? false,
+    origin,
     url: (path) => `${baseUrl}${path}`,
     socketUrl: (path) => `${origin().replace(/^http/, 'ws')}${path}`,
     deviceContext: () => ({ deviceId: device?.deviceId ?? null }),

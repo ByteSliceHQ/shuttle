@@ -3,10 +3,7 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "types": ["vite/client", "bun"],
-    "paths": {
-      "@worker/*": ["../../apps/worker/src/*"]
-    },
+    "types": ["bun"],
     "noEmit": true,
     "declaration": false,
     "declarationMap": false

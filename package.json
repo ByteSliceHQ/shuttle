@@ -6,7 +6,8 @@
   "license": "Apache-2.0",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "examples/*"
   ],
   "type": "module",
   "scripts": {
@@ -19,7 +20,8 @@
     "lint": "oxlint . --deny-warnings && bun run lint:deprecated",
     "lint:deprecated": "oxlint apps packages --type-aware -A all -D typescript/no-deprecated",
     "verify": "turbo run check-types test && bun run lint && bun run fmt:check",
-    "desktop": "bun run --cwd apps/desktop start"
+    "desktop": "bun run --cwd apps/desktop start",
+    "pack": "bun scripts/pack.ts"
   },
   "devDependencies": {
     "@stylistic/eslint-plugin": "5.10.0",

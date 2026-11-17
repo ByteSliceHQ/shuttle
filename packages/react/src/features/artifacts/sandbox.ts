@@ -95,14 +95,31 @@ export function sandboxTerminalUrl(
   return host.socketUrl(`${sandboxBase(identity.runId)}/terminal${query}`)
 }
 
-/** Preview host for sandbox ports: `p3000-<label>.localhost:8790` locally. */
-export function previewUrl(port: number, folderId: string, previewHost?: string): string {
-  const host = previewHost ?? `${window.location.hostname.replace(/^www\./, '')}`
+/** Where previews are served from: the backend, and the port when previews have their own. */
+export type PreviewBackend = Pick<ShuttleHost, 'origin' | 'previewPort'>
 
-  const workerPort = import.meta.env.DEV
-    ? `:${import.meta.env.VITE_SHUTTLE_WORKER_PORT ?? '8790'}`
-    : typeof window !== 'undefined' && window.location.port
-      ? `:${window.location.port}`
+/**
+ * Preview host for sandbox ports: `p3000-<label>.localhost:8790` locally. Previews are
+ * subdomains of the backend, which is the page's own origin unless `backend` says otherwise.
+ */
+export function previewUrl(
+  port: number,
+  folderId: string,
+  previewHost?: string,
+  backend?: PreviewBackend,
+): string {
+  const at = backend
+    ? new URL(backend.origin())
+    : typeof window !== 'undefined'
+      ? window.location
+      : undefined
+
+  const host = previewHost ?? `${at?.hostname.replace(/^www\./, '') ?? ''}`
+
+  const workerPort = backend?.previewPort
+    ? `:${backend.previewPort}`
+    : at?.port
+      ? `:${at.port}`
       : ''
 
   // A preview needs a subdomain, which an IP address cannot have. Loopback addresses map to
@@ -111,7 +128,7 @@ export function previewUrl(port: number, folderId: string, previewHost?: string)
   const baseHost = loopback ? 'localhost' : host
 
   // A page served over https cannot frame an http one, and a deployment only answers https.
-  const secure = !loopback && typeof window !== 'undefined' && window.location.protocol === 'https:'
+  const secure = !loopback && at?.protocol === 'https:'
 
   return `${secure ? 'https' : 'http'}://p${port}-${sanitizeFolderLabel(folderId)}.${baseHost}${workerPort}`
 }
@@ -151,6 +168,7 @@ export function resolveBrowserTarget(
   target: string,
   folderId: string | undefined,
   previewHost?: string,
+  backend?: PreviewBackend,
 ): string {
   const trimmed = target.trim()
 
@@ -161,7 +179,7 @@ export function resolveBrowserTarget(
   const loopbackPort = loopbackPreviewPort(trimmed)
 
   if (loopbackPort != null && folderId) {
-    return previewUrl(loopbackPort, folderId, previewHost)
+    return previewUrl(loopbackPort, folderId, previewHost, backend)
   }
 
   if (/^https?:\/\//i.test(trimmed)) {

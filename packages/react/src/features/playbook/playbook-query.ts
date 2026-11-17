@@ -1,6 +1,9 @@
-import { queryOptions } from '@tanstack/react-query'
+import { queryOptions, type QueryKey } from '@tanstack/react-query'
 
-import { type ShuttleHost } from '../../shuttle'
+import type { ShuttleClient, ShuttleHost } from '../../shuttle'
+
+/** What the backend answers when asked for the playbook. */
+export type PlaybookAnswer = Awaited<ReturnType<ShuttleClient['playbook']['get']>>
 
 /**
  * The organization's playbook: its approved lessons, and the ones waiting for review. The
@@ -8,7 +11,9 @@ import { type ShuttleHost } from '../../shuttle'
  * makes sure it is started first.
  */
 export function playbookQuery({ api, client }: ShuttleHost) {
-  return queryOptions({
+  // The key's type is given, not inferred: inferred, it carries a tag from the query library
+  // that a declaration file cannot name.
+  return queryOptions<PlaybookAnswer, Error, PlaybookAnswer, QueryKey>({
     queryKey: api.playbook.get.queryKey(),
     queryFn: async ({ signal }) => {
       await client.playbook.ensure(undefined, { signal })

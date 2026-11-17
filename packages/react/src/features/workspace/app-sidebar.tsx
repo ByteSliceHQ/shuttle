@@ -99,6 +99,8 @@ export function AppSidebarShell({
   /** Things that draw nothing but need the workspace, such as a badge on the app's icon. */
   background?: React.ReactNode
 }) {
+  const { fixtures } = useShuttleHost()
+
   return (
     <WorkspaceProvider>
       {background}
@@ -106,7 +108,7 @@ export function AppSidebarShell({
         <AppSidebar status={status} account={account} />
         <div className="min-w-0 flex-1">{children}</div>
       </div>
-      {import.meta.env.DEV ? <FixtureToggle /> : null}
+      {fixtures ? <FixtureToggle /> : null}
     </WorkspaceProvider>
   )
 }

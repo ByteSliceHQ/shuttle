@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 import { useRunEvents, useRunStore, useRunSummary } from '@swirls/looms/react'
 
-import { useApi } from '../../shuttle'
+import { useApi, useShuttleHost } from '../../shuttle'
 import type { SessionActivity } from '../sessions/session-activity'
 import {
   emptySessionTabs,
@@ -44,8 +44,8 @@ const WorkspaceContext = createContext<WorkspaceState | null>(null)
 
 const FIXTURE_KEY = 'shuttle.fixture'
 
-function initialFixtureMode(): FixtureMode {
-  if (!import.meta.env.DEV) {
+function initialFixtureMode(offered: boolean): FixtureMode {
+  if (!offered) {
     return 'live'
   }
 
@@ -141,6 +141,7 @@ function useWorkspaceSource(snapshot: WorkspaceSnapshot) {
  */
 export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const api = useApi()
+  const host = useShuttleHost()
 
   // The signed-in layout's loader read the snapshot before this rendered. It is only where the
   // event stream starts from, and the stream keeps it current from then on, so it is never read
@@ -153,7 +154,12 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const personal = useWorkspaceSource(snapshot.personal)
   const [liveSessions, setLiveSessions] = useState<Readonly<Record<string, LiveSessionStatus>>>({})
   const [stalled, setStalled] = useState<string | null>(null)
-  const [fixture, setFixture] = useState(() => ({ mode: initialFixtureMode(), at: Date.now() }))
+
+  const [fixture, setFixture] = useState(() => ({
+    mode: initialFixtureMode(host.fixtures),
+    at: Date.now(),
+  }))
+
   const fixtureMode = fixture.mode
 
   const setLiveSessionStatus = useCallback((sessionRunId: string, next: LiveSessionStatus) => {
@@ -170,10 +176,8 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
   const fixtureTree = useMemo(
     () =>
-      import.meta.env.DEV && fixture.mode !== 'live'
-        ? workspaceFixture(fixture.mode, fixture.at)
-        : null,
-    [fixture],
+      host.fixtures && fixture.mode !== 'live' ? workspaceFixture(fixture.mode, fixture.at) : null,
+    [host.fixtures, fixture],
   )
 
   const sharedTree = shared.tree
@@ -390,9 +394,20 @@ export function useOptionalWorkspace(): WorkspaceValue | null {
   return useContext(WorkspaceContext)?.workspace ?? null
 }
 
+const noFixture = (): void => {}
+
+/** Which made-up workspace is showing. Always the real one where nothing keeps a workspace. */
 export function useFixtureMode(): [FixtureMode, (mode: FixtureMode) => void] {
-  const state = useWorkspaceState()
-  return [state.fixtureMode, state.setFixtureMode]
+  const state = useContext(WorkspaceContext)
+
+  return state ? [state.fixtureMode, state.setFixtureMode] : ['live', noFixture]
+}
+
+const noSessions: WorkspaceTree['sessions'] = {}
+
+/** The sessions the workspace lists, by run. None where nothing keeps a workspace. */
+export function useWorkspaceSessions(): WorkspaceTree['sessions'] {
+  return useContext(WorkspaceContext)?.workspace.tree.sessions ?? noSessions
 }
 
 export function useReportLiveSession(): (runId: string, live: LiveSessionStatus) => void {

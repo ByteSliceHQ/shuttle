@@ -14,7 +14,7 @@ import type { FolderSyncReport, RepoSyncReport } from '@shuttle/api'
 import { cn } from '../../lib/cn'
 import { compactRelativeTime, fullDateTime } from '../../lib/time'
 import { useNow } from '../../lib/use-now'
-import { useWorkspace } from '../workspace/workspace-context'
+import { useWorkspaceSessions } from '../workspace/workspace-context'
 import { LinkedSessionLink, useSessionTitle } from './linked-session'
 import { PullDetailSheet } from './pull-detail-sheet'
 import { CheckGlyph, DiffStat, laneTone, RepoDot, repoShortName } from './pull-glyphs'
@@ -566,7 +566,7 @@ function PullRow({
   inChangeset?: boolean
   onOpen: (key: string) => void
 }) {
-  const sessions = useWorkspace().tree.sessions
+  const sessions = useWorkspaceSessions()
 
   const author =
     pull.linkedSessions.find((session) => session.role === 'author' && sessions[session.runId]) ??

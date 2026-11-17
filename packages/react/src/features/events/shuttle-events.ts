@@ -1,7 +1,6 @@
-// Type-only: the worker owns the event catalogs, and these imports are erased at build time.
-import type { pullsCatalog } from '@worker/pulls/scope'
-import type { workspaceCatalog } from '@worker/workspace/scope'
-
+// Type-only: the runs' event catalogs live in `@shuttle/core`, which the Worker registers.
+import type { pullsCatalog } from '@shuttle/core/pulls'
+import type { workspaceCatalog } from '@shuttle/core/workspace'
 import type { EventsOfCatalog, ProtocolEvents } from '@swirls/looms/core'
 
 /** Every event the workspace run can carry: the runtime's own plus the workspace catalog. */

@@ -61,15 +61,15 @@ export function SessionShare({ runId }: { runId: string }) {
   const [open, setOpen] = useState(false)
   const queryClient = useQueryClient()
 
-  // Dev only: the fixture toggle swaps in worst-case people where the session's are loaded.
+  // Where the host offers fixtures: the fixture toggle swaps in worst-case people where the session's are loaded.
   const [fixtureMode] = useFixtureMode()
 
   const fixture = useMemo(
     () =>
-      import.meta.env.DEV && fixtureMode !== 'live'
+      host.fixtures && fixtureMode !== 'live'
         ? sessionPeopleFixture(fixtureMode, tenant.user.id)
         : null,
-    [fixtureMode, tenant.user.id],
+    [host.fixtures, fixtureMode, tenant.user.id],
   )
 
   // The session page's loader starts this read without waiting on it: the title bar shows

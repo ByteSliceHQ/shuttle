@@ -1,0 +1,27 @@
+{
+  "name": "@shuttle/example-custom-ade",
+  "version": "0.0.1",
+  "private": true,
+  "description": "A development environment put together from Shuttle's parts, in one file",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "start": "vite --port 5190 --strictPort --host 127.0.0.1",
+    "check-types": "bun x tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@shuttle/react": "workspace:*",
+    "@tanstack/react-query": "^5.107.1",
+    "react": "19",
+    "react-dom": "19"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "7.0.2",
+    "vite": "^8.2.2"
+  }
+}

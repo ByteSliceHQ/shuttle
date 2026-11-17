@@ -5,7 +5,7 @@ import { useMemo, useRef, useState } from 'react'
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
 import { EmptyState } from '../../components/ui/panel'
-import { useApi } from '../../shuttle'
+import { useApi, useShuttleHost } from '../../shuttle'
 import { tabTitleForKind } from '../sessions/session-tabs'
 import { resolveBrowserTarget } from './sandbox'
 
@@ -19,6 +19,7 @@ export function BrowserViewer({
   onRetarget: (title: string, nextTarget: string) => void
 }) {
   const api = useApi()
+  const host = useShuttleHost()
 
   // Where this session's sandbox answers previews. It does not change, so it is asked once.
   const { data: preview } = useQuery(
@@ -39,8 +40,8 @@ export function BrowserViewer({
   }
 
   const src = useMemo(
-    () => resolveBrowserTarget(target, preview?.label, preview?.host),
-    [target, preview],
+    () => resolveBrowserTarget(target, preview?.label, preview?.host, host),
+    [target, preview, host],
   )
 
   function navigate(next: string) {
