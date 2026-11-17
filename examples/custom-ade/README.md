@@ -20,5 +20,5 @@ bun run --cwd examples/custom-ade start
 
 Then open `http://127.0.0.1:5190/?session=<a session's run id>`.
 
-Here it uses `@shuttle/react` from this repository. Another repository installs the tarballs
-`bun run pack` writes to `out/packs`; this same file was built and run that way.
+Here it uses `@shuttle/react`, the source in this repository. Anywhere else it is the same file
+with `@swirls/shuttle/react` in its place, installed from npm.

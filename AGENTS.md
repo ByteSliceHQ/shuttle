@@ -106,10 +106,16 @@ repository's web and desktop apps, and other products. It has three entry points
   session part draws. The package reads no `import.meta.env`; what differs by environment is
   an option of `createShuttleHost`. `examples/custom-ade` is a host with no workspace, and is
   the place to try a part on its own.
-- **Outside this repository** the packages are installed, not linked: `bun run pack` builds
-  `@shuttle/api`, `@shuttle/core` and `@shuttle/react` with `tsc` and writes a tarball of each
-  to `out/packs`. A type that is exported has to be nameable in a declaration file, so give a
-  query's options an explicit type where the inferred one carries the query library's tags.
+- **Outside this repository** the parts are `@swirls/shuttle`, the only package published from
+  here. `@shuttle/api`, `@shuttle/core` and `@shuttle/react` stay private and are what the apps
+  use; `packages/shuttle` puts their compiled output together under `@swirls/shuttle/api`,
+  `/core/…` and `/react`. A dependency added to one of the three is added to
+  `packages/shuttle/package.json` too, and `bun run check:package` fails until it is. A type
+  that is exported has to be nameable in a declaration file, so give a query's options an
+  explicit type where the inferred one carries the query library's tags.
+- **Changesets:** a pull request that changes `packages/api`, `core`, `react` or `shuttle` in a
+  way someone installing `@swirls/shuttle` would see adds one with `bun run changeset`. See
+  `RELEASE.md`.
 - **Exports:** `src/index.ts` and `src/ui.ts` list what hosts may use. Add to them when a host
   needs something; a host never reaches into `src`.
 - **Styles:** `src/theme.css` holds the tokens and the classes the parts use. It tells Tailwind
