@@ -453,6 +453,12 @@ code {
   border-radius: 3px;
 }
 
+.snippets {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
 .parts pre {
   margin: 0;
 }
