@@ -2,8 +2,8 @@
  * Writes the pages in `pages/` into `public/`, with their code highlighted by Shiki.
  *
  * A code block is `<pre><code class="language-<lang>">…</code></pre>`, escaped as HTML. Wrangler
- * runs this before `dev` and `deploy` (see `build` in wrangler.jsonc), so `public/docs/` is never
- * edited by hand and is not checked in.
+ * runs this before `dev` and `deploy` (see `build` in wrangler.jsonc). What it writes into
+ * `public/` is not edited by hand and not checked in.
  */
 
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'

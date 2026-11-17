@@ -7,7 +7,7 @@ bun run dev      # http://127.0.0.1:8791
 bun run deploy   # to shuttle.codes
 ```
 
-Pages with code samples (the docs, at `/docs/`) are written in `pages/` and copied into `public/`
+Pages with code samples (the landing page and the docs) are written in `pages/` and copied into `public/`
 with their code highlighted by Shiki (`scripts/build-pages.ts`). Wrangler does this before `dev`
 and `deploy`; `bun run pages` does it on its own. Tag a block `<pre><code class="language-tsx">`.
 
@@ -23,4 +23,4 @@ bun x wrangler r2 object put shuttle-releases/Shuttle-<version>-arm64.dmg \
 ```
 
 Then set `LATEST_MAC` in `wrangler.jsonc` to the new file name, update the version and size
-shown in `public/index.html`, and deploy. `/download/mac` always sends people to `LATEST_MAC`.
+shown in `pages/index.html`, and deploy. `/download/mac` always sends people to `LATEST_MAC`.
