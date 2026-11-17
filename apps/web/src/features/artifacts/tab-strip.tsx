@@ -1,15 +1,5 @@
-import {
-  FileCode2,
-  Files,
-  GitCompareArrows,
-  Globe,
-  Images,
-  ListTree,
-  Plus,
-  SquareTerminal,
-  X,
-} from 'lucide-react'
-import { useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { Plus, X } from 'lucide-react'
+import { useRef, useState, type DragEvent } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -22,19 +12,11 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import type { ArtifactTab, ArtifactTabKind } from '@/features/workspace/workspace'
 import { cn } from '@/lib/cn'
 
-const KIND_ICON: Record<ArtifactTabKind, ReactNode> = {
-  events: <ListTree />,
-  files: <Files />,
-  file: <FileCode2 />,
-  changes: <GitCompareArrows />,
-  terminal: <SquareTerminal />,
-  browser: <Globe />,
-  review: <GitCompareArrows />,
-  media: <Images />,
-}
+import { artifactTypeFor, launchableArtifactTypes, type ArtifactType } from './artifact-types'
 
 export function TabStrip({
   tabs,
+  types,
   activeTabId,
   onSelect,
   onClose,
@@ -42,6 +24,7 @@ export function TabStrip({
   onOpen,
 }: {
   tabs: readonly ArtifactTab[]
+  types: readonly ArtifactType[]
   activeTabId: string | null
   onSelect: (tabId: string) => void
   onClose: (tabId: string) => void
@@ -80,6 +63,8 @@ export function TabStrip({
       >
         {tabs.map((tab) => {
           const active = tab.tabId === activeTabId
+          const type = artifactTypeFor(types, tab.kind)
+          const label = type?.tabLabel?.(tab) ?? tab.title
 
           return (
             <button
@@ -111,7 +96,7 @@ export function TabStrip({
                   onClose(tab.tabId)
                 }
               }}
-              title={tabLabel(tab)}
+              title={label}
               className={cn(
                 'group relative inline-flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] transition-[color,background-color,opacity] duration-100 ease-out',
                 active
@@ -120,14 +105,14 @@ export function TabStrip({
                 draggingId === tab.tabId && 'opacity-50',
               )}
             >
-              <span className="text-muted-foreground [&_svg]:size-3.5">{KIND_ICON[tab.kind]}</span>
+              <span className="text-muted-foreground [&_svg]:size-3.5">{type?.icon}</span>
               <span className="min-w-0 truncate" dir="auto">
-                {tabLabel(tab)}
+                {label}
               </span>
               <span
                 role="button"
                 tabIndex={-1}
-                aria-label={`Close ${tabLabel(tab)}`}
+                aria-label={`Close ${label}`}
                 onClick={(event) => {
                   event.stopPropagation()
                   onClose(tab.tabId)
@@ -151,42 +136,14 @@ export function TabStrip({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <LauncherItem kind="files" label="Workspace" icon={<Files />} onOpen={onOpen} />
-          <LauncherItem
-            kind="terminal"
-            label="Terminal"
-            icon={<SquareTerminal />}
-            onOpen={onOpen}
-          />
-          <LauncherItem kind="browser" label="Browser" icon={<Globe />} onOpen={onOpen} />
-          <LauncherItem kind="review" label="Review" icon={<GitCompareArrows />} onOpen={onOpen} />
-          <LauncherItem kind="media" label="Media" icon={<Images />} onOpen={onOpen} />
+          {launchableArtifactTypes(types).map((type) => (
+            <DropdownMenuItem key={type.kind} onSelect={() => onOpen(type.kind)}>
+              {type.icon}
+              {type.label}
+            </DropdownMenuItem>
+          ))}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
-  )
-}
-
-/** A tab's name. The workspace tab was once called Files, and tabs saved then still say so. */
-function tabLabel(tab: ArtifactTab): string {
-  return tab.kind === 'files' ? 'Workspace' : tab.title
-}
-
-function LauncherItem({
-  kind,
-  label,
-  icon,
-  onOpen,
-}: {
-  kind: ArtifactTabKind
-  label: string
-  icon: ReactNode
-  onOpen: (kind: ArtifactTabKind) => void
-}) {
-  return (
-    <DropdownMenuItem onSelect={() => onOpen(kind)}>
-      {icon}
-      {label}
-    </DropdownMenuItem>
   )
 }

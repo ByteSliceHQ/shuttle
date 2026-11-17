@@ -22,7 +22,8 @@ import { GithubConnectBanner } from '@/features/github/github-connect-banner'
 import { AppSidebarShell } from '@/features/workspace/app-sidebar'
 import { host } from '@/host'
 import { whenRunSynced } from '@/lib/run-stores'
-import { Shuttle, type ShuttleIdentity } from '@/shuttle'
+import { Shuttle } from '@/parts'
+import type { ShuttleIdentity } from '@/shuttle'
 import { useShuttleRouter } from '@/shuttle-router'
 
 const AppSearch = z.object({

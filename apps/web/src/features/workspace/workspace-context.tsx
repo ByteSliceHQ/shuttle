@@ -381,6 +381,15 @@ export function useWorkspace(): WorkspaceValue {
   return useWorkspaceState().workspace
 }
 
+/**
+ * The same, or null where nothing above keeps a workspace. A session shown on its own, in a
+ * host that has no folders, is still a whole session: it only has no folder to name and keeps
+ * its open tabs to itself.
+ */
+export function useOptionalWorkspace(): WorkspaceValue | null {
+  return useContext(WorkspaceContext)?.workspace ?? null
+}
+
 export function useFixtureMode(): [FixtureMode, (mode: FixtureMode) => void] {
   const state = useWorkspaceState()
   return [state.fixtureMode, state.setFixtureMode]

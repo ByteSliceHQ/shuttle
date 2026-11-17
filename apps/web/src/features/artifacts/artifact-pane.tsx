@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { Files, Globe, LayoutPanelTop, SquareTerminal } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { LayoutPanelTop } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/panel'
@@ -8,23 +8,17 @@ import type { SessionEvent } from '@/features/events/event-catalog'
 import type { AgentIdentity } from '@/features/sessions/agents'
 import type { SessionMedia } from '@/features/sessions/media'
 import type { SessionTabsController } from '@/features/sessions/use-session-tabs'
-import type { ArtifactTab, ArtifactTabKind } from '@/features/workspace/workspace'
 import { cn } from '@/lib/cn'
 import { useShuttleHost } from '@/shuttle'
 
-import { BrowserViewer } from './browser-viewer'
-import { MediaViewer } from './media-viewer'
-import { ReviewViewer } from './review-viewer'
+import {
+  artifactTypeFor,
+  defaultArtifactTypes,
+  launchableArtifactTypes,
+  type ArtifactType,
+} from './artifact-types'
 import { invalidateWorktree } from './sandbox'
 import { TabStrip } from './tab-strip'
-import { TerminalViewer } from './terminal-viewer'
-import { WorkspaceViewer } from './workspace-viewer'
-
-const STARTERS: readonly { kind: ArtifactTabKind; label: string; icon: ReactNode }[] = [
-  { kind: 'files', label: 'Workspace', icon: <Files /> },
-  { kind: 'terminal', label: 'Terminal', icon: <SquareTerminal /> },
-  { kind: 'browser', label: 'Browser', icon: <Globe /> },
-]
 
 export function ArtifactPane({
   runId,
@@ -34,6 +28,7 @@ export function ArtifactPane({
   identities,
   controller,
   onReveal,
+  types = defaultArtifactTypes,
 }: {
   runId: string
   folderId?: string
@@ -45,6 +40,8 @@ export function ArtifactPane({
   controller: SessionTabsController
   /** Asks the page to show the pane, for a shortcut that opens a tab while it is closed. */
   onReveal?: () => void
+  /** The kinds of tab the pane can show. Shuttle's own, unless the session was given others. */
+  types?: readonly ArtifactType[]
 }) {
   const host = useShuttleHost()
 
@@ -106,6 +103,7 @@ export function ArtifactPane({
     <div className="bg-sidebar flex h-full min-h-0 flex-col">
       <TabStrip
         tabs={orderedTabs}
+        types={types}
         activeTabId={activeTabId}
         onSelect={setActiveTabId}
         onClose={(tabId) => void closeTab(tabId)}
@@ -119,17 +117,19 @@ export function ArtifactPane({
             Open the workspace to see files and changes, or start a terminal or a browser preview.
           </span>
           <span className="flex flex-wrap justify-center gap-1.5">
-            {STARTERS.map((starter) => (
-              <Button
-                key={starter.kind}
-                variant="secondary"
-                size="sm"
-                onClick={() => void openTab({ kind: starter.kind })}
-              >
-                {starter.icon}
-                {starter.label}
-              </Button>
-            ))}
+            {launchableArtifactTypes(types)
+              .filter((type) => type.launcher?.starter)
+              .map((type) => (
+                <Button
+                  key={type.kind}
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void openTab({ kind: type.kind })}
+                >
+                  {type.icon}
+                  {type.label}
+                </Button>
+              ))}
           </span>
         </EmptyState>
       ) : (
@@ -147,15 +147,15 @@ export function ArtifactPane({
                 className={cn('absolute inset-0 flex min-h-0 flex-col', !active && 'hidden')}
                 aria-hidden={!active}
               >
-                <ArtifactViewer
-                  tab={tab}
-                  runId={runId}
-                  folderId={folderId}
-                  searchToken={searchToken}
-                  media={media}
-                  identities={identities}
-                  onRetarget={(title, target) => void retargetTab(tab.tabId, title, target)}
-                />
+                {artifactTypeFor(types, tab.kind)?.render({
+                  tab,
+                  runId,
+                  folderId,
+                  searchToken,
+                  media,
+                  identities,
+                  retarget: (title, target) => void retargetTab(tab.tabId, title, target),
+                })}
               </div>
             )
           })}
@@ -163,63 +163,4 @@ export function ArtifactPane({
       )}
     </div>
   )
-}
-
-function ArtifactViewer({
-  tab,
-  runId,
-  folderId,
-  searchToken,
-  media,
-  identities,
-  onRetarget,
-}: {
-  tab: ArtifactTab
-  runId: string
-  folderId?: string
-  searchToken: number
-  media: readonly SessionMedia[]
-  identities: ReadonlyMap<string, AgentIdentity>
-  onRetarget: (title: string, target: string) => void
-}) {
-  switch (tab.kind) {
-    // Event history opens as a drawer under the session; it is never shown as a tab.
-    case 'events':
-      return null
-    // One tab shows the workspace. Tabs saved under its earlier names open it too: a Changes
-    // tab on what changed, a single-file tab on that file.
-    case 'files':
-    case 'changes':
-    case 'file':
-      return (
-        <WorkspaceViewer
-          key={runId}
-          runId={runId}
-          searchToken={searchToken}
-          initialFilter={tab.kind === 'changes' ? 'changed' : undefined}
-          initialPath={tab.kind === 'file' ? worktreePath(runId, tab.target) : undefined}
-        />
-      )
-    case 'terminal':
-      return <TerminalViewer runId={runId} folderId={folderId} cwd={tab.target} />
-    case 'browser':
-      return <BrowserViewer runId={runId} target={tab.target} onRetarget={onRetarget} />
-    case 'review':
-      return <ReviewViewer runId={runId} folderId={folderId} />
-    case 'media':
-      return <MediaViewer runId={runId} media={media} identities={identities} />
-
-    default: {
-      const exhaustive: never = tab.kind
-
-      return exhaustive
-    }
-  }
-}
-
-/** A file tab's target as a path under the session's worktree, which is how the Files tab names files. */
-function worktreePath(runId: string, target: string): string {
-  const root = `/workspace/.wt/${runId}/`
-
-  return target.startsWith(root) ? target.slice(root.length) : target
 }

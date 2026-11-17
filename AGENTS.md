@@ -72,5 +72,13 @@ Every JSON route the Worker serves is declared once, in `packages/api` (`@shuttl
   destination (`{ page: 'session', sessionId }`), never a path. A function that is not a hook
   takes the `ShuttleHost` as its first argument. Routes and loaders use `@/host` and
   `@/api/client`, and `routes/_app.tsx` gives all of it to `<Shuttle.Provider>`.
+- **Parts:** `src/parts` is `Shuttle`, the components a host puts together. `<Shuttle.Session>`
+  follows one session and folds its run once; the parts inside (`SessionHeader`, `Agents`,
+  `Conversation`, `Composer`, `Artifacts`, `Events`, `Palette`) read it with `useSession()` and
+  take no session props. `Shuttle.SessionLayout` is this app's arrangement of them. A route
+  only assembles parts: session logic goes in `features/sessions/session.tsx` or a part.
+- **Artifact types:** a kind of tab in the artifacts pane is an `ArtifactType` in
+  `features/artifacts/artifact-types.tsx` (label, icon, launcher, `render`). The pane, the tab
+  strip and the command palette read that list and name no kind themselves.
 - **Layout:** `src/routes` holds thin route files; `src/features/<name>` holds a feature's
   components, logic and tests; `src/components` and `src/lib` hold only what features share.

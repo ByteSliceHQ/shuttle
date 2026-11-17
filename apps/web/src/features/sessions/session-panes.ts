@@ -135,6 +135,12 @@ export function useCollapsiblePanel({
   return { panelRef, onResize, defaultSize: open ? preferredSize : '0' }
 }
 
+/** The shortcuts for the session's panes and its command palette. */
+export const AGENTS_SHORTCUT = { key: 'a', shift: true } as const
+export const ARTIFACTS_SHORTCUT = { key: 'b', shift: true } as const
+export const EVENTS_SHORTCUT = { key: 'j' } as const
+export const PALETTE_SHORTCUT = { key: 'k' } as const
+
 export interface PaneShortcut {
   /** The letter pressed with ⌘ on a Mac and Ctrl elsewhere. */
   readonly key: string

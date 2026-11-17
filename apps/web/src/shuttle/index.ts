@@ -4,15 +4,9 @@
  * Nothing under `src/features` (other than `auth`, `desktop` and `github`, which belong to
  * Shuttle's own app) may import the app's router, its API client, its sign-in client or
  * `window.shuttleDesktop`. They ask for those here, and whatever is hosting them answers through
- * `<Shuttle.Provider>`. That is what lets the same components be put together differently, in
+ * `<Shuttle.Provider>` (see `src/parts`). That is what lets the same components be put together differently, in
  * Shuttle's app or in someone else's.
  */
-import { ShuttleProvider } from './provider'
-
-export const Shuttle = {
-  Provider: ShuttleProvider,
-}
-
 export { isolationLabel, type DeviceRunnerStatus, type ShuttleDevice } from './device'
 export {
   createShuttleHost,
@@ -29,6 +23,7 @@ export {
 export { peopleQuery, possessive, type ShuttleIdentity, type ShuttlePerson } from './identity'
 export {
   Link,
+  ShuttleProvider,
   useApi,
   useDevice,
   useLocation,

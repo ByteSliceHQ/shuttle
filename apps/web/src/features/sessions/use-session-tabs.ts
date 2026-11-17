@@ -9,7 +9,7 @@ import {
   type ArtifactTabKind,
   type SessionTabSet,
 } from '@/features/workspace/workspace'
-import { useWorkspace } from '@/features/workspace/workspace-context'
+import { useOptionalWorkspace } from '@/features/workspace/workspace-context'
 import { useShuttleHost } from '@/shuttle'
 
 import {
@@ -43,7 +43,8 @@ export interface SessionTabsController {
 
 export function useSessionTabs(sessionRunId: string): SessionTabsController {
   const host = useShuttleHost()
-  const workspace = useWorkspace()
+  // With no workspace above, nothing keeps the tabs: they last as long as the page does.
+  const workspace = useOptionalWorkspace()
   const projected = workspace?.tabs[sessionRunId]
   const [pendingRaw, setPendingRaw] = useState<PendingTabOp[]>([])
   const [activeByRun, setActiveByRun] = useState<Record<string, string | null>>({})
