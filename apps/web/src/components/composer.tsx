@@ -243,38 +243,48 @@ export function Composer({
         const uploaded = await Promise.all(sending.map((attachment) => attachment.uploaded))
 
         const messageId = crypto.randomUUID()
+        // The store reports a failed send in its own words; this keeps the Worker's reason.
+        let refused: unknown
 
         // The message shows in the conversation at once, as the session will record it. If the
         // send fails it is taken back out and handed back to the message box below.
-        await store.commit(
-          {
-            type: 'shuttle.user.said',
-            payload: {
-              messageId,
-              text: message,
-              ...(forceKind ? { forceKind } : {}),
-              ...(targetThread ? { targetThreadId: targetThread } : {}),
-              author: { id: me.id, name: me.name || me.email },
-              ...(uploaded.length > 0
-                ? { attachments: uploaded.map((asset) => ({ ...asset })) }
-                : {}),
-            },
-          },
-          {
-            optimistic: true,
-            // The key the session's `say` signal records the message under.
-            idempotencyKey: `shuttle-say:${messageId}`,
-            send: () =>
-              say(
-                runId,
+        await store
+          .commit(
+            {
+              type: 'shuttle.user.said',
+              payload: {
                 messageId,
-                message,
-                forceKind,
-                targetThread,
-                uploaded.map((asset) => asset.id),
-              ),
-          },
-        )
+                text: message,
+                ...(forceKind ? { forceKind } : {}),
+                ...(targetThread ? { targetThreadId: targetThread } : {}),
+                author: { id: me.id, name: me.name || me.email },
+                ...(uploaded.length > 0
+                  ? { attachments: uploaded.map((asset) => ({ ...asset })) }
+                  : {}),
+              },
+            },
+            {
+              optimistic: true,
+              // The key the session's `say` signal records the message under.
+              idempotencyKey: `shuttle-say:${messageId}`,
+              send: () =>
+                say(
+                  runId,
+                  messageId,
+                  message,
+                  forceKind,
+                  targetThread,
+                  uploaded.map((asset) => asset.id),
+                ).catch((cause: unknown) => {
+                  refused = cause
+
+                  throw cause
+                }),
+            },
+          )
+          .catch((cause: unknown) => {
+            throw refused ?? cause
+          })
 
         releaseAttachments(sending)
       })

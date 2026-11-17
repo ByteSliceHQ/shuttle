@@ -18,6 +18,12 @@ export function logTiming(line: Omit<TimingLine, 'kind'>): void {
 /** An append slower than this is worth a line; the rest would only be noise. */
 const SLOW_APPEND_MS = 50
 
+/** A run is asked for its state on most requests, and nearly every one loads in no time. */
+const SLOW_SNAPSHOT_MS = 10
+
+/** A wake shorter than this did no work worth timing: it found nothing to do, or little. */
+const SHORT_WAKE_MS = 50
+
 /**
  * Reports what a run's own clock sees: how long each wake ran, how long a cold start spent
  * loading its snapshot, appends that were slow or failed, and timers that fired late.
@@ -34,7 +40,7 @@ export function runTimingObserver(runId: string): RuntimeObserver {
 
         case 'run.park':
         case 'run.terminal':
-          if (wokeAt !== undefined) {
+          if (wokeAt !== undefined && event.at - wokeAt >= SHORT_WAKE_MS) {
             logTiming({
               source: 'run',
               type: 'run.wake',
@@ -42,20 +48,22 @@ export function runTimingObserver(runId: string): RuntimeObserver {
               durationMs: event.at - wokeAt,
               status: event.status,
             })
-
-            wokeAt = undefined
           }
+
+          wokeAt = undefined
 
           return
 
         case 'snapshot.load':
-          logTiming({
-            source: 'run',
-            type: event.type,
-            runId,
-            durationMs: event.latencyMs,
-            outcome: event.outcome,
-          })
+          if (event.latencyMs >= SLOW_SNAPSHOT_MS || event.outcome === 'error') {
+            logTiming({
+              source: 'run',
+              type: event.type,
+              runId,
+              durationMs: event.latencyMs,
+              outcome: event.outcome,
+            })
+          }
 
           return
 
