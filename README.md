@@ -79,3 +79,7 @@ bun link @swirls/looms
 | `bun run check-types` | Typecheck both apps             |
 | `bun run test`        | Worker unit/integration tests   |
 | `bun run verify`      | Types + tests                   |
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

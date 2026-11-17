@@ -113,8 +113,11 @@ for (const name of PACKAGES) {
     )}\n`,
   )
 
-  if (existsSync(join(root, 'LICENSE'))) {
-    cpSync(join(root, 'LICENSE'), join(dist, 'LICENSE'))
+  // The licence goes with every copy of the package.
+  for (const file of ['LICENSE', 'NOTICE']) {
+    if (existsSync(join(root, file))) {
+      cpSync(join(root, file), join(dist, file))
+    }
   }
 
   run(['bun', 'pm', 'pack', '--destination', out, '--quiet'], dist)

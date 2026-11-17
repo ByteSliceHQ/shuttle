@@ -19,7 +19,6 @@
     "**/routeTree.gen.ts",
     "**/worker-configuration.d.ts",
     "bun.lock",
-    ".agents/**",
     ".claude/**",
     ".cursor/**"
   ]
