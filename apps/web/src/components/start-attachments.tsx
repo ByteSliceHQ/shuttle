@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ClipboardEvent } from 'react'
 
-import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES } from '@/lib/media'
+import { pasteAttachments } from '@/lib/paste-attachments'
 
 /** Keep files local until the session and its first task can be created together. */
 export function useStartAttachments() {
@@ -8,26 +8,21 @@ export function useStartAttachments() {
   const [error, setError] = useState<string | null>(null)
 
   function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const pasted = [...event.clipboardData.files]
+    const result = pasteAttachments(
+      files,
+      [...event.clipboardData.files],
+      event.clipboardData.getData('text/plain').length > 0,
+    )
 
-    if (!pasted.length) {
-      return
+    if (result.takeOver) {
+      event.preventDefault()
     }
 
-    event.preventDefault()
-    const next = [...files, ...pasted]
+    setError(result.error)
 
-    if (
-      next.length > MAX_ATTACHMENTS ||
-      next.reduce((size, file) => size + file.size, 0) > MAX_ATTACHMENT_BYTES - 64 * 1024 ||
-      next.some((file) => !file.size)
-    ) {
-      setError('Attach up to 10 nonempty files, totaling less than 50 MB.')
-      return
+    if (result.files !== files) {
+      setFiles([...result.files])
     }
-
-    setError(null)
-    setFiles(next)
   }
 
   return {
