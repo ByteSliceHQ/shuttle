@@ -48,6 +48,7 @@ import {
   type SummaryRepo,
   type WorkspaceRepoSummary,
 } from '../sandbox/workspace-summary'
+import type { SessionStacks } from '../session/stack-state'
 import type { Actor } from '../tenancy/access'
 import { previewKeyFor } from '../tenancy/previews'
 import { orgOfRun } from '../tenancy/run-id'
@@ -406,10 +407,26 @@ async function fetchForComparison(
 }
 
 /** What the workspace says about one repository measured in the sandbox. */
+/**
+ * What the session last published of each branch of a repository, from the stacks it keeps.
+ * A repository's first stack is kept under its name and the others under `name#stack`.
+ */
+export function publishedBranches(
+  stacks: SessionStacks,
+  repoName: string,
+): { branch: string; tree: string }[] {
+  return Object.entries(stacks)
+    .filter(([key]) => key === repoName || key.startsWith(`${repoName}#`))
+    .flatMap(([, stack]) => stack.layers)
+    .filter((layer) => layer.pull !== null && layer.publishedTree !== '')
+    .map((layer) => ({ branch: layer.branch, tree: layer.publishedTree }))
+}
+
 function measuredRepo(
   repo: LinkedSandboxRepo,
   against: string,
   found: WorkspaceRepoSummary | undefined,
+  stacks: SessionStacks,
 ): SandboxWorkspaceRepo {
   const measure = found?.measure
   const name = describeRepo(repo)
@@ -422,6 +439,7 @@ function measuredRepo(
     dirty: found?.dirty ?? false,
     sessionBaseSha: found?.sessionBaseSha ?? null,
     commits: found?.commits ?? [],
+    published: publishedBranches(stacks, repo.name),
     comparison: {
       against,
       baseSha: measure?.baseSha ?? null,
@@ -736,16 +754,20 @@ export const sandboxRouter = {
         }
       }
 
-      const activity = await loomsStub(env.LOOMS_RUN, runId)
-        .getSessionActivitySnapshot()
-        .catch(() => null)
+      const run = loomsStub(env.LOOMS_RUN, runId)
+      const activity = await run.getSessionActivitySnapshot().catch(() => null)
+
+      // Without them, whether a branch is pushed is told by its commit alone.
+      const stacks = await run.getSessionStacks().catch((): SessionStacks => ({}))
 
       return {
         source: 'sandbox' as const,
         // People edit between turns, not under a running agent.
         working: activity?.activity === 'working',
         holderId: home.personal ? userOfSandbox(home.name) : null,
-        repos: repos.map((repo) => measuredRepo(repo, againstOf(repo), found.get(repo.name))),
+        repos: repos.map((repo) =>
+          measuredRepo(repo, againstOf(repo), found.get(repo.name), stacks),
+        ),
         strays: summary.strays,
       }
     })

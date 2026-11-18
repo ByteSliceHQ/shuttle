@@ -61,6 +61,8 @@ import {
   type PendingPlacement,
   type SessionMove,
 } from './session/handoff'
+import { readSessionStacks } from './session/session-stacks'
+import type { SessionStacks } from './session/stack-state'
 import { DEFAULT_TEAM, readPinnedTeam, writeStoredTeam, type Team } from './team'
 import { readSessionAccess, writeSessionAccess, type SessionAccess } from './tenancy/access'
 import { authorizeLoomsRoute, authorizeRun, runIdOfPath } from './tenancy/gate'
@@ -209,6 +211,11 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
   /** The repositories this session works in. Empty before it binds a sandbox, or with none linked. */
   async getSessionRepos(): Promise<SandboxBinding['repos']> {
     return (await readSandboxBinding(this.ctx.storage, this.ctx.id.name ?? ''))?.repos ?? []
+  }
+
+  /** What this session has published of each stack it keeps. Empty before it publishes anything. */
+  async getSessionStacks(): Promise<SessionStacks> {
+    return readSessionStacks(this.ctx.storage, this.ctx.id.name ?? '')
   }
 
   /** Which agent runs this session: Shuttle's own loop or a vendor agent in the sandbox. */

@@ -210,7 +210,13 @@ describe('comparisons', () => {
       error: null,
     })
 
-    expect(repo.head).toEqual({ branch: `shuttle/${RUN}-stack/web/2`, sha: sha('HEAD') })
+    expect(repo.head).toEqual({
+      branch: `shuttle/${RUN}-stack/web/2`,
+      sha: sha('HEAD'),
+      tree: sha('HEAD^{tree}'),
+    })
+
+    expect(repo.commits[0]?.tree).toBe(sha('HEAD^{tree}'))
     expect(repo.dirty).toBe(true)
     expect(repo.commits.map((commit) => commit.subject)).toEqual(['layer two', 'layer one'])
     expect(repo.commits[1]?.branches).toEqual([layer1])

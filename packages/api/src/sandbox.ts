@@ -119,6 +119,8 @@ export function parseComparison(value: string): ParsedComparison | null {
 /** One commit the session made, newest first. */
 export const SandboxCommit = z.object({
   sha: z.string(),
+  /** The tree it records. Two commits with the same tree hold the same files. */
+  tree: z.string().optional(),
   subject: z.string(),
   /** When it was committed, in milliseconds. */
   at: z.number(),
@@ -164,7 +166,10 @@ export const SandboxWorkspaceRepo = z.object({
   files: z.array(z.string()).readonly(),
   changes: z.array(z.object({ path: z.string(), status: ChangeStatus })).readonly(),
   /** The branch checked out in the session's worktree, and its commit. Unknown in a saved copy. */
-  head: z.object({ branch: z.string().nullable(), sha: z.string() }).nullable().optional(),
+  head: z
+    .object({ branch: z.string().nullable(), sha: z.string(), tree: z.string().optional() })
+    .nullable()
+    .optional(),
   /** Whether the worktree has work that is not committed. Unknown in a saved copy. */
   dirty: z.boolean().optional(),
   /** Where the session started. Unknown in a saved copy. */
@@ -173,6 +178,15 @@ export const SandboxWorkspaceRepo = z.object({
   commits: z.array(SandboxCommit).readonly().optional(),
   /** How `changes` were measured. Absent in a saved copy, which measures from the start. */
   comparison: SandboxComparison.optional(),
+  /**
+   * What the session last published of each of its branches: the tree GitHub was given. Shuttle
+   * publishes a branch by making the commit on GitHub, so that commit never has the sandbox's
+   * name for it; the tree is what the two have in common.
+   */
+  published: z
+    .array(z.object({ branch: z.string(), tree: z.string() }))
+    .readonly()
+    .optional(),
 })
 export type SandboxWorkspaceRepo = z.infer<typeof SandboxWorkspaceRepo>
 
