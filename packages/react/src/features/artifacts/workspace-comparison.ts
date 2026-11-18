@@ -75,13 +75,16 @@ export function pullShown(
   )
 }
 
-/** The commit the sandbox has at the tip of a branch, as the session's commits say. */
-function tipOf(repo: WorkspaceRepo, branch: string): string | undefined {
+/** The commit the sandbox has at the tip of a branch, and its tree, as the session's commits say. */
+function tipOf(
+  repo: WorkspaceRepo,
+  branch: string,
+): { readonly sha: string; readonly tree?: string } | undefined {
   if (repo.head?.branch === branch) {
-    return repo.head.sha
+    return repo.head
   }
 
-  return repo.commits?.find((commit) => commit.branches.includes(branch))?.sha
+  return repo.commits?.find((commit) => commit.branches.includes(branch))
 }
 
 /**
@@ -89,6 +92,10 @@ function tipOf(repo: WorkspaceRepo, branch: string): string | undefined {
  * branch's tip with nothing left uncommitted on it, `unpushed` when the sandbox has commits
  * GitHub does not, `uncommitted` when the branch is checked out with work not committed yet.
  * Null when it cannot be told, as from a saved copy.
+ *
+ * A branch the session published is on GitHub as a commit GitHub made, under another name than
+ * the sandbox's, so the two are compared by the files they hold: the tree last published and the
+ * tree at the branch's tip. Any other branch is compared by its commit.
  */
 export function pullSync(
   pull: PullInboxSummary,
@@ -104,7 +111,16 @@ export function pullSync(
     return null
   }
 
-  if (tip !== pull.headSha && !pull.headSha.startsWith(tip) && !tip.startsWith(pull.headSha)) {
+  const published = repo.published?.find((entry) => entry.branch === pull.headRef)
+
+  const same =
+    published && tip.tree
+      ? published.tree === tip.tree
+      : tip.sha === pull.headSha ||
+        pull.headSha.startsWith(tip.sha) ||
+        tip.sha.startsWith(pull.headSha)
+
+  if (!same) {
     return 'unpushed'
   }
 
@@ -161,7 +177,7 @@ export function railBrackets(
   pulls: readonly RunPull[],
 ): { readonly run: RunPull; readonly from: number; readonly to: number }[] {
   const tipIndex = (branch: string) => {
-    const sha = repo.head?.branch === branch ? null : tipOf(repo, branch)
+    const sha = repo.head?.branch === branch ? null : tipOf(repo, branch)?.sha
 
     // The branch checked out runs on to the working tree.
     return sha === null

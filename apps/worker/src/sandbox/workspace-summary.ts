@@ -18,6 +18,8 @@ export type ChangeStatus = 'A' | 'M' | 'D'
 
 export interface SummaryCommit {
   readonly sha: string
+  /** The tree it records: what the files are, whatever the commit's own name. */
+  readonly tree: string
   readonly subject: string
   /** When it was committed, in milliseconds. */
   readonly at: number
@@ -42,7 +44,12 @@ export interface WorkspaceRepoSummary {
   /** Where the session started. Null when it could not be told. */
   readonly sessionBaseSha?: string | null
   /** The branch checked out, and its commit. */
-  readonly head?: { readonly branch: string | null; readonly sha: string } | null
+  readonly head?: {
+    readonly branch: string | null
+    readonly sha: string
+    /** The tree of that commit. */
+    readonly tree: string
+  } | null
   /** Whether anything is not committed. */
   readonly dirty?: boolean
   /** The session's commits, newest first. */
@@ -208,10 +215,10 @@ export function workspaceSummaryScript(runId: string, repos: readonly SummaryRep
       comparisonScript(repo.defaultBranch, comparisonOf(repo.against)),
       `printf 'MEASURE\\t%s\\t%s\\t%s\\t%s\\n' "$session_base" "$base" "$mode" "$head"`,
       'if [ -n "$err" ]; then echo "ERROR $err"; fi',
-      `printf 'HEAD\\t%s\\t%s\\n' "$(git symbolic-ref -q --short HEAD 2>/dev/null)" "$(git rev-parse --verify -q HEAD 2>/dev/null)"`,
+      `printf 'HEAD\\t%s\\t%s\\t%s\\n' "$(git symbolic-ref -q --short HEAD 2>/dev/null)" "$(git rev-parse --verify -q HEAD 2>/dev/null)" "$(git rev-parse --verify -q 'HEAD^{tree}' 2>/dev/null)"`,
       `if [ -n "$(${GIT_IGNORING} status --porcelain -uall 2>/dev/null | head -1)" ]; then echo DIRTY; fi`,
       // The session's commits, with the branches that end at each, for telling its layers apart.
-      `if [ -n "$session_base" ]; then git log --max-count=${MAX_SESSION_COMMITS} --format='COMMIT%x09%H%x09%ct%x09%D%x09%s' "$session_base..HEAD" 2>/dev/null; fi`,
+      `if [ -n "$session_base" ]; then git log --max-count=${MAX_SESSION_COMMITS} --format='COMMIT%x09%H%x09%T%x09%ct%x09%D%x09%s' "$session_base..HEAD" 2>/dev/null; fi`,
       // Files git tracks or would track, minus the ones deleted from the working directory.
       `{ ${GIT_IGNORING} ls-files -co --exclude-standard; git ls-files -d; } | sort | uniq -u | sed 's/^/FILE /'`,
       `{ ${measuredDiff('--name-status')}; } | sed 's/^/CHANGE /'`,
@@ -252,7 +259,7 @@ type MutableRepo = {
   files: string[]
   changes: { path: string; status: ChangeStatus }[]
   sessionBaseSha: string | null
-  head: { branch: string | null; sha: string } | null
+  head: { branch: string | null; sha: string; tree: string } | null
   dirty: boolean
   commits: SummaryCommit[]
   measure: { -readonly [K in keyof SummaryMeasure]: SummaryMeasure[K] }
@@ -300,17 +307,18 @@ export function parseWorkspaceSummary(output: string): WorkspaceSummary {
     } else if (kind === 'ERROR' && repo) {
       repo.measure.error = rest === 'missing' ? 'missing' : null
     } else if (kind === 'HEAD' && repo) {
-      const [branch = '', sha = ''] = rest.split('\t')
+      const [branch = '', sha = '', tree = ''] = rest.split('\t')
 
-      repo.head = sha ? { branch: branch || null, sha } : null
+      repo.head = sha ? { branch: branch || null, sha, tree } : null
     } else if (kind === 'DIRTY' && repo) {
       repo.dirty = true
     } else if (kind === 'COMMIT' && repo) {
-      const [sha = '', time = '', decorations = '', ...subject] = rest.split('\t')
+      const [sha = '', tree = '', time = '', decorations = '', ...subject] = rest.split('\t')
 
       if (sha) {
         repo.commits.push({
           sha,
+          tree,
           subject: subject.join('\t'),
           at: Number(time) * 1000 || 0,
           branches: localBranches(decorations),

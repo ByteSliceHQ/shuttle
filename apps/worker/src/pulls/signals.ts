@@ -241,7 +241,8 @@ export const recordPublished = pullsModule.signal({
         additions: input.additions,
         deletions: input.deletions,
         reviewDecision: 'none' as const,
-        checkRollup: 'pending' as const,
+        // Nothing has been heard about checks yet, and a repository may have none.
+        checkRollup: 'neutral' as const,
         updatedAt: input.updatedAt,
         isFork: input.isFork,
         state: 'open' as const,

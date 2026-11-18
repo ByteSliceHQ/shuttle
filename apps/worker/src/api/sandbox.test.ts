@@ -4,10 +4,12 @@ import type { SandboxWorkspace } from '@shuttle/api'
 
 import type { ShuttleEnv } from '../env'
 import { localSandboxName } from '../sandbox/names'
+import type { SessionStacks } from '../session/stack-state'
 import type { Actor } from '../tenancy/access'
 import { migratedD1 } from '../testing/fake-d1'
 import { fakeEnv } from '../testing/fake-env'
 import { handleApi } from './handler'
+import { publishedBranches } from './sandbox'
 
 const RUN = 'session_1'
 const ROOT = `/workspace/.wt/${RUN}`
@@ -27,6 +29,8 @@ interface World {
   online?: boolean
   adopt?: { ok: boolean; error?: string }
   mode?: string
+  /** What the session has published, by stack. */
+  stacks?: SessionStacks
   /** More of what the sandbox says about the demo repository's changes. */
   summary?: Record<string, unknown>
 }
@@ -47,6 +51,7 @@ function envWith(world: World = {}, overrides: Partial<ShuttleEnv> = {}) {
       last: null,
     }),
     getSessionRepos: async () => [],
+    getSessionStacks: async () => world.stacks ?? {},
     getSessionActivitySnapshot: async () => ({ activity: world.activity ?? 'idle', tail: 0 }),
     placeSandbox: async (placement: unknown) => {
       placed.push(placement)
@@ -258,6 +263,7 @@ describe('what a session changed', () => {
           dirty: false,
           sessionBaseSha: null,
           commits: [],
+          published: [],
           comparison: {
             against: 'session',
             baseSha: null,
@@ -598,4 +604,28 @@ test('the terminal is not in the contract', async () => {
   })
 
   expect(response).toBeNull()
+})
+
+const layer = (branch: string, publishedTree: string, pull = true) => ({
+  layer: 1,
+  branch,
+  parentBranch: 'main',
+  pull: pull ? { number: 1, url: '', draft: true } : null,
+  remoteSha: 'r',
+  publishedTree,
+})
+
+describe('publishedBranches', () => {
+  const stacks: SessionStacks = {
+    demo: { layers: [layer('one', 't1')], native: null },
+    'demo#2': { layers: [layer('two', 't2'), layer('three', '', false)], native: null },
+    'demo-api': { layers: [layer('other', 't9')], native: null },
+  }
+
+  test("are every stack of the repository's, and only what has a pull request", () => {
+    expect(publishedBranches(stacks, 'demo')).toEqual([
+      { branch: 'one', tree: 't1' },
+      { branch: 'two', tree: 't2' },
+    ])
+  })
 })

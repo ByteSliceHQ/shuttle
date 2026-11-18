@@ -223,7 +223,8 @@ function pullSummaryFromRest(
     additions: body.additions ?? 0,
     deletions: body.deletions ?? 0,
     reviewDecision: 'none',
-    checkRollup: 'pending',
+    // Nothing has been heard about checks yet, and a repository may have none.
+    checkRollup: 'neutral',
     updatedAt: Date.parse(body.updated_at),
     isFork: Boolean(body.head.repo?.fork),
     stack: stackFromRest(body),

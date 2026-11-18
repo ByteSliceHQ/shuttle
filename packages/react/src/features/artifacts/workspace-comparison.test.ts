@@ -114,6 +114,27 @@ describe('the session pull requests', () => {
     expect(pullSync({ ...first.pull, headSha: 'old' }, repo())).toBe('unpushed')
     expect(pullSync(first.pull, repo({ head: null }))).toBeNull()
   })
+
+  test('compare a published branch by its files, not by its commit', () => {
+    // GitHub made the commit, so it has another name than the sandbox's for the same files.
+    const onGithub = { ...first.pull, headSha: 'made-by-github' }
+
+    const published = (tree: string) =>
+      repo({
+        dirty: false,
+        commits: [
+          { sha: 'c2', tree: 't2', subject: 'two', at: 2, branches: [LAYER2] },
+          { sha: 'c1', tree: 't1', subject: 'one', at: 1, branches: [LAYER1] },
+        ],
+        published: [{ branch: LAYER1, tree }],
+      })
+
+    expect(pullSync(onGithub, published('t1'))).toBe('pushed')
+    expect(pullSync(onGithub, published('older'))).toBe('unpushed')
+
+    // With no record of a publish it falls back to the commit, which differs.
+    expect(pullSync(onGithub, repo())).toBe('unpushed')
+  })
 })
 
 describe('the rail', () => {

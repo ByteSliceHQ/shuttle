@@ -6,6 +6,7 @@ import type { HarnessId, VendorHarnessId } from './harness'
 import type { LinkedSandboxRepo } from './sandbox/workspace'
 import type { SandboxPlacement } from './session/bind-sandbox'
 import type { PendingPlacement, SessionMove } from './session/handoff'
+import type { SessionStacks } from './session/stack-state'
 import type { Team } from './team'
 import type { SessionAccess } from './tenancy/access'
 import type {
@@ -72,6 +73,7 @@ export interface LoomsRunStub {
   placeSandboxLater(placement: SandboxPlacement | null): Promise<{ ok: true }>
   getSandboxMoves(): Promise<{ pending: PendingPlacement | null; last: SessionMove | null }>
   getSessionRepos(): Promise<readonly LinkedSandboxRepo[]>
+  getSessionStacks(): Promise<SessionStacks>
   getSessionActivitySnapshot(): Promise<{ activity: SessionActivity; tail: number } | null>
 }
 
