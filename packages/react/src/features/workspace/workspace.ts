@@ -488,12 +488,21 @@ async function startsOnThisMachine(host: ShuttleHost): Promise<{ deviceId?: stri
   return wanted && runner?.status === 'online' ? { deviceId: app.deviceId } : {}
 }
 
-/** Starts a session in a folder, on this machine when the desktop app has its sandbox up. */
+/**
+ * Starts a session in a folder, on this machine when the desktop app has its sandbox up. Files
+ * go with the request, so the session's first task already has them.
+ */
 export async function startWorkspaceSession(
   host: ShuttleHost,
-  input: { folderId: string; goal: string },
+  input: { folderId: string; goal: string; files?: readonly File[] },
 ): Promise<{ runId: string }> {
-  return host.client.workspace.createSession({ ...input, ...(await startsOnThisMachine(host)) })
+  const { files = [], ...fields } = input
+
+  return host.client.workspace.createSession({
+    ...fields,
+    ...(files.length > 0 ? { files: [...files] } : {}),
+    ...(await startsOnThisMachine(host)),
+  })
 }
 
 export async function createWorkspaceFolder(host: ShuttleHost, runId: string, name: string) {

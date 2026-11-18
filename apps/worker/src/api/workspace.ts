@@ -9,6 +9,7 @@ import type {
 } from '@shuttle/api'
 import { DEVICE_ID } from '@shuttle/runner-protocol'
 
+import { deleteAsset, putAsset, uploadMediaType, type AssetRef } from '../assets/store'
 import { getAuth } from '../auth/auth'
 import {
   ensureNamedWorkspace,
@@ -417,19 +418,54 @@ export const workspaceRouter = {
       })
     }
 
-    await stub.signal([
-      requestSession({
-        runId,
-        folderId,
-        goal,
-        lessons: playbook.lessons,
-        playbookVersion: playbook.version,
-        playbookRunId: playbook.runId,
-        ownerId: actor.userId,
-        // The folder lives in the organization's workspace, which this one cannot read.
-        repos: tree.folders[folderId]?.repos ?? [],
-      }),
-    ])
+    const files = input.files ?? []
+
+    if (files.length > 0 && !env.ASSETS) {
+      throw new ORPCError('SERVICE_UNAVAILABLE', { message: 'File storage is not set up.' })
+    }
+
+    const stored: AssetRef[] = []
+
+    try {
+      // Uploaded together; each File is already in memory, so R2 reads it without another copy.
+      const attachments = await Promise.all(
+        files.map(async (file) => {
+          const asset = await putAsset(env.ASSETS!, runId, {
+            name: file.name,
+            mediaType: uploadMediaType(file.type, file.name),
+            body: file,
+            source: 'upload',
+            createdBy: actor.userId,
+          })
+
+          stored.push(asset)
+          return asset
+        }),
+      )
+
+      await stub.signal([
+        requestSession({
+          runId,
+          folderId,
+          goal,
+          ...(attachments.length > 0 ? { attachments } : {}),
+          lessons: playbook.lessons,
+          playbookVersion: playbook.version,
+          playbookRunId: playbook.runId,
+          ownerId: actor.userId,
+          // The folder lives in the organization's workspace, which this one cannot read.
+          repos: tree.folders[folderId]?.repos ?? [],
+        }),
+      ])
+    } catch (cause) {
+      // No session exists to reach these files through, so none may be left behind.
+      if (env.ASSETS) {
+        const bucket = env.ASSETS
+        await Promise.allSettled(stored.map((asset) => deleteAsset(bucket, runId, asset.id)))
+      }
+
+      throw cause
+    }
 
     return { runId }
   }),

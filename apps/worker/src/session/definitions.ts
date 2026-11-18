@@ -2,6 +2,8 @@ import { z } from 'zod'
 
 import { DEFAULT_DEFINITION_VERSION, defineKind } from '@swirls/looms/core'
 
+import { AttachmentInputSchema } from '../agents/attachment-input'
+
 const LessonSchema = z.object({
   id: z.string(),
   text: z.string(),
@@ -26,6 +28,7 @@ const PullRefSchema = z.object({
 
 export const ShuttleSessionInputSchema = z.object({
   goal: z.string(),
+  attachments: z.array(AttachmentInputSchema).optional(),
   repoUrl: z.string().nullable().optional(),
   folderId: z.string().nullable().optional(),
   workspaceRunId: z.string().nullable().optional(),

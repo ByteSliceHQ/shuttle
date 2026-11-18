@@ -99,6 +99,13 @@ describe('workspace module', () => {
         input: { title: 'Test workspace' },
       })
 
+      const screenshot = {
+        id: 'ast_0123456789abcdef0123456789abcdef',
+        name: 'screen.png',
+        mediaType: 'image/png',
+        size: 1024,
+      }
+
       await looms.signal(runId, [
         createFolder({
           folderId: 'folder-1',
@@ -120,6 +127,7 @@ describe('workspace module', () => {
           runId: 'session_1',
           folderId: 'folder-1',
           goal: 'Ship the sidebar',
+          attachments: [screenshot],
           lessons: [],
           playbookVersion: 0,
           playbookRunId: null,
@@ -140,6 +148,13 @@ describe('workspace module', () => {
 
       const session = await looms.getRun('session_1')
       expect(session.status).toBeTruthy()
+
+      const response = await looms.fetch(new Request('http://shuttle.test/runs/session_1/events'))
+      const body = (await response?.json()) as { events: { type: string; payload: unknown }[] }
+
+      expect(
+        body.events.find((event) => event.type === 'runtime.thread.started')?.payload,
+      ).toMatchObject({ input: { attachments: [screenshot] } })
 
       // Unlink must not affect the already-launched session.
       await looms.signal(runId, [

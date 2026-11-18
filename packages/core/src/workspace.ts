@@ -19,6 +19,14 @@ const LinkedRepoSchema = Schema.Struct({
   private: Schema.Boolean,
 })
 
+/** A file attached to a session's first message. The bytes are in the session's media store. */
+const AttachmentRefSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  mediaType: Schema.String,
+  size: Schema.Finite,
+})
+
 const LessonSchema = Schema.Struct({
   id: Schema.String,
   text: Schema.String,
@@ -92,6 +100,7 @@ export const workspaceCatalog = defineEventCatalog('workspace', {
     runId: Schema.String,
     folderId: Schema.String,
     goal: Schema.String,
+    attachments: Schema.optional(Schema.Array(AttachmentRefSchema)),
     lessons: Schema.Array(LessonSchema),
     playbookVersion: Schema.Finite,
     playbookRunId: Schema.NullOr(Schema.String),

@@ -242,6 +242,52 @@ describe('shuttle session routing', () => {
     }
   })
 
+  test('initial screenshots reach the first conductor turn with their sandbox paths', async () => {
+    const lines: { text: string; attachments: readonly { id: string }[] }[] = []
+
+    const screenshot = {
+      id: 'ast_0123456789abcdef0123456789abcdef',
+      name: 'overflow.png',
+      mediaType: 'image/png',
+      size: 4096,
+    }
+
+    const conductor = defineAgent({
+      name: 'conductor',
+      input: TextInput.extend({
+        attachments: z
+          .array(
+            z.object({ id: z.string(), name: z.string(), mediaType: z.string(), size: z.number() }),
+          )
+          .optional(),
+      }),
+      instructions: 'Conduct.',
+      runTurn: ({ messages }) => {
+        const last = messages.findLast((message) => message.role === 'user')
+        lines.push({ text: last?.content ?? '', attachments: last?.attachments ?? [] })
+        return { message: { role: 'assistant', content: 'ok' }, done: true }
+      },
+    })
+
+    const looms = createSessionLooms(conductor)
+
+    try {
+      const { runId } = await looms.launch(codingSession, {
+        goal: 'Fix this overflow',
+        attachments: [screenshot],
+      })
+
+      await waitFor(() => lines.length > 0)
+      expect(lines[0]?.attachments).toEqual([screenshot])
+
+      expect(lines[0]?.text).toContain(
+        `/workspace/.shuttle/${runId}/attachments/01234567-overflow.png`,
+      )
+    } finally {
+      await looms.stop()
+    }
+  })
+
   test('a message keeps its attached files on the way to the conductor', async () => {
     const lines: { text: string; attachments: readonly { id: string }[] }[] = []
 

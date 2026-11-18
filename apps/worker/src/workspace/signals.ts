@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 
+import { AttachmentRefSchema } from '../session/scope'
 import { SessionActivitySchema, TabKindSchema, workspaceModule } from './scope'
 
 const LinkedRepoSchema = Schema.Struct({
@@ -111,6 +112,7 @@ export const requestSession = workspaceModule.signal({
     runId: Schema.String,
     folderId: Schema.String,
     goal: Schema.String,
+    attachments: Schema.optional(Schema.Array(AttachmentRefSchema)),
     lessons: Schema.Array(LessonSchema),
     playbookVersion: Schema.Finite,
     playbookRunId: Schema.NullOr(Schema.String),

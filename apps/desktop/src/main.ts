@@ -4,6 +4,7 @@ import { hostname } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, session, shell } from 'electron'
+import { autoUpdater } from 'electron-updater'
 
 import {
   appPath,
@@ -18,6 +19,7 @@ import { forgetMachineToken, machineToken } from './machine'
 import { RunnerSupervisor } from './runner'
 import { showSplash } from './splash'
 import { Store } from './store'
+import { startUpdates } from './updates'
 
 /**
  * Shuttle's desktop app.
@@ -210,6 +212,22 @@ if (!app.requestSingleInstanceLock()) {
       // Removed from Shuttle on purpose. It is registered again only when asked to be.
       rejected: () => forgetMachineToken(store, APP_URL),
     })
+
+    const updates = startUpdates(
+      app,
+      autoUpdater,
+      (status) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+          window.webContents.send(CHANNELS.updateStatusChanged, status)
+        }
+      },
+      PACKAGED.autoUpdate === true,
+    )
+
+    ipcMain.handle(CHANNELS.updateStatus, () => updates.status())
+    ipcMain.handle(CHANNELS.checkForUpdates, () => updates.check())
+    ipcMain.handle(CHANNELS.downloadUpdate, () => updates.download())
+    ipcMain.handle(CHANNELS.installUpdate, () => updates.install())
 
     const startsLocally = () => store.get('startLocally') !== false
 

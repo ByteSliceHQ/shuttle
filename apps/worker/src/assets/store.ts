@@ -91,6 +91,16 @@ export function cleanAssetName(name: string): string {
   return cleaned && cleaned !== '.' && cleaned !== '..' ? cleaned : 'file'
 }
 
+/**
+ * The type to store for an uploaded file: what the browser declared, unless it declared nothing
+ * useful, in which case the file name decides.
+ */
+export function uploadMediaType(declared: string | null | undefined, name: string): string {
+  const type = cleanMediaType(declared)
+
+  return type && type !== 'application/octet-stream' ? type : mediaTypeOfName(name)
+}
+
 /** A media type as a browser reports it, without parameters, or `null` when it is not one. */
 export function cleanMediaType(value: string | null | undefined): string | null {
   const type = (value ?? '').split(';')[0]?.trim().toLowerCase() ?? ''
@@ -101,7 +111,7 @@ export function cleanMediaType(value: string | null | undefined): string | null 
 export interface PutAssetInput {
   readonly name: string
   readonly mediaType: string
-  readonly body: ReadableStream | ArrayBuffer | ArrayBufferView
+  readonly body: ReadableStream | ArrayBuffer | ArrayBufferView | Blob
   readonly source: AssetSource
   /** The person who attached it, or the agent thread that made it. */
   readonly createdBy: string

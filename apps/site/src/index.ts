@@ -14,29 +14,55 @@ export interface SiteEnv {
 }
 
 /** A build's file name: nothing that could reach outside the bucket's top level. */
-const RELEASE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.(dmg|zip|exe|AppImage)$/
+const RELEASE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.(dmg|zip|exe|AppImage|blockmap)$/
 
 export function releaseName(pathname: string): string | null {
   const name = pathname.slice('/download/'.length)
 
-  return RELEASE_NAME.test(name) ? name : null
+  return name === 'latest-mac.json' || name === 'latest-mac.yml' || RELEASE_NAME.test(name)
+    ? name
+    : null
 }
 
-async function download(request: Request, env: SiteEnv, name: string): Promise<Response> {
-  const object = await env.RELEASES.get(name, { range: request.headers, onlyIf: request.headers })
-
-  if (!object) {
-    return new Response('No such download.', { status: 404 })
-  }
-
+function releaseHeaders(object: R2Object, name: string): Headers {
   const headers = new Headers()
 
   object.writeHttpMetadata(headers)
   headers.set('etag', object.httpEtag)
   headers.set('accept-ranges', 'bytes')
   headers.set('content-disposition', `attachment; filename="${name}"`)
+
   // A build never changes under its name; a new one gets a new name.
-  headers.set('cache-control', 'public, max-age=86400')
+  headers.set(
+    'cache-control',
+    name.startsWith('latest-mac.') ? 'no-store' : 'public, max-age=86400',
+  )
+
+  return headers
+}
+
+async function download(request: Request, env: SiteEnv, name: string): Promise<Response> {
+  // A HEAD asks only for the headers; reading the body of a large build would waste the read.
+  if (request.method === 'HEAD') {
+    const object = await env.RELEASES.head(name)
+
+    if (!object) {
+      return new Response(null, { status: 404 })
+    }
+
+    const headers = releaseHeaders(object, name)
+    headers.set('content-length', String(object.size))
+
+    return new Response(null, { headers })
+  }
+
+  const object = await env.RELEASES.get(name, { range: request.headers, onlyIf: request.headers })
+
+  if (!object) {
+    return new Response('No such download.', { status: 404 })
+  }
+
+  const headers = releaseHeaders(object, name)
 
   if (!('body' in object)) {
     return new Response(null, { status: 304, headers })
@@ -70,7 +96,16 @@ export default {
     const url = new URL(request.url)
 
     if (url.pathname === '/download/mac') {
-      return Response.redirect(new URL(`/download/${env.LATEST_MAC}`, url).toString(), 302)
+      // The manual download also advances for ad hoc builds that cannot auto-install.
+      const pointer = await env.RELEASES.get('latest-mac.json')
+      const data = pointer ? await pointer.json<{ file?: unknown }>().catch(() => null) : null
+
+      const name =
+        typeof data?.file === 'string' && /^Shuttle-[A-Za-z0-9._-]+\.dmg$/.test(data.file)
+          ? data.file
+          : env.LATEST_MAC
+
+      return Response.redirect(new URL(`/download/${name}`, url).toString(), 302)
     }
 
     if (url.pathname.startsWith('/download/')) {

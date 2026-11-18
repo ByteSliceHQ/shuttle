@@ -20,9 +20,11 @@ import {
   rememberSession,
   repoCountLabel,
   SignInGate,
+  StartAttachments,
   startWorkspaceSession,
   useAgentGate,
   useDefaultHarness,
+  useStartAttachments,
   useStartPlace,
   useWorkspace,
 } from '@shuttle/react'
@@ -54,6 +56,7 @@ function HomePage() {
 
   const [goal, setGoal] = useState(DEFAULT_GOAL)
   const [folderId, setFolderId] = useState<string>('')
+  const attachments = useStartAttachments()
   const agent = useDefaultHarness()
   const startPlace = useStartPlace()
   const gate = useAgentGate(agent.harness, startPlace)
@@ -77,7 +80,11 @@ function HomePage() {
 
       rememberLastFolder(resolvedFolderId)
 
-      return startWorkspaceSession(host, { folderId: resolvedFolderId, goal: trimmed })
+      return startWorkspaceSession(host, {
+        folderId: resolvedFolderId,
+        goal: trimmed,
+        files: attachments.files,
+      })
     },
     onSuccess({ runId: sessionId }, trimmed) {
       rememberSession({ runId: sessionId, goal: trimmed })
@@ -125,10 +132,13 @@ function HomePage() {
                 upcoming
               />
             ) : null}
+            <StartAttachments files={attachments.files} remove={attachments.remove} />
             <Textarea
               value={goal}
               onChange={(event) => setGoal(event.target.value)}
               onKeyDown={onKeyDown}
+              onPaste={attachments.onPaste}
+              disabled={busy}
               aria-label="Session goal"
               placeholder="Describe the change you want…"
               className="min-h-24 resize-none border-0 bg-transparent text-sm focus-visible:ring-0"
@@ -185,6 +195,11 @@ function HomePage() {
               </Button>
             </div>
           </div>
+          {attachments.error ? (
+            <p role="alert" className="text-status-failed mt-3 text-xs">
+              {attachments.error}
+            </p>
+          ) : null}
           {startSession.error ? (
             <p className="text-status-failed mt-3 text-xs">{startSession.error.message}</p>
           ) : null}

@@ -213,6 +213,11 @@ export const workspaceContract = {
         goal: z.string().trim().min(1),
         /** One of the caller's own machines to start on, as the desktop app asks for. */
         deviceId: z.string().nullish(),
+        /**
+         * Files for the first task, such as pasted screenshots. With any, the request is sent as
+         * multipart form data, and the Worker limits the whole body to 50 MB.
+         */
+        files: z.array(z.file().min(1)).max(10).optional(),
       }),
     )
     .output(z.object({ runId: z.string() })),

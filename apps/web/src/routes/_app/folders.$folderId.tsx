@@ -20,11 +20,13 @@ import {
   sessionIndicatorLabel,
   sessionsForFolder,
   SignInGate,
+  StartAttachments,
   startWorkspaceSession,
   useAgentGate,
   useDefaultHarness,
   usePullInbox,
   useSeenSessions,
+  useStartAttachments,
   useStartPlace,
   useWorkspace,
   type WorkspaceFolder,
@@ -81,6 +83,7 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
   const now = useNow()
   const seenSnapshot = useSeenSessions()
   const [goal, setGoal] = useState(() => (folder.repos.length === 0 ? DEMO_GOAL : ''))
+  const attachments = useStartAttachments()
   const [linkOpen, setLinkOpen] = useState(false)
   const agent = useDefaultHarness()
   const startPlace = useStartPlace()
@@ -99,7 +102,11 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
     async mutationFn(trimmed: string) {
       await agent.save()
 
-      return startWorkspaceSession(host, { folderId: folder.folderId, goal: trimmed })
+      return startWorkspaceSession(host, {
+        folderId: folder.folderId,
+        goal: trimmed,
+        files: attachments.files,
+      })
     },
     onSuccess({ runId: sessionId }, trimmed) {
       rememberSession({ runId: sessionId, goal: trimmed })
@@ -205,10 +212,13 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
                   upcoming
                 />
               ) : null}
+              <StartAttachments files={attachments.files} remove={attachments.remove} />
               <Textarea
                 value={goal}
                 onChange={(event) => setGoal(event.target.value)}
                 onKeyDown={onKeyDown}
+                onPaste={attachments.onPaste}
+                disabled={busy}
                 aria-label="Session goal"
                 placeholder="Describe the change you want…"
                 className="max-h-80 min-h-24 resize-none border-0 bg-transparent text-sm focus-visible:ring-0"
@@ -237,6 +247,11 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
                 </Button>
               </div>
             </div>
+            {attachments.error ? (
+              <p role="alert" className="text-status-failed mt-3 text-xs">
+                {attachments.error}
+              </p>
+            ) : null}
             {error ? (
               <p className="text-status-failed mt-3 text-xs wrap-anywhere">{error.message}</p>
             ) : null}

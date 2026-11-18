@@ -50,6 +50,18 @@ describe('session feed', () => {
     expect(feed.brief[0]).toMatchObject({ version: 1, text: 'Ship it' })
   })
 
+  test('shows initial attachments on the goal and in session media', () => {
+    const screenshot = { id: 'ast_a', name: 'bug.png', mediaType: 'image/png', size: 2048 }
+
+    const feed = fold([
+      event('runtime.thread.started', { input: { goal: 'Fix this', attachments: [screenshot] } }),
+    ])
+
+    expect(feed.items[0]).toMatchObject({ kind: 'user', goal: true, attachments: [screenshot] })
+    expect(feed.media).toHaveLength(1)
+    expect(feed.media[0]).toMatchObject({ asset: screenshot, source: 'upload' })
+  })
+
   test('shows attached files on their message and shared files where the agent shared them', () => {
     const screenshot = { id: 'ast_a', name: 'bug.png', mediaType: 'image/png', size: 2048 }
 

@@ -27,6 +27,7 @@ const staging = join(root, 'build')
 
 const url = process.env.SHUTTLE_DESKTOP_URL?.trim().replace(/\/$/, '')
 const image = process.env.SHUTTLE_SANDBOX_IMAGE?.trim()
+const identity = process.env.CSC_NAME?.trim()
 
 if (!url?.startsWith('https://')) {
   console.error('Set SHUTTLE_DESKTOP_URL to the https address of the Shuttle deployment.')
@@ -51,7 +52,7 @@ mkdirSync(staging, { recursive: true })
 
 writeFileSync(
   join(staging, 'desktop.config.json'),
-  `${JSON.stringify({ url, ...(image ? { image } : {}) }, null, 2)}\n`,
+  `${JSON.stringify({ url, autoUpdate: Boolean(identity && identity !== '-'), ...(image ? { image } : {}) }, null, 2)}\n`,
 )
 
 // The agent bridge, which the built-in sandbox copies into itself. Tests stay behind.
@@ -64,8 +65,6 @@ bridge.discard()
 await run(['bun', 'run', 'build'], runnerRoot)
 await run(['bun', 'run', 'build'], root)
 
-const identity = process.env.CSC_NAME?.trim()
-
 await run(
   [
     'bun',
@@ -73,6 +72,7 @@ await run(
     'electron-builder',
     '--mac',
     'dmg',
+    'zip',
     // "-" is an ad hoc signature: enough to run on Apple Silicon, not enough for Gatekeeper.
     `-c.mac.identity=${identity || '-'}`,
     `-c.mac.notarize=${identity ? 'true' : 'false'}`,

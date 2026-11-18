@@ -45,6 +45,7 @@ export { ActivityDot } from './features/workspace/activity-dot'
 export { AppSidebarShell } from './features/workspace/app-sidebar'
 export { LinkRepoDialog } from './features/workspace/link-repo-dialog'
 export { RepoChip } from './features/workspace/repo-chip'
+export { StartAttachments, useStartAttachments } from './features/workspace/start-attachments'
 export {
   createWorkspaceFolder,
   orderedFolders,

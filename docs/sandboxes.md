@@ -163,7 +163,7 @@ Desktop, against `wrangler dev`, with Daytona as the cloud provider.
 
 - Packaged for Apple Silicon Macs only (see "Packaging the desktop app"), with an ad hoc
   signature unless a Developer ID is given. No notarization has been run, and there is no
-  auto-update, app icon or deep link for signing in through the system browser.
+  deep link for signing in through the system browser.
 - GitHub sign-in happens inside the app window. It should hand off to the system browser and
   come back through a deep link.
 - The window loads the UI from a Shuttle deployment. Nothing works offline.
@@ -172,8 +172,9 @@ Desktop, against `wrangler dev`, with Daytona as the cloud provider.
 
 ### Verification
 
-- The desktop app has no automated tests. The runner has tests for its link and its lock; the
-  container backend is exercised by hand.
+- The desktop update flow has automated state tests. Installing a signed Mac update still needs
+  release testing. The runner has tests for its link and its lock; the container backend is
+  exercised by hand.
 - Never run against a deployed Worker, where the runner's socket hibernates for real.
 - A vendor agent turn on a local sandbox has not been run: the sign-in switch and listing work,
   but no subscription was signed in there.
@@ -188,7 +189,7 @@ SHUTTLE_SANDBOX_IMAGE=registry.example.com/shuttle-sandbox:latest \
 bun run package
 ```
 
-This writes `release/Shuttle-<version>-<arch>.dmg` for the architecture of the Mac it runs on.
+This writes `release/Shuttle-<version>-<arch>.dmg`, the update `.zip`, and `latest-mac.yml` for the architecture of the Mac it runs on.
 The app holds the compiled runner, the built-in sandbox runtime, the agent bridge, and one small
 file, `desktop.config.json`, naming the deployment its window opens and, when given, the image
 a Docker or Podman fallback pulls. `SHUTTLE_SANDBOX_IMAGE` is optional. `SHUTTLE_DESKTOP_URL` and
@@ -205,3 +206,25 @@ Set `CSC_NAME` to a Developer ID Application identity to sign with it; electron-
 notarizes when it finds Apple credentials in the environment. Otherwise the signature is ad
 hoc: the app runs, but a Mac that downloaded it refuses to open it until its owner chooses
 Open Anyway under System Settings, Privacy & Security.
+
+### Desktop updates
+
+Developer ID builds check `https://shuttle.codes/download/latest-mac.yml` shortly after launch and every
+four hours. The bottom-left sidebar also offers a manual check. People choose when to download
+and when to restart; the app never installs an update on quit automatically. Development builds
+do not check for updates.
+
+The release workflow builds a new Apple Silicon version for each push to `main`, then
+uploads it to the existing `shuttle-releases` R2 bucket. Builds are ad hoc by default, with a
+manual download link in the sidebar and no automatic installation. Once Apple credentials exist,
+set `SHUTTLE_SIGN_DESKTOP=true` to enable signed releases and the automatic updater.
+The ZIP and DMG are uploaded before the
+update manifest, so an available update always points to uploaded binaries. The public feed works
+without giving desktop apps credentials for the private source repository. See
+[deployment setup](deployments.md) for required GitHub variables and secrets.
+
+For a manual release, package with a stable Developer ID signing identity and notarization
+credentials, then upload the generated DMG, ZIP, blockmaps, and `latest-mac.yml` to R2, publishing
+the manifest last. Packaging uses `--publish never`; the workflow performs publication. macOS
+requires signed apps for automatic installation. An older build without the update bridge or
+with the previous GitHub feed needs one manual upgrade first.

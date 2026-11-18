@@ -2,6 +2,11 @@
 export const CHANNELS = {
   /** Sync. Answers with `DesktopInfo`. */
   info: 'desktop:info',
+  updateStatus: 'desktop:update-status',
+  updateStatusChanged: 'desktop:update-status-changed',
+  checkForUpdates: 'desktop:check-for-updates',
+  downloadUpdate: 'desktop:download-update',
+  installUpdate: 'desktop:install-update',
   /** Invoke. Answers with the runner's last `RunnerStatus`. */
   runnerStatus: 'desktop:runner-status',
   /** Invoke. Answers whether a new session starts on this machine. */
@@ -59,4 +64,21 @@ export interface RunnerStatus {
     | 'error'
   readonly message?: string
   readonly backend?: { readonly id: string; readonly label: string; readonly isolation: string }
+}
+
+export interface UpdateStatus {
+  readonly status:
+    | 'manual'
+    | 'disabled'
+    | 'idle'
+    | 'checking'
+    | 'current'
+    | 'available'
+    | 'downloading'
+    | 'ready'
+    | 'error'
+  readonly version: string
+  readonly nextVersion?: string
+  readonly progress?: number
+  readonly message?: string
 }

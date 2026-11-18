@@ -15,7 +15,9 @@ import {
   isJsonObject,
 } from '@swirls/looms/core'
 
+import { AttachmentInputSchema } from '../agents/attachment-input'
 import { isHardStop } from '../agents/intake'
+import { withAttachmentManifest } from '../assets/sandbox'
 import { jsonObject } from '../json'
 import { reflectionRunId } from '../tenancy/run-id'
 import {
@@ -97,6 +99,7 @@ export interface SessionState {
    * is more than one, agents are told who each message is from.
    */
   readonly speakerIds: readonly string[]
+  readonly initialAttachments?: readonly AttachmentRef[]
   readonly goal: string
   readonly repoUrl: string | null
   readonly folderId: string | null
@@ -332,6 +335,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
 
       return {
         speakerIds: ownerId ? [ownerId] : [],
+        initialAttachments: AttachmentInputSchema.array().parse(input.attachments ?? []),
         goal: asString(input.goal) ?? 'Improve the repository',
         repoUrl: asString(input.repoUrl),
         folderId: asString(input.folderId),
@@ -870,7 +874,11 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
       if (!state.pull && shouldSpawnConductor(state.conductor)) {
         const { generation } = state.conductor
         const childThreadId = conductorChildThreadId(ctx.threadId, generation)
-        const startingFiles = queuedAttachments(state.conductor)
+
+        const startingFiles = [
+          ...(state.initialAttachments ?? []),
+          ...queuedAttachments(state.conductor),
+        ]
 
         effects.push(
           emit(
@@ -897,18 +905,22 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             kind: 'agent',
             definitionName: 'conductor',
             input: {
-              text: buildConductorInput({
-                runId: ctx.runId,
-                goal: state.goal,
-                briefText: state.briefText,
-                briefVersion: state.briefVersion,
-                repoUrl: state.repoUrl,
-                repos: state.repos,
-                lessons: state.lessons,
-                playbookVersion: state.playbookVersion,
-                conductor: state.conductor,
-                speakerIds: state.speakerIds,
-              }),
+              text: withAttachmentManifest(
+                buildConductorInput({
+                  runId: ctx.runId,
+                  goal: state.goal,
+                  briefText: state.briefText,
+                  briefVersion: state.briefVersion,
+                  repoUrl: state.repoUrl,
+                  repos: state.repos,
+                  lessons: state.lessons,
+                  playbookVersion: state.playbookVersion,
+                  conductor: state.conductor,
+                  speakerIds: state.speakerIds,
+                }),
+                ctx.runId,
+                state.initialAttachments,
+              ),
               repos: state.repos.map((repo) => repo.fullName),
               ...(startingFiles.length > 0 ? { attachments: startingFiles } : {}),
             },

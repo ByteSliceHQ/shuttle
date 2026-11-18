@@ -597,6 +597,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       }
 
       const goal = jsonText(jsonFields(payload.input).goal)
+      const attachments = mediaAssetsOf(jsonFields(payload.input).attachments)
 
       if (!goal || !event.threadId) {
         return { ...feed, rootThreadId: event.threadId ?? undefined }
@@ -611,7 +612,17 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
           messageId: `goal_${event.id}`,
           text: goal,
           goal: true,
+          ...(attachments.length ? { attachments } : {}),
         }),
+        media: [
+          ...feed.media,
+          ...attachments.map((asset) => ({
+            asset,
+            source: 'upload' as const,
+            seq: event.seq,
+            ts: event.ts,
+          })),
+        ],
         rootThreadId: event.threadId,
         brief: [{ version: 1, text: goal, ts: event.ts }],
       }

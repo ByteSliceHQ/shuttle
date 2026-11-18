@@ -1,0 +1,184 @@
+name: Deploy Shuttle
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Keep deployment and publication in order. Never interrupt an upload halfway through.
+concurrency:
+  group: shuttle-production
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun run verify
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SHUTTLE_WEB_URL: ${{ vars.SHUTTLE_WEB_URL }}
+      SHUTTLE_DEPLOY_VARS: ${{ vars.SHUTTLE_DEPLOY_VARS }}
+      SHUTTLE_DEPLOY_ROUTES: ${{ vars.SHUTTLE_DEPLOY_ROUTES }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: Validate production configuration
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Missing CLOUDFLARE_API_TOKEN'; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'Missing CLOUDFLARE_ACCOUNT_ID'; exit 1; }
+          test -n "$SHUTTLE_DEPLOY_VARS" || { echo 'Set SHUTTLE_DEPLOY_VARS to the production Worker vars JSON'; exit 1; }
+          bun -e 'const u = new URL(process.env.SHUTTLE_WEB_URL); if (u.protocol !== "https:" || u.hostname === "localhost") throw new Error("Set SHUTTLE_WEB_URL to the production HTTPS URL")'
+      - name: Build UI and production Worker configuration
+        working-directory: apps/worker
+        run: |
+          export SHUTTLE_DEPLOY_VARS="$(bun -e 'console.log(JSON.stringify({ ...JSON.parse(process.env.SHUTTLE_DEPLOY_VARS || "{}"), SHUTTLE_WEB_URL: process.env.SHUTTLE_WEB_URL }))')"
+          export SHUTTLE_DEPLOY_ROUTES="${SHUTTLE_DEPLOY_ROUTES:-[]}"
+          bun run deploy:config
+      - name: Apply auth migrations
+        working-directory: apps/worker
+        run: bun x wrangler d1 migrations apply AUTH_DB --remote --config wrangler.deploy.jsonc
+      - name: Deploy Worker and hosted UI
+        working-directory: apps/worker
+        run: bun x wrangler deploy --config wrangler.deploy.jsonc
+      - name: Deploy download endpoint
+        working-directory: apps/site
+        run: bun run deploy
+
+  desktop:
+    needs: deploy
+    # Packaging currently bundles the Apple Silicon sandbox runtime only.
+    runs-on: macos-15
+    timeout-minutes: 60
+    outputs:
+      signed: ${{ steps.signing.outputs.signed }}
+    env:
+      SHUTTLE_DESKTOP_URL: ${{ vars.SHUTTLE_WEB_URL }}
+      SHUTTLE_SANDBOX_IMAGE: ${{ vars.SHUTTLE_SANDBOX_IMAGE }}
+      CSC_NAME: ${{ secrets.MAC_CSC_NAME }}
+      CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: Select signing mode and validate architecture
+        id: signing
+        env:
+          SIGN_DESKTOP: ${{ vars.SHUTTLE_SIGN_DESKTOP }}
+        run: |
+          test "$(uname -m)" = arm64 || { echo 'An Apple Silicon runner is required'; exit 1; }
+          if [ "$SIGN_DESKTOP" = true ]; then
+            for name in CSC_NAME CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+              test -n "$(printenv "$name")" || { echo "Missing signing credential: $name"; exit 1; }
+            done
+            echo 'signed=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'Publishing an ad hoc build for manual installation'
+            echo 'signed=false' >> "$GITHUB_OUTPUT"
+            for name in CSC_NAME CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+              echo "$name=" >> "$GITHUB_ENV"
+            done
+          fi
+      - run: bun install --frozen-lockfile
+      - name: Version this desktop release
+        run: |
+          bun -e '
+            const path = "apps/desktop/package.json";
+            const pkg = await Bun.file(path).json();
+            pkg.version = `0.1.${process.env.GITHUB_RUN_NUMBER}`;
+            await Bun.write(path, JSON.stringify(pkg, null, 2) + "\n");
+          '
+      - name: Build desktop (sign and notarize when enabled)
+        run: bun run --cwd apps/desktop package
+      - name: Write manual download pointer
+        run: |
+          bun -e '
+            const pkg = await Bun.file("apps/desktop/package.json").json();
+            await Bun.write("apps/desktop/release/latest-mac.json", JSON.stringify({ version: pkg.version, file: `Shuttle-${pkg.version}-arm64.dmg` }));
+          '
+      - name: Retain release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release
+          if-no-files-found: error
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest-mac.yml
+            apps/desktop/release/latest-mac.json
+
+  publish:
+    needs: desktop
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      AWS_ENDPOINT_URL: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-release
+          path: release
+      - name: Validate upload credentials
+        run: |
+          test -n "$AWS_ACCESS_KEY_ID" || { echo 'Missing R2_ACCESS_KEY_ID'; exit 1; }
+          test -n "$AWS_SECRET_ACCESS_KEY" || { echo 'Missing R2_SECRET_ACCESS_KEY'; exit 1; }
+      # AWS CLI supports multipart uploads; app bundles can exceed Wrangler's upload limit.
+      - name: Upload versioned binaries first
+        run: |
+          aws s3 cp release/ s3://shuttle-releases/ --recursive \
+            --exclude '*' --include '*.dmg' --include '*.zip' --include '*.blockmap' \
+            --cache-control 'public, max-age=31536000, immutable' --only-show-errors
+      # Rerunning an older workflow run must not move the public pointers back to its build.
+      - name: Check this release is the newest
+        id: newest
+        run: |
+          current="$(aws s3 cp s3://shuttle-releases/latest-mac.json - 2>/dev/null \
+            | jq -r '.version // (.file // "" | capture("^Shuttle-(?<v>[0-9][0-9.]*)-").v) // empty' 2>/dev/null || true)"
+          candidate="$(jq -r .version release/latest-mac.json)"
+          test -n "$candidate" || { echo 'latest-mac.json has no version'; exit 1; }
+          newest="$(printf '%s\n%s\n' "$current" "$candidate" | sed '/^$/d' | sort -V | tail -n 1)"
+          if [ -n "$current" ] && [ "$candidate" != "$newest" ]; then
+            echo "Published release $current is newer than $candidate; leaving the manifests unchanged"
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish signed update manifest
+        if: needs.desktop.outputs.signed == 'true' && steps.newest.outputs.publish == 'true'
+        run: |
+          aws s3 cp release/latest-mac.yml s3://shuttle-releases/latest-mac.yml \
+            --content-type application/yaml --cache-control no-store --only-show-errors
+      - name: Publish manual download pointer last
+        if: steps.newest.outputs.publish == 'true'
+        run: |
+          aws s3 cp release/latest-mac.json s3://shuttle-releases/latest-mac.json \
+            --content-type application/json --cache-control no-store --only-show-errors

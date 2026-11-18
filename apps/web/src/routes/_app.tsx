@@ -18,6 +18,7 @@ import { acceptInvitation, InvitationError } from '@/features/auth/invitation'
 import { listOrgMembers, orgMembersQuery } from '@/features/auth/org-people'
 import { tenantQuery } from '@/features/auth/tenant'
 import { DesktopAttention } from '@/features/desktop/desktop-attention'
+import { DesktopUpdate } from '@/features/desktop/desktop-update'
 import { LocalSandboxStatus } from '@/features/desktop/local-sandbox-status'
 import { GithubConnectBanner } from '@/features/github/github-connect-banner'
 import { host } from '@/host'
@@ -123,7 +124,12 @@ function AppLayout() {
   return (
     <Shuttle.Provider host={host} router={router} identity={identity}>
       <Shuttle.Shell
-        status={<LocalSandboxStatus />}
+        status={
+          <>
+            <DesktopUpdate />
+            <LocalSandboxStatus />
+          </>
+        }
         account={<AccountMenu />}
         background={<DesktopAttention />}
       >

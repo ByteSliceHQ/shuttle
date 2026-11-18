@@ -7,6 +7,7 @@ import { join } from 'node:path'
  * `scripts/package.ts`). Neither is a secret; an app carries none.
  */
 export interface PackagedConfig {
+  readonly autoUpdate?: boolean
   readonly url?: string
   readonly image?: string
 }
@@ -27,7 +28,11 @@ export function readPackagedConfig(resourcesPath: string): PackagedConfig {
     const url = text(parsed.url)
     const image = text(parsed.image)
 
-    return { ...(url ? { url } : {}), ...(image ? { image } : {}) }
+    return {
+      autoUpdate: parsed.autoUpdate === true,
+      ...(url ? { url } : {}),
+      ...(image ? { image } : {}),
+    }
   } catch {
     return {}
   }

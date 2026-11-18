@@ -11,6 +11,7 @@ import {
 } from '@swirls/looms/core'
 
 import { jsonObject } from '../json'
+import type { AttachmentRef } from '../session/scope'
 import { orgOfRun } from '../tenancy/run-id'
 import type { LinkedRepo, SessionActivity } from './scope'
 import { workspaceModule } from './scope'
@@ -36,6 +37,7 @@ export interface SessionPullRef {
 export interface WorkspaceSession {
   readonly runId: string
   readonly folderId: string
+  readonly attachments?: readonly AttachmentRef[]
   readonly goal: string
   readonly title: string
   readonly status: 'requested' | 'running' | 'completed' | 'failed' | 'cancelled'
@@ -321,6 +323,7 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
               [event.payload.runId]: {
                 runId: event.payload.runId,
                 folderId: event.payload.folderId,
+                attachments: event.payload.attachments,
                 goal: event.payload.goal,
                 title: event.payload.goal,
                 status: 'requested',
@@ -589,6 +592,7 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
             definitionName: session.definitionName,
             input: {
               goal: session.goal,
+              ...(session.attachments?.length ? { attachments: session.attachments } : {}),
               folderId: session.folderId,
               workspaceRunId: ctx.runId,
               ...(session.ownerId ? { ownerId: session.ownerId } : {}),
