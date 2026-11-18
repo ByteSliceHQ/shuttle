@@ -2,11 +2,10 @@ import {
   MAX_ASSET_BYTES,
   assetKind,
   cleanAssetName,
-  cleanMediaType,
   formatBytes,
   getAsset,
-  mediaTypeOfName,
   putAsset,
+  uploadMediaType,
 } from '../assets/store'
 import type { ShuttleEnv } from '../env'
 import type { Actor } from '../tenancy/access'
@@ -86,12 +85,7 @@ async function uploadAsset(
     return Response.json({ error: 'The file is empty.' }, { status: 400 })
   }
 
-  const declaredType = cleanMediaType(request.headers.get('content-type'))
-
-  const mediaType =
-    declaredType && declaredType !== 'application/octet-stream'
-      ? declaredType
-      : mediaTypeOfName(name)
+  const mediaType = uploadMediaType(request.headers.get('content-type'), name)
 
   const asset = await putAsset(bucket, runId, {
     name,

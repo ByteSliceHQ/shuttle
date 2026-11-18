@@ -13,6 +13,10 @@ async function bytesOf(body: unknown): Promise<Uint8Array> {
     return new Uint8Array(body)
   }
 
+  if (body instanceof Blob) {
+    return new Uint8Array(await body.arrayBuffer())
+  }
+
   if (ArrayBuffer.isView(body)) {
     return new Uint8Array(body.buffer, body.byteOffset, body.byteLength)
   }

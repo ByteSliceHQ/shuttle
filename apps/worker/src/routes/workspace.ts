@@ -3,11 +3,13 @@ import { DEVICE_ID } from '@shuttle/runner-protocol'
 import {
   MAX_ASSET_BYTES,
   MAX_ATTACHMENTS,
+  deleteAsset,
+  formatBytes,
   putAsset,
-  cleanMediaType,
+  uploadMediaType,
   type AssetRef,
 } from '../assets/store'
-import { getAuth } from '../auth/auth'
+import { getAuth, trustedWebOrigins } from '../auth/auth'
 import {
   ensureNamedWorkspace,
   ensurePlaybookQuietly,
@@ -300,25 +302,24 @@ async function createWorkspaceSession(
   let data: unknown
 
   if (multipart) {
+    // A form post is a "simple" request that browsers send cross-site without asking first, so
+    // unlike the JSON body it must prove it comes from the app itself.
+    if (!fromTrustedPage(request, env)) {
+      return Response.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
     if (!env.ASSETS) {
       return Response.json({ error: 'File storage is not set up.' }, { status: 503 })
     }
 
-    if (!request.body) {
-      return Response.json({ error: 'Missing request body' }, { status: 400 })
+    const form = await readSessionForm(request)
+
+    if (form === 'too-large') {
+      return Response.json(
+        { error: `Attachments can total up to ${formatBytes(MAX_ASSET_BYTES)}.` },
+        { status: 413 },
+      )
     }
-
-    const bytes = await readCapped(request.body, MAX_ASSET_BYTES)
-
-    if (!bytes) {
-      return Response.json({ error: 'Attachments exceed 50 MB.' }, { status: 413 })
-    }
-
-    const form = await new Response(bytes, {
-      headers: { 'content-type': request.headers.get('content-type')! },
-    })
-      .formData()
-      .catch(() => null)
 
     if (!form) {
       return Response.json({ error: 'Invalid form data' }, { status: 400 })
@@ -330,7 +331,10 @@ async function createWorkspaceSession(
       entries.length > MAX_ATTACHMENTS ||
       entries.some((file) => typeof file === 'string' || file.size === 0)
     ) {
-      return Response.json({ error: 'Attach up to 10 nonempty files.' }, { status: 400 })
+      return Response.json(
+        { error: `Attach up to ${MAX_ATTACHMENTS} nonempty files.` },
+        { status: 400 },
+      )
     }
 
     files = entries.filter((file): file is File => typeof file !== 'string')
@@ -389,36 +393,95 @@ async function createWorkspaceSession(
     })
   }
 
-  const attachments: AssetRef[] = []
+  const bucket = env.ASSETS
+  const stored: AssetRef[] = []
 
-  for (const file of files) {
-    attachments.push(
-      await putAsset(env.ASSETS!, runId, {
-        name: file.name,
-        mediaType: cleanMediaType(file.type) ?? 'application/octet-stream',
-        body: await file.arrayBuffer(),
-        source: 'upload',
-        createdBy: actor.userId,
+  try {
+    // Uploaded together; each File is already in memory, so R2 reads it without another copy.
+    const attachments = await Promise.all(
+      files.map(async (file) => {
+        const asset = await putAsset(bucket!, runId, {
+          name: file.name,
+          mediaType: uploadMediaType(file.type, file.name),
+          body: file,
+          source: 'upload',
+          createdBy: actor.userId,
+        })
+
+        stored.push(asset)
+        return asset
       }),
     )
+
+    await stub.signal([
+      requestSession({
+        runId,
+        folderId,
+        goal,
+        ...(attachments.length ? { attachments } : {}),
+        lessons: playbook.lessons,
+        playbookVersion: playbook.version,
+        playbookRunId: playbook.runId,
+        ownerId: actor.userId,
+        // The folder lives in the organization's workspace, which this one cannot read.
+        repos: tree.folders[folderId]?.repos ?? [],
+      }),
+    ])
+  } catch (cause) {
+    // No session exists to reach these files through, so none may be left behind.
+    if (bucket) {
+      await Promise.allSettled(stored.map((asset) => deleteAsset(bucket, runId, asset.id)))
+    }
+
+    throw cause
   }
 
-  await stub.signal([
-    requestSession({
-      runId,
-      folderId,
-      goal,
-      ...(attachments.length ? { attachments } : {}),
-      lessons: playbook.lessons,
-      playbookVersion: playbook.version,
-      playbookRunId: playbook.runId,
-      ownerId: actor.userId,
-      // The folder lives in the organization's workspace, which this one cannot read.
-      repos: tree.folders[folderId]?.repos ?? [],
-    }),
-  ])
-
   return Response.json({ runId })
+}
+
+/**
+ * Whether a state-changing browser request comes from the app's own pages. Requests without
+ * browser provenance headers (scripts, the runner) carry no ambient cookies to abuse.
+ */
+function fromTrustedPage(request: Request, env: ShuttleEnv): boolean {
+  const site = request.headers.get('sec-fetch-site')
+
+  if (site !== null && site !== 'same-origin' && site !== 'none') {
+    return false
+  }
+
+  const origin = request.headers.get('origin')
+
+  return origin === null || trustedWebOrigins(env).includes(origin)
+}
+
+/**
+ * The session form, parsed once. A declared length is enforced by HTTP framing, so the body can
+ * be parsed in place; only a body sent in chunks is read with the limit applied as it arrives.
+ */
+async function readSessionForm(request: Request): Promise<FormData | 'too-large' | null> {
+  const length = request.headers.get('content-length')
+  const declared = length === null ? Number.NaN : Number(length)
+
+  if (Number.isFinite(declared)) {
+    return declared > MAX_ASSET_BYTES ? 'too-large' : request.formData().catch(() => null)
+  }
+
+  if (!request.body) {
+    return null
+  }
+
+  const bytes = await readCapped(request.body, MAX_ASSET_BYTES)
+
+  if (!bytes) {
+    return 'too-large'
+  }
+
+  return new Response(bytes, {
+    headers: { 'content-type': request.headers.get('content-type') ?? '' },
+  })
+    .formData()
+    .catch(() => null)
 }
 
 function privateTo(actor: Actor): SessionAccess {
