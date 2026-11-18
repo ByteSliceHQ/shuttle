@@ -57,7 +57,8 @@ update manifest.
 
 CI sets the desktop package version to `0.1.<workflow run number>` in its checkout, without
 committing a version bump to `main`. Every new workflow run gets a higher version; rerunning a
-failed run keeps that run's version. Keep this workflow's run-number sequence when changing the
+failed run keeps that run's version. A rerun never moves `latest-mac.json` or `latest-mac.yml`
+back to an older version than the one already published; it still uploads its binaries. Keep this workflow's run-number sequence when changing the
 release process, and choose a higher major/minor version if starting a new sequence.
 
 Release jobs run in a single concurrency group without canceling an in-flight publication.

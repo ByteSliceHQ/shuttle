@@ -118,7 +118,7 @@ jobs:
         run: |
           bun -e '
             const pkg = await Bun.file("apps/desktop/package.json").json();
-            await Bun.write("apps/desktop/release/latest-mac.json", JSON.stringify({ file: `Shuttle-${pkg.version}-arm64.dmg` }));
+            await Bun.write("apps/desktop/release/latest-mac.json", JSON.stringify({ version: pkg.version, file: `Shuttle-${pkg.version}-arm64.dmg` }));
           '
       - name: Retain release files
         uses: actions/upload-artifact@v4
@@ -157,12 +157,28 @@ jobs:
           aws s3 cp release/ s3://shuttle-releases/ --recursive \
             --exclude '*' --include '*.dmg' --include '*.zip' --include '*.blockmap' \
             --cache-control 'public, max-age=31536000, immutable' --only-show-errors
+      # Rerunning an older workflow run must not move the public pointers back to its build.
+      - name: Check this release is the newest
+        id: newest
+        run: |
+          current="$(aws s3 cp s3://shuttle-releases/latest-mac.json - 2>/dev/null \
+            | jq -r '.version // (.file // "" | capture("^Shuttle-(?<v>[0-9][0-9.]*)-").v) // empty' 2>/dev/null || true)"
+          candidate="$(jq -r .version release/latest-mac.json)"
+          test -n "$candidate" || { echo 'latest-mac.json has no version'; exit 1; }
+          newest="$(printf '%s\n%s\n' "$current" "$candidate" | sed '/^$/d' | sort -V | tail -n 1)"
+          if [ -n "$current" ] && [ "$candidate" != "$newest" ]; then
+            echo "Published release $current is newer than $candidate; leaving the manifests unchanged"
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
+          fi
       - name: Publish signed update manifest
-        if: needs.desktop.outputs.signed == 'true'
+        if: needs.desktop.outputs.signed == 'true' && steps.newest.outputs.publish == 'true'
         run: |
           aws s3 cp release/latest-mac.yml s3://shuttle-releases/latest-mac.yml \
             --content-type application/yaml --cache-control no-store --only-show-errors
       - name: Publish manual download pointer last
+        if: steps.newest.outputs.publish == 'true'
         run: |
           aws s3 cp release/latest-mac.json s3://shuttle-releases/latest-mac.json \
             --content-type application/json --cache-control no-store --only-show-errors
