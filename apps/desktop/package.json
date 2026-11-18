@@ -1,6 +1,6 @@
 {
   "name": "@shuttle/desktop",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "private": true,
   "description": "Shuttle desktop app: the session UI, with a sandbox on this machine",
   "license": "Apache-2.0",
@@ -79,6 +79,14 @@
       "provider": "generic",
       "url": "https://shuttle.codes/download/",
       "useMultipleRangeRequest": false
-    }
+    },
+    "protocols": [
+      {
+        "name": "Shuttle",
+        "schemes": [
+          "shuttle"
+        ]
+      }
+    ]
   }
 }

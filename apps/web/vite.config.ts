@@ -60,6 +60,7 @@ export default defineConfig({
       '/runs': { ...api, ws: true },
       '/sessions': { ...api, ws: true },
       '/playbook': api,
+      '/timings': api,
       '/workspace': api,
       '/firehose': { ...api, ws: true },
       // Local sandbox runners connect here, as the desktop app's own page origin.

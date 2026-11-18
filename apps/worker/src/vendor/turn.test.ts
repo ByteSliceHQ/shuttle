@@ -6,7 +6,13 @@ import type { BridgeEvent, BridgeEventBody } from '../../bridge/protocol'
 import type { CredentialPayload } from '../credentials/store'
 import { bindStepObserver, bindThinkingObserver } from '../llm'
 import type { AgentRunInput } from '../sandbox/agent-runs'
-import { runVendorTurn, SANDBOX_INSTRUCTIONS, type VendorTurnDeps } from './turn'
+import {
+  describeProposalOutcome,
+  PULL_REQUEST_INSTRUCTIONS,
+  runVendorTurn,
+  SANDBOX_INSTRUCTIONS,
+  type VendorTurnDeps,
+} from './turn'
 
 function memoryStorage() {
   const values = new Map<string, unknown>()
@@ -617,5 +623,172 @@ describe("runVendorTurn in a person's own sandbox", () => {
     // Bob's sandbox has no record of the conversation Alice's agent started.
     expect(continuedConversation(forBob)).toBeUndefined()
     expect(continuedConversation(again)).toBe('thr_1')
+  })
+})
+
+describe('pull requests from a vendor agent', () => {
+  const proposeTool = {
+    name: 'propose_pull_request',
+  } as unknown as LlmCompleteArgs['tools'][number]
+
+  const proposed: BridgeEventBody[][] = [
+    [
+      { type: 'message', text: 'Done. The PR is waiting for your approval.' },
+      {
+        type: 'pr_proposed',
+        id: 'p1',
+        title: 'Support attachments in the first message',
+        body: 'Adds the picker.',
+        draft: true,
+      },
+      {
+        type: 'turn_done',
+        status: 'completed',
+        text: 'Done. The PR is waiting for your approval.',
+      },
+    ],
+  ]
+
+  test("the agent gets Shuttle's tool and its instructions where the session can publish", async () => {
+    const { sandbox, started } = fakeSandbox([
+      [{ type: 'turn_done', status: 'completed', text: 'ok' }],
+    ])
+
+    await runVendorTurn(deps(sandbox), args({ tools: [proposeTool] }))
+
+    const request = started[0]?.mode === 'turn' ? started[0].request : undefined
+
+    expect(request?.shuttleTools).toEqual({ proposePullRequest: true })
+    expect(request?.instructions).toContain(PULL_REQUEST_INSTRUCTIONS)
+  })
+
+  test('without a repository to publish to, the agent gets neither', async () => {
+    const { sandbox, started } = fakeSandbox([
+      [{ type: 'turn_done', status: 'completed', text: 'ok' }],
+    ])
+
+    await runVendorTurn(deps(sandbox), args())
+
+    const request = started[0]?.mode === 'turn' ? started[0].request : undefined
+
+    expect(request?.shuttleTools).toBeUndefined()
+    expect(request?.instructions).not.toContain('propose_pull_request')
+  })
+
+  test("a proposal becomes the conductor's own propose_pull_request call", async () => {
+    const { sandbox } = fakeSandbox(proposed)
+    const result = await runVendorTurn(deps(sandbox), args({ tools: [proposeTool] }))
+
+    expect(result.message.content).toBe('Done. The PR is waiting for your approval.')
+
+    expect(result.toolCalls).toEqual([
+      {
+        id: 'vendor_pr_p1',
+        name: 'propose_pull_request',
+        arguments: {
+          title: 'Support attachments in the first message',
+          body: 'Adds the picker.',
+          draft: true,
+        },
+      },
+    ])
+
+    expect(result.message.toolCalls).toEqual(result.toolCalls)
+  })
+
+  test("a team member's proposal is not handed on: the conductor proposes for the team", async () => {
+    const { sandbox } = fakeSandbox(proposed)
+
+    const result = await runVendorTurn(
+      deps(sandbox, { member: { threadId: 'member-1' } }),
+      args({ tools: [proposeTool] }),
+    )
+
+    expect(result.toolCalls).toBeUndefined()
+  })
+
+  test('once published, the turn ends without the agent, and its next prompt says how it went', async () => {
+    const storage = memoryStorage()
+    const first = fakeSandbox(proposed)
+
+    await runVendorTurn(deps(first.sandbox, { storage }), args({ tools: [proposeTool] }))
+
+    const published = fakeSandbox([])
+
+    const settled = await runVendorTurn(
+      deps(published.sandbox, { storage }),
+      args({
+        tools: [proposeTool],
+        messages: [
+          { role: 'user', content: 'could you create a PR?' },
+          {
+            role: 'assistant',
+            content: 'Done.',
+            toolCalls: [{ id: 'vendor_pr_p1', name: 'propose_pull_request', arguments: {} }],
+          },
+          {
+            role: 'tool',
+            toolCallId: 'vendor_pr_p1',
+            content: JSON.stringify({
+              approvalId: 'pr_publish_1',
+              pulls: [
+                {
+                  fullName: 'acme/app',
+                  number: 12,
+                  url: 'https://github.com/acme/app/pull/12',
+                  draft: true,
+                  outcome: 'opened',
+                },
+              ],
+            }),
+          },
+        ],
+      }),
+    )
+
+    expect(published.started).toEqual([])
+    expect(settled.message.content).toBe('Opened acme/app#12: https://github.com/acme/app/pull/12')
+
+    const next = fakeSandbox([[{ type: 'turn_done', status: 'completed', text: 'ok' }]])
+
+    await runVendorTurn(
+      deps(next.sandbox, { storage }),
+      args({
+        tools: [proposeTool],
+        messages: [
+          { role: 'assistant', content: 'Opened acme/app#12' },
+          { role: 'user', content: 'Thanks, now add a test' },
+        ],
+      }),
+    )
+
+    const prompt = next.started[0]?.mode === 'turn' ? next.started[0].request.prompt : ''
+
+    expect(prompt).toContain('acme/app#12')
+    expect(prompt).toContain('Thanks, now add a test')
+
+    // Said once: the turn after that does not repeat it.
+    const after = fakeSandbox([[{ type: 'turn_done', status: 'completed', text: 'ok' }]])
+
+    await runVendorTurn(
+      deps(after.sandbox, { storage }),
+      args({ messages: [{ role: 'user', content: 'And the docs' }] }),
+    )
+
+    const again = after.started[0]?.mode === 'turn' ? after.started[0].request.prompt : ''
+
+    expect(again).toBe('And the docs')
+  })
+
+  test('says what became of a proposal that failed or was discarded', () => {
+    expect(
+      describeProposalOutcome(JSON.stringify({ approvalId: 'a', error: 'branch protected' }))
+        .forPerson,
+    ).toContain('branch protected')
+
+    expect(
+      describeProposalOutcome(JSON.stringify({ approvalId: 'a', message: 'The user discarded it' }))
+        .forAgent,
+    ).toContain('discarded')
   })
 })

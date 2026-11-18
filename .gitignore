@@ -21,3 +21,4 @@ apps/worker/.prod.vars.json
 # Packaged desktop app and its staging files
 apps/desktop/release
 apps/desktop/build
+out

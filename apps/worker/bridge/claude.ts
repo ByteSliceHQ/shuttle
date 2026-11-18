@@ -19,6 +19,20 @@ import {
 export interface ClaudeOptions {
   /** The Claude Code binary. Tests point this at a fake. */
   readonly bin?: string
+  /** Shuttle's MCP server for this turn, when the agent gets Shuttle's tools. */
+  readonly mcp?: { readonly command: string; readonly args: readonly string[] }
+}
+
+/** Gives Claude Code Shuttle's MCP server for one turn, beside any the user configured. */
+export function claudeMcpArgs(mcp: ClaudeOptions['mcp']): string[] {
+  return mcp
+    ? [
+        '--mcp-config',
+        JSON.stringify({
+          mcpServers: { shuttle: { type: 'stdio', command: mcp.command, args: [...mcp.args] } },
+        }),
+      ]
+    : []
 }
 
 function claudeBin(options: ClaudeOptions): string {
@@ -143,6 +157,7 @@ function runAttempt(
     ...(request.model ? ['--model', request.model] : []),
     ...(request.effort ? ['--effort', request.effort] : []),
     ...(request.instructions ? ['--append-system-prompt', request.instructions] : []),
+    ...claudeMcpArgs(options.mcp),
   ]
 
   return new Promise<Attempt>((resolve) => {

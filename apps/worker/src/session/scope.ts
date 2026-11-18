@@ -97,6 +97,20 @@ export const shuttleCatalog = defineEventCatalog('shuttle', {
     sandboxName: Schema.String,
     repoCount: Schema.Finite,
   }),
+  /**
+   * Someone asked, from the session's PR button, for a pull request of the session's work. The
+   * session opens the same publish gate an agent's proposal does.
+   */
+  'pr.requested': Schema.Struct({
+    requestId: Schema.String,
+    /** Empty to have Shuttle write one from the commits. */
+    title: Schema.String,
+    body: Schema.String,
+    draft: Schema.Boolean,
+    repo: Schema.optional(Schema.String),
+    /** Who pressed the button. Set by the Worker from the sign-in. */
+    requestedBy: Schema.optional(Schema.String),
+  }),
   'pr.proposed': Schema.Struct({
     approvalId: Schema.String,
     title: Schema.String,

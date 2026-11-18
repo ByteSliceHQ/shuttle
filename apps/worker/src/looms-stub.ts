@@ -27,7 +27,14 @@ export interface LoomsRunStub {
     attributes?: Record<string, string>
   }): Promise<void>
   status(): Promise<RunStatusSnapshot | null>
-  signal(events: ReadonlyArray<EventInput>): Promise<RunState>
+  /**
+   * `wake: 'schedule'` answers once the events are committed and leaves the run to act on them
+   * afterwards. Without it the call waits until the run parks, which can be a whole agent turn.
+   */
+  signal(
+    events: ReadonlyArray<EventInput>,
+    options?: { wake?: 'await' | 'schedule' },
+  ): Promise<RunState>
   getRun(): Promise<RunState>
   startRun(args: {
     kind: string

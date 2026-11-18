@@ -1,4 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 
 import {
@@ -21,14 +24,64 @@ import {
 export interface CursorOptions {
   /** The Cursor Agent binary. Tests point this at a fake. */
   readonly bin?: string
+  /** Shuttle's MCP server for this turn, when the agent gets Shuttle's tools. */
+  readonly mcp?: { readonly command: string; readonly args: readonly string[] }
+  /** Where Cursor's user config lives. Tests point this at a temporary directory. */
+  readonly home?: string
+}
+
+/** Tells Shuttle's MCP server which turn it serves, when the agent cannot pass it arguments. */
+export const SHUTTLE_RUN_DIR_ENV = 'SHUTTLE_AGENT_RUN_DIR'
+
+/**
+ * Cursor reads MCP servers only from its config files, so Shuttle's goes into the user config
+ * beside any others. Several sessions can share a sandbox, so the entry names no turn: the
+ * server learns its turn from the environment Cursor passes down. Returns false when it could
+ * not be written, and the turn runs without Shuttle's tools.
+ */
+export function installCursorMcp(
+  home: string,
+  mcp: { readonly command: string; readonly args: readonly string[] },
+): boolean {
+  const path = join(home, '.cursor', 'mcp.json')
+  // The run directory is passed down in the environment instead.
+  const args = mcp.args.filter((arg, index, all) => arg !== '--dir' && all[index - 1] !== '--dir')
+
+  try {
+    const existing = existsSync(path)
+      ? (JSON.parse(readFileSync(path, 'utf8')) as { mcpServers?: Record<string, unknown> })
+      : {}
+
+    const next = {
+      ...existing,
+      mcpServers: { ...existing.mcpServers, shuttle: { command: mcp.command, args } },
+    }
+
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** The run directory from Shuttle's MCP arguments. */
+function mcpRunDir(mcp: CursorOptions['mcp']): string | undefined {
+  const index = mcp?.args.indexOf('--dir') ?? -1
+
+  return index >= 0 ? mcp?.args[index + 1] : undefined
 }
 
 function cursorBin(options: CursorOptions): string {
   return options.bin ?? (process.env.SHUTTLE_CURSOR_BIN?.trim() || 'agent')
 }
 
-function cursorEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, NO_OPEN_BROWSER: '1' }
+function cursorEnv(runDir?: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    NO_OPEN_BROWSER: '1',
+    ...(runDir ? { [SHUTTLE_RUN_DIR_ENV]: runDir } : {}),
+  }
 }
 
 /**
@@ -208,6 +261,12 @@ function runAttempt(
   signal: AbortSignal,
   options: CursorOptions,
 ): Promise<Attempt> {
+  const runDir = mcpRunDir(options.mcp)
+
+  const withMcp = Boolean(
+    options.mcp && runDir && installCursorMcp(options.home ?? homedir(), options.mcp),
+  )
+
   const args = [
     '-p',
     '--force',
@@ -220,6 +279,7 @@ function runAttempt(
     ...(resume ? ['--resume', resume] : []),
     ...(request.model ? ['--model', request.model] : []),
     ...(request.cwd ? ['--workspace', request.cwd] : []),
+    ...(withMcp ? ['--approve-mcps'] : []),
     cursorPrompt(request, resume),
   ]
 
@@ -229,7 +289,7 @@ function runAttempt(
     try {
       child = spawn(cursorBin(options), args, {
         cwd: request.cwd,
-        env: cursorEnv(),
+        env: cursorEnv(withMcp ? runDir : undefined),
         stdio: ['pipe', 'pipe', 'pipe'],
       })
     } catch (cause) {

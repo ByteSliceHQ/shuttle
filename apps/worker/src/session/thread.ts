@@ -131,6 +131,17 @@ export interface SessionState {
   readonly stacks: Readonly<Record<string, SessionRepoStack>>
   /** Rejected publish gate whose `pr.discarded` settles the proposing tool call. */
   readonly discardedPrApprovalId: string | null
+  /**
+   * A pull request asked for from the session's PR button, until its publish gate opens. Absent
+   * in sessions from before the button.
+   */
+  readonly pendingPrRequest?: {
+    readonly approvalId: string
+    readonly title: string
+    readonly body: string
+    readonly draft: boolean
+    readonly repo: string | null
+  } | null
   readonly pendingReviewSubmit: {
     readonly approvalId: string
     readonly fullName: string
@@ -150,6 +161,20 @@ export interface SessionState {
 
 function asObject(value: unknown): { [key: string]: JsonValue } {
   return jsonObject(value)
+}
+
+/** The first line of `text`, kept short enough for a pull request title. */
+function firstLine(text: string): string {
+  const line = text.trim().split('\n')[0]?.trim() ?? ''
+
+  return line.length > 72 ? `${line.slice(0, 71).trimEnd()}…` : line
+}
+
+/** Once a requested pull request's gate is open, the request is done. */
+function settlePrRequest(state: SessionState, approvalId: unknown): SessionState {
+  return state.pendingPrRequest && state.pendingPrRequest.approvalId === approvalId
+    ? { ...state, pendingPrRequest: null }
+    : state
 }
 
 function objectPayload(event: EventEnvelope): { [key: string]: JsonValue } {
@@ -337,6 +362,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         stacks: {},
         discardedPrApprovalId: null,
         pendingReviewSubmit: null,
+        pendingPrRequest: null,
         parked: false,
         mailboxEpoch: 0,
       }
@@ -352,7 +378,28 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         }
 
         case 'shuttle.pr.proposed': {
-          return withPrProposal(state, event.payload, event.threadId ?? null)
+          return settlePrRequest(
+            withPrProposal(state, event.payload, event.threadId ?? null),
+            event.payload.approvalId,
+          )
+        }
+
+        case 'shuttle.pr.requested': {
+          // One publish at a time: while a gate is open or publishing, the button asks again later.
+          if (state.pendingPrPublish) {
+            return state
+          }
+
+          return {
+            ...state,
+            pendingPrRequest: {
+              approvalId: `pr_publish_${event.payload.requestId}`,
+              title: event.payload.title,
+              body: event.payload.body,
+              draft: event.payload.draft,
+              repo: event.payload.repo ?? null,
+            },
+          }
         }
 
         case 'approval.decided': {
@@ -611,10 +658,13 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
           // The conductor's proposal reaches the root only through this mailbox wake, and the
           // embedded copy carries no threadId. Only the conductor can propose PRs.
           if (embedded?.type === 'shuttle.pr.proposed') {
-            return withPrProposal(
-              base,
-              embeddedPayload,
-              embedded.threadId ?? liveConductorThreadId(base.conductor),
+            return settlePrRequest(
+              withPrProposal(
+                base,
+                embeddedPayload,
+                embedded.threadId ?? liveConductorThreadId(base.conductor),
+              ),
+              embeddedPayload.approvalId,
             )
           }
 
@@ -725,6 +775,29 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
       }
 
       appendPrPublishEffects(state, effects)
+
+      // The PR button: open the publish gate on the conductor's thread, so the card sits with the
+      // agent's work. The gate's invoke key makes a repeat of this a no-op.
+      if (state.pendingPrRequest && !state.pendingPrPublish) {
+        const request = state.pendingPrRequest
+
+        effects.push(
+          invoke(
+            'shuttle.preparePrPublishGate',
+            {
+              approvalId: request.approvalId,
+              title: request.title,
+              body: request.body,
+              draft: request.draft,
+              repos: request.repo ? [request.repo] : [],
+              ...(request.repo ? { repo: request.repo } : {}),
+              ...(conductorThreadId ? { threadId: conductorThreadId } : {}),
+              fallbackTitle: firstLine(state.goal),
+            },
+            `prepare_pr_${request.approvalId}`,
+          ),
+        )
+      }
 
       if (state.pendingReviewSubmit?.status === 'submitting') {
         const pending = state.pendingReviewSubmit
@@ -1016,6 +1089,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
               'shuttle.user.said',
               'shuttle.reroute',
               'shuttle.pr.proposed',
+              'shuttle.pr.requested',
               'shuttle.pr.published',
               'shuttle.pr.publish_failed',
               'shuttle.review.submitted',

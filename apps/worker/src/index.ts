@@ -6,14 +6,13 @@ import {
 } from '@swirls/looms/cloudflare'
 import { forwardedActorAuth } from '@swirls/looms/runtime'
 
+import { handleApi } from './api/handler'
+import { handlePublicApi } from './api/public'
 import { shuttleAttributes } from './attributes'
 import { resolveActor } from './auth/actor'
-import { AUTH_BASE_PATH, AuthUnavailableError, getAuth, githubSignInEnabled } from './auth/auth'
-import { refuseSignUp, signUpCodeRequired } from './auth/signup-code'
+import { AUTH_BASE_PATH, AuthUnavailableError, getAuth } from './auth/auth'
+import { refuseSignUp } from './auth/signup-code'
 import {
-  personalWorkspaceRunId,
-  playbookRunId,
-  pullsRunId,
   readStoredLlmModel,
   resolveProjectors,
   workspaceRunId,
@@ -39,13 +38,10 @@ import { httpsRedirect, withHsts } from './https'
 import { loomsStub } from './looms-stub'
 import { shuttleModules } from './modules'
 import { handleAssetRoutes } from './routes/assets'
-import { handleConnectionRoutes } from './routes/connections'
 import { handleFirehoseRoutes } from './routes/firehose'
 import { handleGithubPublicRoutes, handleGithubRoutes } from './routes/github'
-import { handleRunnerRoutes, handleRunnerTokenRoutes } from './routes/runners'
+import { handleRunnerTokenRoutes } from './routes/runners'
 import { handleSandboxRoutes } from './routes/sandbox'
-import { handleShuttleRoutes } from './routes/sessions'
-import { handleWorkspaceRoutes } from './routes/workspace'
 import { sandboxesArePersonal } from './sandbox/names'
 import { isOwnHost, parsePreviewHost } from './sandbox/preview-host'
 import { SessionSandbox } from './sandbox/session-sandbox'
@@ -70,6 +66,7 @@ import { readSessionAccess, writeSessionAccess, type SessionAccess } from './ten
 import { authorizeLoomsRoute, authorizeRun, runIdOfPath } from './tenancy/gate'
 import { runOfPreviewKey } from './tenancy/previews'
 import { orgOfRun } from './tenancy/run-id'
+import { runTimingObserver } from './timing'
 import { CONNECTABLE_HARNESSES } from './vendor/harnesses'
 import {
   readVendorCatalogue,
@@ -104,6 +101,7 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
       // Only the Worker reaches this object, and it has already decided the request. It says who
       // the request acts as, and that is recorded on the events the request sends.
       authorize: forwardedActorAuth(),
+      observer: runTimingObserver(runId),
     }
   }
 
@@ -405,12 +403,10 @@ async function route(
     return refuseSignUp(request, env) ?? getAuth(env).handler(request)
   }
 
-  if (request.method === 'GET' && url.pathname === '/auth/providers') {
-    return Response.json({
-      emailAndPassword: true,
-      github: githubSignInEnabled(env),
-      signUpCode: signUpCodeRequired(env),
-    })
+  const open = await handlePublicApi(request, env)
+
+  if (open) {
+    return open
   }
 
   const githubPublic = await handleGithubPublicRoutes(request, env)
@@ -432,19 +428,6 @@ async function route(
     return Response.json({ error: 'Sign in to continue' }, { status: 401 })
   }
 
-  if (request.method === 'GET' && url.pathname === '/me') {
-    return Response.json({
-      user: { id: actor.userId, name: actor.name, email: actor.email },
-      org: { id: actor.orgId, role: actor.role },
-      runs: {
-        workspace: workspaceRunId(env, actor.orgId),
-        personal: personalWorkspaceRunId(env, actor.orgId, actor.userId),
-        pulls: pullsRunId(env, actor.orgId),
-        playbook: playbookRunId(env, actor.orgId),
-      },
-    })
-  }
-
   // A request that names a run is checked against that run before anything else sees it.
   const runId = runIdOfPath(url.pathname)
 
@@ -461,14 +444,11 @@ async function route(
   }
 
   const handled =
+    (await handleApi({ env, actor, request, ctx })) ??
     (await handleFirehoseRoutes(request, env, actor)) ??
-    (await handleConnectionRoutes(request, env, actor)) ??
-    (await handleWorkspaceRoutes(request, env, actor, ctx)) ??
     (await handleGithubRoutes(request, env, actor)) ??
-    (await handleRunnerRoutes(request, env, actor)) ??
     (await handleSandboxRoutes(request, env, actor)) ??
-    (await handleAssetRoutes(request, env, actor)) ??
-    (await handleShuttleRoutes(request, env, actor))
+    (await handleAssetRoutes(request, env, actor))
 
   if (handled) {
     return handled

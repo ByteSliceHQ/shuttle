@@ -20,6 +20,23 @@ export interface BridgeTurnRequest {
   readonly vendorThreadId?: string
   /** Extra standing instructions, such as playbook lessons. */
   readonly instructions?: string
+  /** Shuttle's own tools the agent gets for this turn, served by the bridge's `mcp` mode. */
+  readonly shuttleTools?: {
+    /** The agent may propose a pull request; Shuttle publishes it once a person approves. */
+    readonly proposePullRequest?: boolean
+  }
+}
+
+/** The name of Shuttle's tool, for the agent and for the Looms conductor alike. */
+export const SHUTTLE_PROPOSE_PULL_REQUEST = 'propose_pull_request'
+
+/** A pull request the agent proposed with Shuttle's tool. */
+export interface BridgePullProposal {
+  readonly id: string
+  readonly title: string
+  readonly body: string
+  readonly draft: boolean
+  readonly repo?: string
 }
 
 /** A model the agent offers, as the model picker shows it. */
@@ -70,6 +87,8 @@ export type BridgeEventBody =
       readonly output?: string
       readonly exitCode?: number
     }
+  /** The agent proposed a pull request. The Worker opens the publish card when the turn ends. */
+  | ({ readonly type: 'pr_proposed' } & BridgePullProposal)
   | {
       readonly type: 'usage'
       readonly input: number
@@ -107,6 +126,8 @@ export const BRIDGE_REQUEST_FILE = 'request.json'
 export const BRIDGE_EVENTS_FILE = 'events.jsonl'
 export const BRIDGE_PID_FILE = 'pid'
 export const BRIDGE_LOG_FILE = 'bridge.log'
+/** Shuttle's MCP server leaves the agent's pull request proposals here, one file each. */
+export const BRIDGE_PROPOSALS_DIR = 'proposals'
 /** The Worker writes the user's reply here when an agent asks for one, such as a sign-in code. */
 export const BRIDGE_INPUT_FILE = 'input'
 

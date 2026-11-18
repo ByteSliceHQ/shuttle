@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { setTimeout as sleep } from 'node:timers/promises'
 
+import { Schema } from 'effect'
 import { z } from 'zod'
 
+import { ArtifactTabKind } from '@shuttle/api'
 import { agent, defineAgent } from '@swirls/looms/agent'
 import { approval } from '@swirls/looms/approval'
 import { evaluator } from '@swirls/looms/evaluator'
@@ -28,6 +30,7 @@ import {
   workspaceDefinition,
   workspaceTree,
 } from './module'
+import { TabKindSchema } from './scope'
 
 const TextInput = z.object({
   text: z.string().optional(),
@@ -399,6 +402,62 @@ describe('workspace module', () => {
       expect(tabs.session_tabs?.tabs.files).toBeUndefined()
       expect(tabs.session_tabs?.tabs.browser?.target).toBe('http://127.0.0.1:3000')
       expect(Object.keys(tabs.session_tabs?.tabs ?? {})).toHaveLength(2)
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test("keeps a tab of a host's own kind, and refuses a kind that is not named like one", async () => {
+    const decode = Schema.decodeUnknownSync(TabKindSchema)
+
+    // The contract and the run have to agree, or a tab one accepts the other refuses.
+    for (const kind of ['files', 'acme:designs', 'my-team:pr-2']) {
+      expect<string>(decode(kind)).toBe(kind)
+      expect(ArtifactTabKind.safeParse(kind).success).toBe(true)
+    }
+
+    for (const kind of ['designs', 'Acme:designs', 'acme:', ':designs', 'a:b:c', 'acme:de signs']) {
+      expect(() => decode(kind)).toThrow()
+      expect(ArtifactTabKind.safeParse(kind).success).toBe(false)
+    }
+
+    const tooLong = `acme:${'x'.repeat(60)}`
+
+    expect(() => decode(tooLong)).toThrow()
+    expect(ArtifactTabKind.safeParse(tooLong).success).toBe(false)
+
+    const looms = createLooms({ modules: [workspace()] })
+
+    try {
+      const { runId } = await looms.launchRun({
+        kind: 'shuttle-workspace',
+        definitionName: workspaceDefinition.name,
+        input: { title: 'Custom tabs workspace' },
+      })
+
+      await looms.signal(runId, [
+        openTab({
+          runId: 'session_custom',
+          tabId: 'design-7',
+          kind: 'acme:designs',
+          title: 'Checkout redesign',
+          target: 'design_7',
+          at: 1,
+        }),
+      ])
+
+      let tabs = await looms.project(runId, sessionTabs)
+
+      for (let i = 0; i < 50 && !tabs.session_custom; i++) {
+        await sleep(20)
+        tabs = await looms.project(runId, sessionTabs)
+      }
+
+      expect(tabs.session_custom?.tabs['design-7']).toMatchObject({
+        kind: 'acme:designs',
+        title: 'Checkout redesign',
+        target: 'design_7',
+      })
     } finally {
       await looms.stop()
     }

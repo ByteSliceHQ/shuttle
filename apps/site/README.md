@@ -7,6 +7,10 @@ bun run dev      # http://127.0.0.1:8791
 bun run deploy   # to shuttle.codes
 ```
 
+Pages with code samples (the landing page and the docs) are written in `pages/` and copied into `public/`
+with their code highlighted by Shiki (`scripts/build-pages.ts`). Wrangler does this before `dev`
+and `deploy`; `bun run pages` does it on its own. Tag a block `<pre><code class="language-tsx">`.
+
 ## Desktop releases
 
 The [production workflow](../../.github/workflows/deploy.yml) uploads desktop builds and

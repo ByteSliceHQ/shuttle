@@ -21,6 +21,28 @@ export interface CodexOptions {
   readonly command?: readonly string[]
   /** How long to wait for Codex to wind down after an interrupt. */
   readonly interruptGraceMs?: number
+  /** Shuttle's MCP server for this turn, when the agent gets Shuttle's tools. */
+  readonly mcp?: { readonly command: string; readonly args: readonly string[] }
+}
+
+/**
+ * Config overrides that give Codex Shuttle's MCP server for one turn, without touching the
+ * user's `config.toml`. Its tools are approved up front: turns run unattended.
+ */
+export function codexMcpOverrides(mcp: CodexOptions['mcp']): string[] {
+  if (!mcp) {
+    return []
+  }
+
+  // JSON strings and arrays of them are valid TOML.
+  return [
+    '-c',
+    `mcp_servers.shuttle.command=${JSON.stringify(mcp.command)}`,
+    '-c',
+    `mcp_servers.shuttle.args=${JSON.stringify(mcp.args)}`,
+    '-c',
+    'mcp_servers.shuttle.default_tools_approval_mode="approve"',
+  ]
 }
 
 /** `SHUTTLE_CODEX_BIN` points at a Codex binary that is not on PATH. */
@@ -95,7 +117,8 @@ function connect(
   options: CodexOptions,
   onNotification: (method: string, params: unknown) => void,
 ): JsonRpcPeer {
-  const [bin, ...args] = options.command ?? defaultCommand()
+  const [bin, ...base] = options.command ?? defaultCommand()
+  const args = [...base, ...codexMcpOverrides(options.mcp)]
 
   if (!bin) {
     throw new Error('codex command is empty')

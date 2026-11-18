@@ -5,12 +5,14 @@
   "compatibility_date": "2026-06-01",
   "workers_dev": false,
   "routes": [{ "pattern": "shuttle.codes", "custom_domain": true }],
+  // Writes pages/ into public/ with their code highlighted. Runs before dev and deploy.
+  "build": { "command": "bun scripts/build-pages.ts", "watch_dir": "pages" },
   // The page itself. The Worker sees every request first, so it can send plain http to https.
   "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
   // Desktop builds and update metadata, published by .github/workflows/deploy.yml.
   "r2_buckets": [{ "binding": "RELEASES", "bucket_name": "shuttle-releases" }],
   "vars": {
     // Fallback for /download/mac before the first manual download pointer is published.
-    "LATEST_MAC": "Shuttle-0.0.1-arm64.dmg",
+    "LATEST_MAC": "Shuttle-0.0.3-arm64.dmg",
   },
 }

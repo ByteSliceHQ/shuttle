@@ -36,3 +36,20 @@ export const reroute = shuttleModule.signal({
   }),
   build: (input) => shuttleModule.input('reroute', input),
 })
+
+/** Asks the session to propose a pull request of its work, as its PR button does. */
+export const requestPullRequest = shuttleModule.signal({
+  description: 'Open the publish gate for a pull request of the session work.',
+  input: Schema.Struct({
+    requestId: Schema.String,
+    title: Schema.String,
+    body: Schema.String,
+    draft: Schema.Boolean,
+    repo: Schema.optional(Schema.String),
+    requestedBy: Schema.optional(Schema.String),
+  }),
+  build: (input) =>
+    shuttleModule.input('pr.requested', input, {
+      idempotencyKey: `shuttle-pr-request:${input.requestId}`,
+    }),
+})

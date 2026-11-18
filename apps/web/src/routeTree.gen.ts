@@ -9,73 +9,89 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as ConnectionsRouteImport } from './routes/connections'
-import { Route as EventsRouteImport } from './routes/events'
-import { Route as PlaybookRouteImport } from './routes/playbook'
-import { Route as FoldersFolderIdRouteImport } from './routes/folders.$folderId'
-import { Route as SessionsSessionIdRouteImport } from './routes/sessions.$sessionId'
+import { Route as AppRouteImport } from './routes/_app'
+import { Route as SignInRouteImport } from './routes/sign-in'
+import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AppConnectionsRouteImport } from './routes/_app/connections'
+import { Route as AppEventsRouteImport } from './routes/_app/events'
+import { Route as AppPlaybookRouteImport } from './routes/_app/playbook'
+import { Route as AppFoldersFolderIdRouteImport } from './routes/_app/folders.$folderId'
+import { Route as AppSessionsSessionIdRouteImport } from './routes/_app/sessions.$sessionId'
 
-const IndexRoute = IndexRouteImport.update({
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignInRoute = SignInRouteImport.update({
+  id: '/sign-in',
+  path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
 } as any)
-const ConnectionsRoute = ConnectionsRouteImport.update({
+const AppConnectionsRoute = AppConnectionsRouteImport.update({
   id: '/connections',
   path: '/connections',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
 } as any)
-const EventsRoute = EventsRouteImport.update({
+const AppEventsRoute = AppEventsRouteImport.update({
   id: '/events',
   path: '/events',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
 } as any)
-const PlaybookRoute = PlaybookRouteImport.update({
+const AppPlaybookRoute = AppPlaybookRouteImport.update({
   id: '/playbook',
   path: '/playbook',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
 } as any)
-const FoldersFolderIdRoute = FoldersFolderIdRouteImport.update({
+const AppFoldersFolderIdRoute = AppFoldersFolderIdRouteImport.update({
   id: '/folders/$folderId',
   path: '/folders/$folderId',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
 } as any)
-const SessionsSessionIdRoute = SessionsSessionIdRouteImport.update({
+const AppSessionsSessionIdRoute = AppSessionsSessionIdRouteImport.update({
   id: '/sessions/$sessionId',
   path: '/sessions/$sessionId',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/connections': typeof ConnectionsRoute
-  '/events': typeof EventsRoute
-  '/playbook': typeof PlaybookRoute
-  '/folders/$folderId': typeof FoldersFolderIdRoute
-  '/sessions/$sessionId': typeof SessionsSessionIdRoute
+  '/': typeof AppIndexRoute
+  '/sign-in': typeof SignInRoute
+  '/connections': typeof AppConnectionsRoute
+  '/events': typeof AppEventsRoute
+  '/playbook': typeof AppPlaybookRoute
+  '/folders/$folderId': typeof AppFoldersFolderIdRoute
+  '/sessions/$sessionId': typeof AppSessionsSessionIdRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/connections': typeof ConnectionsRoute
-  '/events': typeof EventsRoute
-  '/playbook': typeof PlaybookRoute
-  '/folders/$folderId': typeof FoldersFolderIdRoute
-  '/sessions/$sessionId': typeof SessionsSessionIdRoute
+  '/sign-in': typeof SignInRoute
+  '/connections': typeof AppConnectionsRoute
+  '/events': typeof AppEventsRoute
+  '/playbook': typeof AppPlaybookRoute
+  '/': typeof AppIndexRoute
+  '/folders/$folderId': typeof AppFoldersFolderIdRoute
+  '/sessions/$sessionId': typeof AppSessionsSessionIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/connections': typeof ConnectionsRoute
-  '/events': typeof EventsRoute
-  '/playbook': typeof PlaybookRoute
-  '/folders/$folderId': typeof FoldersFolderIdRoute
-  '/sessions/$sessionId': typeof SessionsSessionIdRoute
+  '/_app': typeof AppRouteWithChildren
+  '/sign-in': typeof SignInRoute
+  '/_app/connections': typeof AppConnectionsRoute
+  '/_app/events': typeof AppEventsRoute
+  '/_app/playbook': typeof AppPlaybookRoute
+  '/_app/': typeof AppIndexRoute
+  '/_app/folders/$folderId': typeof AppFoldersFolderIdRoute
+  '/_app/sessions/$sessionId': typeof AppSessionsSessionIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/sign-in'
     | '/connections'
     | '/events'
     | '/playbook'
@@ -83,85 +99,114 @@ export interface FileRouteTypes {
     | '/sessions/$sessionId'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
+    | '/sign-in'
     | '/connections'
     | '/events'
     | '/playbook'
+    | '/'
     | '/folders/$folderId'
     | '/sessions/$sessionId'
   id:
     | '__root__'
-    | '/'
-    | '/connections'
-    | '/events'
-    | '/playbook'
-    | '/folders/$folderId'
-    | '/sessions/$sessionId'
+    | '/_app'
+    | '/sign-in'
+    | '/_app/connections'
+    | '/_app/events'
+    | '/_app/playbook'
+    | '/_app/'
+    | '/_app/folders/$folderId'
+    | '/_app/sessions/$sessionId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  ConnectionsRoute: typeof ConnectionsRoute
-  EventsRoute: typeof EventsRoute
-  PlaybookRoute: typeof PlaybookRoute
-  FoldersFolderIdRoute: typeof FoldersFolderIdRoute
-  SessionsSessionIdRoute: typeof SessionsSessionIdRoute
+  AppRoute: typeof AppRouteWithChildren
+  SignInRoute: typeof SignInRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sign-in': {
+      id: '/sign-in'
+      path: '/sign-in'
+      fullPath: '/sign-in'
+      preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/': {
+      id: '/_app/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/connections': {
-      id: '/connections'
+    '/_app/connections': {
+      id: '/_app/connections'
       path: '/connections'
       fullPath: '/connections'
-      preLoaderRoute: typeof ConnectionsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AppConnectionsRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/events': {
-      id: '/events'
+    '/_app/events': {
+      id: '/_app/events'
       path: '/events'
       fullPath: '/events'
-      preLoaderRoute: typeof EventsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AppEventsRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/playbook': {
-      id: '/playbook'
+    '/_app/playbook': {
+      id: '/_app/playbook'
       path: '/playbook'
       fullPath: '/playbook'
-      preLoaderRoute: typeof PlaybookRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AppPlaybookRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/folders/$folderId': {
-      id: '/folders/$folderId'
+    '/_app/folders/$folderId': {
+      id: '/_app/folders/$folderId'
       path: '/folders/$folderId'
       fullPath: '/folders/$folderId'
-      preLoaderRoute: typeof FoldersFolderIdRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AppFoldersFolderIdRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/sessions/$sessionId': {
-      id: '/sessions/$sessionId'
+    '/_app/sessions/$sessionId': {
+      id: '/_app/sessions/$sessionId'
       path: '/sessions/$sessionId'
       fullPath: '/sessions/$sessionId'
-      preLoaderRoute: typeof SessionsSessionIdRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AppSessionsSessionIdRouteImport
+      parentRoute: typeof AppRoute
     }
   }
 }
 
+interface AppRouteChildren {
+  AppConnectionsRoute: typeof AppConnectionsRoute
+  AppEventsRoute: typeof AppEventsRoute
+  AppPlaybookRoute: typeof AppPlaybookRoute
+  AppIndexRoute: typeof AppIndexRoute
+  AppFoldersFolderIdRoute: typeof AppFoldersFolderIdRoute
+  AppSessionsSessionIdRoute: typeof AppSessionsSessionIdRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppConnectionsRoute: AppConnectionsRoute,
+  AppEventsRoute: AppEventsRoute,
+  AppPlaybookRoute: AppPlaybookRoute,
+  AppIndexRoute: AppIndexRoute,
+  AppFoldersFolderIdRoute: AppFoldersFolderIdRoute,
+  AppSessionsSessionIdRoute: AppSessionsSessionIdRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  ConnectionsRoute: ConnectionsRoute,
-  EventsRoute: EventsRoute,
-  PlaybookRoute: PlaybookRoute,
-  FoldersFolderIdRoute: FoldersFolderIdRoute,
-  SessionsSessionIdRoute: SessionsSessionIdRoute,
+  AppRoute: AppRouteWithChildren,
+  SignInRoute: SignInRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

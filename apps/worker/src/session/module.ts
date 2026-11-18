@@ -7,7 +7,7 @@ import { createPreparePrPublishGateEffect } from './prepare-pr-publish-gate'
 import { brief, routing, transcript, work } from './projections'
 import { createPublishPullRequestEffect } from './publish-pr'
 import { shuttleModule } from './scope'
-import { reroute, say } from './signals'
+import { requestPullRequest, reroute, say } from './signals'
 import { createSubmitReviewEffect } from './submit-review'
 import { thinkingMiddleware } from './thinking-middleware'
 import { createSessionThread } from './thread'
@@ -35,6 +35,7 @@ export function shuttleSession(options: ShuttleSessionOptions) {
     signals: {
       say,
       reroute,
+      requestPullRequest,
     },
     effects: {
       bindSandbox: createBindSandboxEffect(storage),
