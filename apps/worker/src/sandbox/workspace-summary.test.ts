@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { parseComparison } from '@shuttle/api'
+
 import { insideSessionWorktree, sessionWorkDir, worktreeRepoPath } from './workspace'
 import {
   adoptStrayScript,
@@ -152,6 +154,141 @@ describe('workspace summary', () => {
 
     expect(second.exitCode).toBe(1)
     expect(second.stderr).toContain('already exists')
+  })
+})
+
+describe('comparisons', () => {
+  const box = sandbox()
+  const web = box.repo('web')
+  const source = '/workspace/repos/web'
+  const sha = (ref: string, cwd = web) => box.sh(`git rev-parse ${ref}`, cwd).stdout.trim()
+
+  // main moves on after the session starts, on a branch the session never sees otherwise.
+  box.sh(
+    'git checkout -q -b develop && echo d > develop.txt && git add -A && git commit -q -m develop && git checkout -q main',
+    source,
+  )
+
+  const start = sha('HEAD')
+
+  // Layer 1 commits a.txt; layer 2 commits b.txt; c.txt is not committed.
+  box.write(`${web}/a.txt`, 'a\n')
+  box.sh('git add -A && git commit -q -m "layer one"', web)
+  const layer1 = `shuttle/${RUN}/web`
+  box.sh(`git checkout -q -b shuttle/${RUN}-stack/web/2`, web)
+  box.write(`${web}/b.txt`, 'b\n')
+  box.sh('git add -A && git commit -q -m "layer two"', web)
+  box.write(`${web}/c.txt`, 'c\n')
+
+  const measure = (against: string) => {
+    const [repo] = parseWorkspaceSummary(
+      box.sh(workspaceSummaryScript(RUN, [{ name: 'web', defaultBranch: 'main', against }])).stdout,
+    ).repos
+
+    if (!repo?.measure || !repo.commits) {
+      throw new Error('The repository was not measured')
+    }
+
+    return {
+      ...repo,
+      measure: repo.measure,
+      commits: repo.commits,
+      paths: repo.changes.map((change) => change.path).toSorted(),
+    }
+  }
+
+  test('the session start counts every change, and the head, commits and dirt are reported', () => {
+    const repo = measure('session')
+
+    expect(repo.paths).toEqual(['a.txt', 'b.txt', 'c.txt'])
+    expect(repo.sessionBaseSha).toBe(start)
+
+    expect(repo.measure).toEqual({
+      baseSha: start,
+      baseMode: 'merge-base',
+      headSha: null,
+      error: null,
+    })
+
+    expect(repo.head).toEqual({ branch: `shuttle/${RUN}-stack/web/2`, sha: sha('HEAD') })
+    expect(repo.dirty).toBe(true)
+    expect(repo.commits.map((commit) => commit.subject)).toEqual(['layer two', 'layer one'])
+    expect(repo.commits[1]?.branches).toEqual([layer1])
+    expect(repo.commits[0]?.at).toBeGreaterThan(0)
+  })
+
+  test('uncommitted counts only what is not committed', () => {
+    expect(measure('uncommitted').paths).toEqual(['c.txt'])
+  })
+
+  test('a ref measures from where the work split from it, to the working tree', () => {
+    expect(measure(`ref:${layer1}`).paths).toEqual(['b.txt', 'c.txt'])
+    expect(measure('ref:develop').paths).toEqual(['a.txt', 'b.txt', 'c.txt'])
+    expect(measure('ref:develop').measure.baseSha).toBe(start)
+  })
+
+  test('a range is what its head changes from its base, leaving out the working tree', () => {
+    const top = measure(`range:${layer1}...shuttle/${RUN}-stack/web/2`)
+    const bottom = measure(`range:main...${layer1}`)
+
+    expect(top.paths).toEqual(['b.txt'])
+    expect(top.measure.headSha).toBe(sha('HEAD'))
+    expect(bottom.paths).toEqual(['a.txt'])
+
+    expect(box.sh(fileDiffScript('main', 'a.txt', `range:main...${layer1}`), web).stdout).toContain(
+      '+a',
+    )
+
+    expect(
+      box.sh(baseFileScript('main', 'b.txt', `range:${layer1}...HEAD`, 'head'), web).stdout,
+    ).toBe('b\n')
+
+    expect(box.sh(baseFileScript('main', 'c.txt', 'session', 'head'), web).exitCode).not.toBe(0)
+  })
+
+  test('a reference that is not there is reported, with nothing counted', () => {
+    const repo = measure('ref:nowhere')
+
+    expect(repo.measure.error).toBe('missing')
+    expect(repo.paths).toEqual([])
+  })
+
+  test('an unrelated history is measured from the reference itself', () => {
+    box.sh(
+      'git checkout -q --orphan island && git rm -rqf . && echo i > i.txt && git add -A && git commit -q -m island && git checkout -q main',
+      source,
+    )
+
+    expect(measure('ref:island').measure.baseMode).toBe('tip')
+  })
+})
+
+describe('reading comparisons', () => {
+  test('only plain references are accepted', () => {
+    expect(parseComparison('session')).toEqual({ kind: 'session' })
+    expect(parseComparison('ref:release/2026.11')).toEqual({ kind: 'ref', ref: 'release/2026.11' })
+
+    expect(parseComparison('range:main...shuttle/a/web')).toEqual({
+      kind: 'range',
+      base: 'main',
+      head: 'shuttle/a/web',
+    })
+
+    for (const bad of [
+      'ref:',
+      'ref:-x',
+      'ref:a..b',
+      'ref:a b',
+      "ref:a'b",
+      'ref:a;rm',
+      'range:a',
+      'range:a...b...c',
+      'ref:/etc',
+      'ref:a.lock',
+      'nope',
+    ]) {
+      expect(parseComparison(bad)).toBeNull()
+    }
   })
 })
 

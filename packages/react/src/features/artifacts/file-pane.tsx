@@ -174,14 +174,20 @@ export default function FilePane({
   runId,
   path,
   status,
+  against,
   editBlock,
   onDirtyChange,
 }: {
   runId: string
   /** `<repository>/<path>`. */
   path: string
-  /** How the session changed this file, if it did. */
+  /** How the file differs in the comparison shown, if it does. */
   status: ChangeStatus | undefined
+  /**
+   * What the file's changes are measured against, as the Workspace tab's comparison says. Left
+   * out, the session's start. A `range:` comparison shows the file at a commit, not as it is now.
+   */
+  against?: string
   editBlock: EditBlock
   /** Told when there is an unsaved edit, and when there no longer is. */
   onDirtyChange: (dirty: boolean) => void
@@ -210,9 +216,12 @@ export default function FilePane({
 
   // Each of these is read again whenever the tab shows the file, and whenever the session's
   // events say its files may have changed (see `ArtifactPane`).
+  const atCommit = against?.startsWith('range:') ?? false
+  const measured = against && against !== 'session' ? { against } : {}
+
   const fileQuery = useQuery(
     api.sandbox.file.queryOptions({
-      input: { id: runId, path },
+      input: atCommit ? { id: runId, path, version: 'head', ...measured } : { id: runId, path },
       staleTime: 0,
       // The editor owns the text while someone is typing; reloading would pull it out from
       // under them.
@@ -225,7 +234,7 @@ export default function FilePane({
 
   const baseQuery = useQuery(
     api.sandbox.file.queryOptions({
-      input: { id: runId, path, version: 'base' },
+      input: { id: runId, path, version: 'base', ...measured },
       staleTime: 0,
       enabled: view === 'diff',
     }),
@@ -237,7 +246,7 @@ export default function FilePane({
 
   const patchQuery = useQuery(
     api.sandbox.diff.queryOptions({
-      input: { id: runId, path },
+      input: { id: runId, path, ...measured },
       staleTime: 0,
       enabled: view === 'diff' && baseUnknown,
       select: patchOf,

@@ -51,6 +51,103 @@ export const SandboxFileDiff = SandboxSource.extend({
 })
 export type SandboxFileDiff = z.infer<typeof SandboxFileDiff>
 
+/**
+ * What a repository's changes are measured against. Left out, it is `session`.
+ *
+ * - `session`: where the session started, so every change it made, committed or not.
+ * - `uncommitted`: the last commit, so only work not committed yet.
+ * - `ref:<ref>`: a branch or commit, from where the work and it split. The working tree is the
+ *   other side, so work not committed yet is counted.
+ * - `range:<base>...<head>`: what `<head>` changes since it split from `<base>`, as a pull request
+ *   shows it. Commits only: the working tree is not read.
+ */
+export const Comparison = z
+  .string()
+  .max(400)
+  .refine((value) => parseComparison(value) !== null, {
+    message: 'Not a comparison: session, uncommitted, ref:<ref> or range:<base>...<head>',
+  })
+export type Comparison = z.infer<typeof Comparison>
+
+/** A comparison taken apart. */
+export type ParsedComparison =
+  | { readonly kind: 'session' }
+  | { readonly kind: 'uncommitted' }
+  | { readonly kind: 'ref'; readonly ref: string }
+  | { readonly kind: 'range'; readonly base: string; readonly head: string }
+
+/**
+ * Whether `ref` is a branch name or commit that is safe to hand to git: letters, digits and
+ * `_ . / -`, not starting with `-` or `/`, and none of the sequences git gives meaning to.
+ */
+export function isPlainRef(ref: string): boolean {
+  return (
+    /^[\w./-]+$/.test(ref) &&
+    !/^[-/.]/.test(ref) &&
+    !ref.endsWith('/') &&
+    !ref.endsWith('.') &&
+    !ref.endsWith('.lock') &&
+    !ref.includes('..') &&
+    !ref.includes('//') &&
+    !ref.includes('/.')
+  )
+}
+
+/** Reads a comparison, or null when it is not one. */
+export function parseComparison(value: string): ParsedComparison | null {
+  if (value === 'session' || value === 'uncommitted') {
+    return { kind: value }
+  }
+
+  if (value.startsWith('ref:')) {
+    const ref = value.slice(4)
+
+    return isPlainRef(ref) ? { kind: 'ref', ref } : null
+  }
+
+  if (value.startsWith('range:')) {
+    const [base = '', head = '', ...rest] = value.slice(6).split('...')
+
+    return rest.length === 0 && isPlainRef(base) && isPlainRef(head)
+      ? { kind: 'range', base, head }
+      : null
+  }
+
+  return null
+}
+
+/** One commit the session made, newest first. */
+export const SandboxCommit = z.object({
+  sha: z.string(),
+  subject: z.string(),
+  /** When it was committed, in milliseconds. */
+  at: z.number(),
+  /** Local branches whose tip it is, such as a stack layer's branch. */
+  branches: z.array(z.string()).readonly(),
+})
+export type SandboxCommit = z.infer<typeof SandboxCommit>
+
+/**
+ * How a repository's changes were measured, read from its sandbox. A saved copy only knows the
+ * session's starting point and has none of this.
+ */
+export const SandboxComparison = z.object({
+  /** The comparison applied. */
+  against: Comparison,
+  /** The commit the changes are measured from. Null when the reference was not found. */
+  baseSha: z.string().nullable(),
+  /**
+   * `merge-base` when measured from where the two split, `tip` when they share no history in the
+   * sandbox (a shallow clone) and the reference's own commit was used instead.
+   */
+  baseMode: z.enum(['merge-base', 'tip']).nullable(),
+  /** The other side: null for the working tree, a commit for a range. */
+  headSha: z.string().nullable(),
+  /** Why nothing could be measured, such as a branch GitHub does not have. */
+  error: z.string().nullable(),
+})
+export type SandboxComparison = z.infer<typeof SandboxComparison>
+
 /** How a file differs from where the session started: added, modified or deleted. */
 export const ChangeStatus = z.enum(['A', 'M', 'D'])
 export type ChangeStatus = z.infer<typeof ChangeStatus>
@@ -66,6 +163,16 @@ export const SandboxWorkspaceRepo = z.object({
   /** Every file, relative to the repository. */
   files: z.array(z.string()).readonly(),
   changes: z.array(z.object({ path: z.string(), status: ChangeStatus })).readonly(),
+  /** The branch checked out in the session's worktree, and its commit. Unknown in a saved copy. */
+  head: z.object({ branch: z.string().nullable(), sha: z.string() }).nullable().optional(),
+  /** Whether the worktree has work that is not committed. Unknown in a saved copy. */
+  dirty: z.boolean().optional(),
+  /** Where the session started. Unknown in a saved copy. */
+  sessionBaseSha: z.string().nullable().optional(),
+  /** The session's commits, newest first, at most `MAX_SESSION_COMMITS`. */
+  commits: z.array(SandboxCommit).readonly().optional(),
+  /** How `changes` were measured. Absent in a saved copy, which measures from the start. */
+  comparison: SandboxComparison.optional(),
 })
 export type SandboxWorkspaceRepo = z.infer<typeof SandboxWorkspaceRepo>
 
@@ -113,6 +220,17 @@ export const FileDiagnostics = z.discriminatedUnion('status', [
   }),
 ])
 export type FileDiagnostics = z.infer<typeof FileDiagnostics>
+
+/** The most of a session's commits the workspace lists for each repository. */
+export const MAX_SESSION_COMMITS = 50
+
+/** A branch a repository's changes can be compared with. */
+export const SandboxBranch = z.object({
+  name: z.string(),
+  /** Whether it is on GitHub, rather than only in the sandbox (as a stack layer may be). */
+  remote: z.boolean(),
+})
+export type SandboxBranch = z.infer<typeof SandboxBranch>
 
 /** Largest text a draft may be to have the language server check it, in characters. */
 export const MAX_DIAGNOSTICS_CHARS = 512_000
@@ -171,22 +289,48 @@ export const sandboxContract = {
     .input(SessionParams)
     .output(SandboxFiles),
 
-  /** One file, as it is now or, with `version: 'base'`, as it was when the session started. */
+  /**
+   * One file, as it is now or, with `version: 'base'`, as it was where its changes are measured
+   * from (`against`, the session's start when left out). `version: 'head'` is the other side of a
+   * `range:` comparison, which is a commit rather than the file as it is now.
+   */
   file: oc
     .route({ method: 'GET', path: '/sessions/{id}/sandbox/file' })
-    .input(SessionParams.extend({ path: FilePath, version: z.enum(['base']).optional() }))
+    .input(
+      SessionParams.extend({
+        path: FilePath,
+        version: z.enum(['base', 'head']).optional(),
+        against: Comparison.optional(),
+      }),
+    )
     .output(SandboxFile),
 
-  /** One file's changes since the session started, given `path`; every repository's without. */
+  /**
+   * One file's changes, given `path`; every repository's without. Measured from the session's
+   * start, or, for the file named, from `against`.
+   */
   diff: oc
     .route({ method: 'GET', path: '/sessions/{id}/sandbox/diff' })
-    .input(SessionParams.extend({ path: FilePath.optional() }))
+    .input(SessionParams.extend({ path: FilePath.optional(), against: Comparison.optional() }))
     .output(z.union([SandboxFileDiff, SandboxDiffs])),
 
+  /**
+   * The session's repositories and what changed in each. `against` measures a repository's
+   * changes from something other than the session's start, by its directory name.
+   */
   workspace: oc
     .route({ method: 'GET', path: '/sessions/{id}/sandbox/workspace' })
-    .input(SessionParams)
+    .input(SessionParams.extend({ against: z.record(z.string(), Comparison).optional() }))
     .output(SandboxWorkspace),
+
+  /**
+   * The branches a repository's changes can be compared with: GitHub's, and the session's own.
+   * Empty while the sandbox sleeps.
+   */
+  branches: oc
+    .route({ method: 'GET', path: '/sessions/{id}/sandbox/branches' })
+    .input(SessionParams.extend({ repo: z.string().min(1) }))
+    .output(z.object({ branches: z.array(SandboxBranch).readonly() })),
 
   /**
    * Saves a person's edit to one file in the session's workspace. `expected` is the text the

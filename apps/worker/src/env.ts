@@ -141,7 +141,12 @@ export interface SessionSandboxStub {
   gitDiff(cwd?: string): Promise<{ diff: string }>
   workspaceSummary(runId: string, repos: readonly SummaryRepo[]): Promise<WorkspaceSummary>
   fileDiff(runId: string, repo: SummaryRepo, path: string): Promise<{ diff: string }>
-  baseFile(runId: string, repo: SummaryRepo, path: string): Promise<{ content: string | null }>
+  baseFile(
+    runId: string,
+    repo: SummaryRepo,
+    path: string,
+    version?: 'base' | 'head',
+  ): Promise<{ content: string | null }>
   adoptStray(
     runId: string,
     repoName: string,
