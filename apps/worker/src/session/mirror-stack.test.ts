@@ -5,7 +5,7 @@ import type { PullSummary } from '../github/pulls'
 import { createStackGitFixture, type StackGitFixture } from '../sandbox/stack-git-fixture'
 import type { LinkedSandboxRepo } from '../sandbox/workspace'
 import { mirrorRepoStack, type MirrorGitHub, type MirrorInput } from './mirror-stack'
-import { stackKey, type SessionRepoStack } from './stack-state'
+import { stackKey, type SessionStacks } from './stack-state'
 
 const repo: LinkedSandboxRepo = {
   installationId: 1,
@@ -63,7 +63,7 @@ function fakeGitHub(baseSha: string, baseTree: Tree) {
         throw new Error(`GitHub has no commit ${input.baseSha}`)
       }
 
-      const tree: Record<string, string> = { ...parent }
+      const tree = { ...parent }
 
       for (const file of input.files) {
         if (file.content === null) {
@@ -120,10 +120,17 @@ describe('mirrorRepoStack', () => {
   })
 
   const setup = () => {
-    fixture = createStackGitFixture()
-    const { ops, runId, git, baseSha } = fixture
+    const current = createStackGitFixture()
+    fixture = current
+    const { ops, runId, baseSha } = current
+    const git = (command: string) => current.git(command)
+
+    const write = (path: string, content: string) => {
+      current.write(path, content)
+    }
+
     const remote = fakeGitHub(baseSha, { 'README.md': 'base\n' })
-    let stacks: Record<string, SessionRepoStack> = {}
+    let stacks: SessionStacks = {}
 
     const publish = async (input: Partial<MirrorInput> = {}) => {
       const result = await mirrorRepoStack(
@@ -146,7 +153,7 @@ describe('mirrorRepoStack', () => {
           .map((path) => [path, `${git(`git show ${branch}:${path}`)}\n`]),
       )
 
-    return { ...fixture, ...remote, publish, localTree, stacks: () => stacks }
+    return { ops, runId, write, ...remote, publish, localTree, stacks: () => stacks }
   }
 
   test('publishes a stack and a standalone PR from one session', async () => {
@@ -261,6 +268,15 @@ describe('mirrorRepoStack', () => {
 
   test('publishing a stack that does not exist fails clearly', async () => {
     const { publish } = setup()
-    await expect(publish({ stackId: 4 })).rejects.toThrow('Stack 4 does not exist in glue')
+
+    let message = ''
+
+    try {
+      await publish({ stackId: 4 })
+    } catch (error) {
+      message = error instanceof Error ? error.message : ''
+    }
+
+    expect(message).toContain('Stack 4 does not exist in glue')
   })
 })

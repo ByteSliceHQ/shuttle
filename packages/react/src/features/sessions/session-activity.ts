@@ -1,6 +1,11 @@
-import type { AnyEventEnvelope, ProjectionDefinition, ThreadNode } from '@swirls/looms/core'
+import type {
+  AnyEventEnvelope,
+  JsonValue,
+  ProjectionDefinition,
+  ThreadNode,
+} from '@swirls/looms/core'
 
-import { isRecord } from '../../lib/json'
+import { jsonFields, jsonNumber, jsonText } from '../../lib/json'
 import type { SessionFeed, ToolCallItem } from './session-feed'
 
 export type SessionActivity = 'working' | 'needs_input' | 'idle' | 'error'
@@ -88,16 +93,16 @@ export const initialSessionActivityState: SessionActivityState = {
   activity: 'idle',
 }
 
-function asRecord(value: unknown): { readonly [key: string]: unknown } {
-  return isRecord(value) ? value : {}
+function asString(value: JsonValue | undefined): string | null {
+  const text = jsonText(value)
+
+  return text !== undefined && text.length > 0 ? text : null
 }
 
-function asString(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null
-}
+function asNumber(value: JsonValue | undefined): number | null {
+  const number = jsonNumber(value)
 
-function asNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
+  return number !== undefined && Number.isFinite(number) ? number : null
 }
 
 function withoutKey<T>(
@@ -108,9 +113,7 @@ function withoutKey<T>(
     return record
   }
 
-  const next = { ...record }
-  delete next[key]
-  return next
+  return Object.fromEntries(Object.entries(record).filter(([entryKey]) => entryKey !== key))
 }
 
 function withoutApprovalsForThread(
@@ -289,11 +292,11 @@ export function reduceSessionActivity(
   event: {
     readonly seq: number
     readonly type: string
-    readonly payload: unknown
+    readonly payload: JsonValue
     readonly threadId?: string | null
   },
 ): SessionActivityState {
-  const payload = asRecord(event.payload)
+  const payload = jsonFields(event.payload)
 
   switch (event.type) {
     case 'runtime.run.started':
@@ -331,7 +334,7 @@ export function reduceSessionActivity(
     case 'runtime.thread.started': {
       const threadId = asString(payload.threadId) ?? asString(event.threadId)
 
-      if (!threadId) {
+      if (threadId === null) {
         return state
       }
 
@@ -339,7 +342,7 @@ export function reduceSessionActivity(
       const definitionName = asString(payload.definitionName) ?? ''
 
       if (kind === 'shuttle-session') {
-        const input = asRecord(payload.input)
+        const input = jsonFields(payload.input)
         return withDerivedActivity({
           ...state,
           rootThreadId: state.rootThreadId ?? threadId,
@@ -389,7 +392,7 @@ export function reduceSessionActivity(
     case 'runtime.thread.cancelled': {
       const threadId = asString(payload.threadId) ?? asString(event.threadId)
 
-      if (!threadId) {
+      if (threadId === null) {
         return withDerivedActivity({
           ...state,
           bindingSandbox: false,
@@ -405,7 +408,7 @@ export function reduceSessionActivity(
       const isPrimaryThread =
         threadId === state.rootThreadId ||
         threadId === state.conductorThreadId ||
-        (!state.conductorThreadId && Object.keys(nextThreads).length === 0)
+        (state.conductorThreadId === null && Object.keys(nextThreads).length === 0)
 
       return withDerivedActivity({
         ...state,
@@ -421,7 +424,7 @@ export function reduceSessionActivity(
       const threadId = asString(event.threadId) ?? asString(payload.threadId)
       const waitId = asString(payload.waitId)
 
-      if (!threadId || !waitId) {
+      if (threadId === null || waitId === null) {
         return state
       }
 
@@ -432,7 +435,7 @@ export function reduceSessionActivity(
       }
 
       if (existing.kind === 'shuttle-session') {
-        const tag = asRecord(payload.tag)
+        const tag = jsonFields(payload.tag)
         return tag.kind === 'shuttle-mailbox'
           ? putThread(state, threadId, { ...existing, parkedOnMailbox: true })
           : state
@@ -452,7 +455,7 @@ export function reduceSessionActivity(
       const threadId = asString(event.threadId) ?? asString(payload.threadId)
       const waitId = asString(payload.waitId)
 
-      if (!threadId) {
+      if (threadId === null) {
         return state
       }
 
@@ -463,7 +466,7 @@ export function reduceSessionActivity(
       }
 
       if (existing.kind === 'shuttle-session') {
-        const tag = asRecord(payload.tag)
+        const tag = jsonFields(payload.tag)
         return tag.kind === 'shuttle-mailbox'
           ? putThread(state, threadId, { ...existing, parkedOnMailbox: false })
           : state
@@ -472,7 +475,7 @@ export function reduceSessionActivity(
       if (existing.kind === 'other') {
         return putThread(state, threadId, {
           ...existing,
-          activeWaits: waitId ? existing.activeWaits.filter((id) => id !== waitId) : [],
+          activeWaits: waitId !== null ? existing.activeWaits.filter((id) => id !== waitId) : [],
         })
       }
 
@@ -486,8 +489,8 @@ export function reduceSessionActivity(
       const effectId = asString(payload.effectId)
 
       if (
-        (threadId && threadId === state.rootThreadId) ||
-        (effectId && effectId.endsWith(':bind_sandbox'))
+        (threadId !== null && threadId === state.rootThreadId) ||
+        (effectId !== null && effectId.endsWith(':bind_sandbox'))
       ) {
         return withDerivedActivity({ ...state, bindingSandbox: false })
       }
@@ -529,9 +532,8 @@ export function reduceSessionActivity(
       const messageId = asString(payload.messageId)
       return withDerivedActivity({
         ...state,
-        pendingUserMessages: messageId
-          ? state.pendingUserMessages.filter((id) => id !== messageId)
-          : [],
+        pendingUserMessages:
+          messageId !== null ? state.pendingUserMessages.filter((id) => id !== messageId) : [],
         queuedForConductor: payload.queued === true,
       })
     }
@@ -566,15 +568,15 @@ export function reduceSessionActivity(
         return state
       }
 
-      const message = asRecord(payload.message)
+      const message = jsonFields(payload.message)
       const toolCallsRaw = Array.isArray(message.toolCalls) ? message.toolCalls : []
       let openToolCalls = existing.openToolCalls
 
       for (const item of toolCallsRaw) {
-        const call = asRecord(item)
+        const call = jsonFields(item)
         const callId = asString(call.id)
 
-        if (callId && !openToolCalls[callId]) {
+        if (callId !== null && openToolCalls[callId] === undefined) {
           openToolCalls = { ...openToolCalls, [callId]: 'executing' }
         }
       }
@@ -610,7 +612,7 @@ export function reduceSessionActivity(
     case 'agent.tool_call.requested': {
       const threadId = asString(event.threadId) ?? DEFAULT_THREAD_ID
       const thread = ensureAgentThread(state.threads, threadId)
-      const toolCall = asRecord(payload.toolCall)
+      const toolCall = jsonFields(payload.toolCall)
       const callId = asString(toolCall.id) ?? `call_${event.seq}`
 
       return putThread(state, threadId, {
@@ -644,7 +646,7 @@ export function reduceSessionActivity(
       const thread = ensureAgentThread(state.threads, threadId)
       const toolCallId = asString(payload.toolCallId)
 
-      if (!toolCallId) {
+      if (toolCallId === null) {
         return state
       }
 
@@ -662,7 +664,7 @@ export function reduceSessionActivity(
       const thread = ensureAgentThread(state.threads, threadId)
       const toolCallId = asString(payload.toolCallId)
 
-      if (!toolCallId) {
+      if (toolCallId === null) {
         return state
       }
 
@@ -679,7 +681,7 @@ export function reduceSessionActivity(
       const threadId = asString(event.threadId) ?? DEFAULT_THREAD_ID
       const thread = ensureAgentThread(state.threads, threadId)
       const toolCallId = asString(payload.toolCallId)
-      const openToolCalls = toolCallId ? withoutKey(thread.openToolCalls, toolCallId) : {}
+      const openToolCalls = toolCallId !== null ? withoutKey(thread.openToolCalls, toolCallId) : {}
 
       return putThread(state, threadId, {
         ...thread,
@@ -779,7 +781,7 @@ export function reduceSessionActivity(
 
       return withDerivedActivity({
         ...state,
-        pendingApprovals: approvalId ? withoutKey(state.pendingApprovals, approvalId) : {},
+        pendingApprovals: approvalId !== null ? withoutKey(state.pendingApprovals, approvalId) : {},
       })
     }
 
@@ -881,7 +883,7 @@ export function resolveSessionIndicator(input: {
   }
 
   if (input.status === 'completed') {
-    return input.unread ? 'ready' : 'completed'
+    return input.unread === true ? 'ready' : 'completed'
   }
 
   if (input.status === 'requested') {
@@ -896,7 +898,7 @@ export function resolveSessionIndicator(input: {
     case 'error':
       return 'failed'
     default:
-      return input.unread ? 'ready' : 'idle'
+      return input.unread === true ? 'ready' : 'idle'
   }
 }
 
@@ -966,11 +968,13 @@ export function findRunningToolInFeed(feed: SessionFeed): {
 
     const running = item.calls.filter((call) => call.status === 'running')
 
-    if (running.length === 0) {
+    const last = running.at(-1)
+
+    if (last === undefined) {
       continue
     }
 
-    return { threadId: item.threadId, call: running[running.length - 1]! }
+    return { threadId: item.threadId, call: last }
   }
 
   return null

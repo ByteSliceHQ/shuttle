@@ -1,6 +1,7 @@
 import type { ComponentProps, ReactNode } from 'react'
 
 import { cn } from '../../lib/cn'
+import { hasNode } from '../../lib/text'
 
 /**
  * Every panel header shares this height, which is also the app sidebar's top bar, so the
@@ -65,13 +66,13 @@ function EmptyState({
         className,
       )}
     >
-      {icon ? (
+      {hasNode(icon) ? (
         <div className="text-muted-foreground/70 bg-card mb-1 flex size-9 items-center justify-center rounded-lg border [&_svg]:size-4">
           {icon}
         </div>
       ) : null}
       <p className="text-foreground text-[13px] font-medium">{title}</p>
-      {children ? (
+      {hasNode(children) ? (
         <p className="text-muted-foreground max-w-64 text-xs leading-relaxed">{children}</p>
       ) : null}
     </div>

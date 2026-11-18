@@ -11,6 +11,7 @@ import {
   X,
 } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { z } from 'zod'
 
 import type { ChangeStatus } from '@shuttle/api'
 import { useProjection, useRunStore } from '@swirls/looms/react'
@@ -20,6 +21,7 @@ import { EmptyState, Kbd } from '../../components/ui/panel'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '../../components/ui/resizable'
 import { ScrollArea } from '../../components/ui/scroll-area'
 import { cn } from '../../lib/cn'
+import { hasText } from '../../lib/text'
 import { useWidthBucket } from '../../lib/use-width-bucket'
 import { useApi, useShuttleHost } from '../../shuttle'
 import { pullInbox, usePullsRunId } from '../pulls/pulls'
@@ -65,16 +67,25 @@ function storageKey(runId: string): string {
   return `shuttle:open-files:${runId}`
 }
 
+/** What sessionStorage holds for the files a tab had open. Anything else in it is left out. */
+const StoredOpenFiles = z.object({
+  paths: z.array(z.string().optional().catch(undefined)),
+  active: z.string().nullable().catch(null),
+})
+
 /** The files this browser tab had open in a session, so a reload comes back to them. */
 function readOpenFiles(runId: string): OpenFiles {
   try {
-    const stored = JSON.parse(sessionStorage.getItem(storageKey(runId)) ?? 'null') as unknown
+    const stored = StoredOpenFiles.parse(
+      JSON.parse(sessionStorage.getItem(storageKey(runId)) ?? 'null'),
+    )
 
-    if (stored && typeof stored === 'object' && 'paths' in stored && Array.isArray(stored.paths)) {
-      const paths = stored.paths.filter((path): path is string => typeof path === 'string')
-      const active = 'active' in stored && typeof stored.active === 'string' ? stored.active : null
+    const paths = stored.paths.filter((path) => path !== undefined)
+    const { active } = stored
 
-      return { paths, active: active && paths.includes(active) ? active : (paths.at(-1) ?? null) }
+    return {
+      paths,
+      active: active !== null && paths.includes(active) ? active : (paths.at(-1) ?? null),
     }
   } catch {
     // Nothing stored, or storage is unavailable.
@@ -96,24 +107,25 @@ interface CompareState {
   readonly repo: string | null
 }
 
+/** What sessionStorage holds for a tab's comparisons. Anything else in it is left out. */
+const StoredCompare = z.object({
+  against: z.record(z.string(), z.string().optional().catch(undefined)).catch({}),
+  repo: z.string().nullable().catch(null),
+})
+
 function readCompare(runId: string): CompareState {
   try {
-    const stored = JSON.parse(sessionStorage.getItem(compareKey(runId)) ?? 'null') as unknown
+    const stored = StoredCompare.parse(
+      JSON.parse(sessionStorage.getItem(compareKey(runId)) ?? 'null'),
+    )
 
-    if (stored && typeof stored === 'object') {
-      const against =
-        'against' in stored && stored.against && typeof stored.against === 'object'
-          ? Object.fromEntries(
-              Object.entries(stored.against).filter(
-                (entry): entry is [string, string] => typeof entry[1] === 'string',
-              ),
-            )
-          : {}
+    const against = Object.fromEntries(
+      Object.entries(stored.against).filter(
+        (entry): entry is [string, string] => entry[1] !== undefined,
+      ),
+    )
 
-      const repo = 'repo' in stored && typeof stored.repo === 'string' ? stored.repo : null
-
-      return { against, repo }
-    }
+    return { against, repo: stored.repo }
   } catch {
     // Nothing stored, or storage is unavailable.
   }
@@ -178,7 +190,7 @@ export function WorkspaceViewer({
   const [compare, setCompare] = useState<CompareState>(() => {
     const stored = readCompare(runId)
 
-    return initialPath ? { ...stored, repo: repoOfPath(initialPath) } : stored
+    return hasText(initialPath) ? { ...stored, repo: repoOfPath(initialPath) } : stored
   })
 
   useEffect(() => {
@@ -219,7 +231,7 @@ export function WorkspaceViewer({
   const [open, setOpen] = useState<OpenFiles>(() => {
     const stored = readOpenFiles(runId)
 
-    return initialPath ? withOpened(stored, initialPath) : stored
+    return hasText(initialPath) ? withOpened(stored, initialPath) : stored
   })
 
   const [treeShown, setTreeShown] = useState(true)
@@ -236,7 +248,7 @@ export function WorkspaceViewer({
     setSearching(true)
   }
 
-  const [containerRef, bucket] = useWidthBucket<HTMLDivElement>([SIDE_BY_SIDE_PX])
+  const [containerRef, bucket] = useWidthBucket([SIDE_BY_SIDE_PX])
   const sideBySide = bucket > 0
 
   useEffect(() => {
@@ -369,7 +381,7 @@ export function WorkspaceViewer({
           <p className="text-muted-foreground px-3 py-4 text-[12px] leading-relaxed text-pretty">
             {shown !== 'changed'
               ? 'No files yet. They appear here as agents write them.'
-              : activeRepo?.comparison?.error
+              : hasText(activeRepo?.comparison?.error)
                 ? 'Nothing to list until the comparison can be measured.'
                 : activeAgainst === SESSION
                   ? 'Nothing has changed since the session started.'
@@ -405,7 +417,7 @@ export function WorkspaceViewer({
   }
 
   // The comparison of the repository the open file is in.
-  const fileAgainst = active
+  const fileAgainst = hasText(active)
     ? (repos.find((repo) => repo.name === repoOfPath(active))?.comparison?.against ?? SESSION)
     : SESSION
 
@@ -414,7 +426,7 @@ export function WorkspaceViewer({
       ? 'A saved copy cannot be edited. Send a message to wake the sandbox.'
       : fileAgainst.startsWith('range:')
         ? 'This shows the file at a commit. Go back to all changes to edit it.'
-        : workspace.working
+        : workspace.working === true
           ? 'Agents are working. Edit once they have finished.'
           : null
 
@@ -432,7 +444,7 @@ export function WorkspaceViewer({
         }
       />
       <div className="min-h-0 flex-1">
-        {active ? (
+        {hasText(active) ? (
           <Suspense
             fallback={
               <div className="text-muted-foreground flex h-full items-center justify-center text-xs">
@@ -517,7 +529,7 @@ export function WorkspaceViewer({
           </ResizablePanelGroup>
         ) : treeShown ? (
           <div className="flex h-full min-h-0 flex-col">
-            {open.active ? (
+            {hasText(open.active) ? (
               <button
                 type="button"
                 onClick={() => setTreeShown(false)}
@@ -570,7 +582,9 @@ function Segmented<T extends string>({
           )}
         >
           {option.label}
-          {option.count ? <span className="tabular-nums opacity-70">{option.count}</span> : null}
+          {option.count !== undefined && option.count > 0 ? (
+            <span className="tabular-nums opacity-70">{option.count}</span>
+          ) : null}
         </button>
       ))}
     </div>
@@ -642,7 +656,7 @@ function OpenFileStrip({
 
   // Keeps the file in view in the strip when it is picked from the tree or the search.
   useEffect(() => {
-    if (open.active) {
+    if (hasText(open.active)) {
       stripRef.current
         ?.querySelector(`[data-path="${CSS.escape(open.active)}"]`)
         ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
@@ -688,7 +702,9 @@ function OpenFileStrip({
                 className="focus-visible:ring-ring/50 h-full max-w-48 truncate py-0 pr-1 pl-2.5 font-mono outline-none focus-visible:ring-2 focus-visible:ring-inset"
               >
                 {name}
-                {twin && folder ? <span className="text-muted-foreground"> · {folder}</span> : null}
+                {twin && hasText(folder) ? (
+                  <span className="text-muted-foreground"> · {folder}</span>
+                ) : null}
               </button>
               <button
                 type="button"
@@ -758,7 +774,7 @@ function TreeNode({
           <span className={cn('min-w-0 flex-1 truncate', node.status === 'D' && 'line-through')}>
             {node.name}
           </span>
-          {node.status ? (
+          {node.status !== undefined ? (
             <span
               className={cn('shrink-0 font-mono text-[10.5px]', STATUS_CLASS[node.status])}
               title={STATUS_LABEL[node.status]}

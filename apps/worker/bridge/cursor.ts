@@ -5,6 +5,22 @@ import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 
 import {
+  booleanField,
+  decodeEach,
+  field,
+  isJsonArray,
+  isJsonObject,
+  isNumber,
+  isString,
+  nonEmpty,
+  numberField,
+  objectField,
+  parseJson,
+  stringField,
+  type JsonObject,
+  type JsonValue,
+} from './json.ts'
+import {
   clipToolOutput,
   type BridgeEmit,
   type BridgeModel,
@@ -48,13 +64,21 @@ export function installCursorMcp(
   const args = mcp.args.filter((arg, index, all) => arg !== '--dir' && all[index - 1] !== '--dir')
 
   try {
-    const existing = existsSync(path)
-      ? (JSON.parse(readFileSync(path, 'utf8')) as { mcpServers?: Record<string, unknown> })
-      : {}
+    const parsed = existsSync(path) ? parseJson(readFileSync(path, 'utf8')) : {}
+
+    // A config that is not JSON is left alone: the turn runs without Shuttle's tools.
+    if (parsed === undefined) {
+      return false
+    }
+
+    const existing: JsonObject = isJsonObject(parsed) ? parsed : {}
 
     const next = {
       ...existing,
-      mcpServers: { ...existing.mcpServers, shuttle: { command: mcp.command, args } },
+      mcpServers: {
+        ...objectField(existing, 'mcpServers'),
+        shuttle: { command: mcp.command, args },
+      },
     }
 
     mkdirSync(dirname(path), { recursive: true })
@@ -77,11 +101,13 @@ function cursorBin(options: CursorOptions): string {
 }
 
 function cursorEnv(runDir?: string): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    NO_OPEN_BROWSER: '1',
-    ...(runDir ? { [SHUTTLE_RUN_DIR_ENV]: runDir } : {}),
+  const env: NodeJS.ProcessEnv = { ...process.env, NO_OPEN_BROWSER: '1' }
+
+  if (runDir) {
+    env[SHUTTLE_RUN_DIR_ENV] = runDir
   }
+
+  return env
 }
 
 /**
@@ -108,20 +134,19 @@ interface ContentBlock {
   readonly text?: string
 }
 
+interface ToolResult<Success> {
+  readonly success?: Success
+  readonly error?: string
+}
+
 interface ToolCallBody {
   readonly readToolCall?: {
     readonly args?: { readonly path?: string }
-    readonly result?: {
-      readonly success?: { readonly totalLines?: number; readonly content?: string }
-      readonly error?: string
-    }
+    readonly result?: ToolResult<{ readonly totalLines?: number; readonly content?: string }>
   }
   readonly writeToolCall?: {
     readonly args?: { readonly path?: string }
-    readonly result?: {
-      readonly success?: { readonly linesCreated?: number; readonly path?: string }
-      readonly error?: string
-    }
+    readonly result?: ToolResult<{ readonly linesCreated?: number; readonly path?: string }>
   }
   readonly function?: {
     readonly name?: string
@@ -129,7 +154,7 @@ interface ToolCallBody {
   }
   readonly shellToolCall?: {
     readonly args?: { readonly command?: string }
-    readonly result?: { readonly success?: { readonly output?: string }; readonly error?: string }
+    readonly result?: ToolResult<{ readonly output?: string }>
   }
 }
 
@@ -144,16 +169,121 @@ interface StreamLine {
   readonly is_error?: boolean
   readonly result?: string
   readonly message?: {
-    readonly content?: readonly ContentBlock[]
+    readonly content?: ContentBlock[]
   }
   readonly tool_call?: ToolCallBody
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+function decodeBlock(value: JsonValue): ContentBlock | undefined {
+  return isJsonObject(value)
+    ? { type: stringField(value, 'type'), text: stringField(value, 'text') }
+    : undefined
 }
 
-function toolKindFromCall(call: ToolCallBody | undefined): { kind: BridgeToolKind; title: string } {
+interface DecodedCall<Args, Success> {
+  readonly args?: Args
+  readonly result?: ToolResult<Success>
+}
+
+/** A call of a tool whose arguments are read by `readArgs` and whose success by `readSuccess`. */
+function decodeCall<Args, Success>(
+  value: JsonValue | undefined,
+  readArgs: (args: JsonObject) => Args,
+  readSuccess: (success: JsonObject) => Success,
+): DecodedCall<Args, Success> | undefined {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  const args = objectField(value, 'args')
+  const result = objectField(value, 'result')
+  const success = result === undefined ? undefined : objectField(result, 'success')
+
+  return {
+    args: args === undefined ? undefined : readArgs(args),
+    result:
+      result === undefined
+        ? undefined
+        : {
+            success: success === undefined ? undefined : readSuccess(success),
+            error: stringField(result, 'error'),
+          },
+  }
+}
+
+function decodeToolCall(value: JsonValue | undefined): ToolCallBody | undefined {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  const fn = objectField(value, 'function')
+
+  return {
+    readToolCall: decodeCall(
+      field(value, 'readToolCall'),
+      (args) => ({ path: stringField(args, 'path') }),
+      (success) => ({
+        totalLines: numberField(success, 'totalLines'),
+        content: stringField(success, 'content'),
+      }),
+    ),
+    writeToolCall: decodeCall(
+      field(value, 'writeToolCall'),
+      (args) => ({ path: stringField(args, 'path') }),
+      (success) => ({
+        linesCreated: numberField(success, 'linesCreated'),
+        path: stringField(success, 'path'),
+      }),
+    ),
+    function:
+      fn === undefined
+        ? undefined
+        : { name: stringField(fn, 'name'), arguments: stringField(fn, 'arguments') },
+    shellToolCall: decodeCall(
+      field(value, 'shellToolCall'),
+      (args) => ({ command: stringField(args, 'command') }),
+      (success) => ({ output: stringField(success, 'output') }),
+    ),
+  }
+}
+
+/** One line of Cursor's stream, or undefined when the line is not an object. */
+function decodeStreamLine(value: JsonValue | undefined): StreamLine | undefined {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  const message = objectField(value, 'message')
+
+  return {
+    type: stringField(value, 'type') ?? '',
+    subtype: stringField(value, 'subtype'),
+    session_id: stringField(value, 'session_id'),
+    model: stringField(value, 'model'),
+    timestamp_ms: numberField(value, 'timestamp_ms'),
+    model_call_id: stringField(value, 'model_call_id'),
+    call_id: stringField(value, 'call_id'),
+    is_error: booleanField(value, 'is_error'),
+    result: stringField(value, 'result'),
+    message:
+      message === undefined
+        ? undefined
+        : { content: decodeEach(field(message, 'content'), decodeBlock) },
+    tool_call: decodeToolCall(field(value, 'tool_call')),
+  }
+}
+
+interface ToolView {
+  readonly kind: BridgeToolKind
+  readonly title: string
+}
+
+interface ToolOutcome {
+  readonly status: 'completed' | 'failed'
+  readonly output?: string
+}
+
+function toolKindFromCall(call: ToolCallBody | undefined): ToolView {
   if (call?.readToolCall) {
     const path = call.readToolCall.args?.path
     return { kind: 'other', title: path ? `Read ${path}` : 'Read' }
@@ -190,10 +320,7 @@ function toolKindFromCall(call: ToolCallBody | undefined): { kind: BridgeToolKin
   return { kind: 'other', title: name }
 }
 
-function toolOutput(call: ToolCallBody | undefined): {
-  status: 'completed' | 'failed'
-  output?: string
-} {
+function toolOutput(call: ToolCallBody | undefined): ToolOutcome {
   if (call?.readToolCall?.result?.error) {
     return { status: 'failed', output: call.readToolCall.result.error }
   }
@@ -208,17 +335,16 @@ function toolOutput(call: ToolCallBody | undefined): {
 
   if (call?.readToolCall?.result?.success) {
     const lines = call.readToolCall.result.success.totalLines
-    return {
-      status: 'completed',
-      ...(typeof lines === 'number' ? { output: `${lines} lines` } : {}),
-    }
+
+    return { status: 'completed', output: lines === undefined ? undefined : `${lines} lines` }
   }
 
   if (call?.writeToolCall?.result?.success) {
     const lines = call.writeToolCall.result.success.linesCreated
+
     return {
       status: 'completed',
-      ...(typeof lines === 'number' ? { output: `created ${lines} lines` } : {}),
+      output: lines === undefined ? undefined : `created ${lines} lines`,
     }
   }
 
@@ -233,18 +359,12 @@ function toolOutput(call: ToolCallBody | undefined): {
 }
 
 function assistantText(line: StreamLine): string {
-  const content = line.message?.content
-
-  if (!Array.isArray(content)) {
-    return ''
-  }
-
-  return content.map((block) => (typeof block.text === 'string' ? block.text : '')).join('')
+  return (line.message?.content ?? []).map((block) => block.text ?? '').join('')
 }
 
 /** True for character-level streaming deltas; skips buffered flushes that duplicate text. */
 function isStreamingDelta(line: StreamLine): boolean {
-  return typeof line.timestamp_ms === 'number' && line.model_call_id === undefined
+  return line.timestamp_ms !== undefined && line.model_call_id === undefined
 }
 
 interface Attempt {
@@ -297,7 +417,7 @@ function runAttempt(
       return
     }
 
-    const tools = new Map<string, { kind: BridgeToolKind; title: string }>()
+    const tools = new Map<string, ToolView>()
     let finalText = ''
     let failure: string | undefined
     let sawResult = false
@@ -319,11 +439,9 @@ function runAttempt(
     })
 
     createInterface({ input: child.stdout }).on('line', (raw) => {
-      let line: StreamLine
+      const line = decodeStreamLine(parseJson(raw))
 
-      try {
-        line = JSON.parse(raw)
-      } catch {
+      if (line === undefined) {
         return
       }
 
@@ -335,7 +453,7 @@ function runAttempt(
             emit({
               type: 'thread',
               vendorThreadId: line.session_id,
-              ...(line.model ? { model: line.model } : {}),
+              model: nonEmpty(line.model),
             })
           }
 
@@ -355,7 +473,7 @@ function runAttempt(
 
           if (isStreamingDelta(line)) {
             emit({ type: 'text_delta', delta: text })
-          } else if (typeof line.timestamp_ms !== 'number' && !line.model_call_id) {
+          } else if (line.timestamp_ms === undefined && !line.model_call_id) {
             // Final flush at end of a message segment (not a streaming delta).
             emit({ type: 'message', text })
           }
@@ -386,7 +504,7 @@ function runAttempt(
               id,
               ...view,
               status: finished.status,
-              ...(finished.output ? { output: finished.output } : {}),
+              output: nonEmpty(finished.output),
             })
           }
 
@@ -464,7 +582,7 @@ export async function runCursorTurn(
     type: 'turn_done',
     status: attempt.status,
     text: attempt.text,
-    ...(attempt.error ? { error: attempt.error } : {}),
+    error: nonEmpty(attempt.error),
   })
 }
 
@@ -490,39 +608,44 @@ function runToEnd(
 export async function cursorSignedIn(options: CursorOptions = {}): Promise<boolean> {
   const status = await runToEnd(cursorBin(options), ['status', '--format', 'json'])
 
-  try {
-    const parsed = JSON.parse(status.stdout) as Record<string, unknown>
-    const userInfo = isRecord(parsed.userInfo) ? parsed.userInfo : undefined
+  const parsed = parseJson(status.stdout)
 
-    // Current CLI: `{ "status": "authenticated", "isAuthenticated": true, "userInfo": { ... } }`.
-    if (
-      parsed.isAuthenticated === true ||
-      parsed.authenticated === true ||
-      parsed.loggedIn === true ||
-      parsed.status === 'authenticated'
-    ) {
-      return true
-    }
-
-    if (
-      parsed.isAuthenticated === false ||
-      parsed.authenticated === false ||
-      parsed.loggedIn === false ||
-      parsed.status === 'unauthenticated'
-    ) {
-      return false
-    }
-
-    return (
-      typeof parsed.email === 'string' ||
-      typeof parsed.userId === 'string' ||
-      typeof userInfo?.email === 'string' ||
-      typeof userInfo?.userId === 'string' ||
-      typeof userInfo?.userId === 'number'
-    )
-  } catch {
+  if (parsed === undefined) {
     return /logged in as|isAuthenticated|status.: .authenticated/i.test(status.stdout)
   }
+
+  if (!isJsonObject(parsed)) {
+    return false
+  }
+
+  const userInfo: JsonObject = objectField(parsed, 'userInfo') ?? {}
+
+  // Current CLI: `{ "status": "authenticated", "isAuthenticated": true, "userInfo": { ... } }`.
+  if (
+    parsed.isAuthenticated === true ||
+    parsed.authenticated === true ||
+    parsed.loggedIn === true ||
+    parsed.status === 'authenticated'
+  ) {
+    return true
+  }
+
+  if (
+    parsed.isAuthenticated === false ||
+    parsed.authenticated === false ||
+    parsed.loggedIn === false ||
+    parsed.status === 'unauthenticated'
+  ) {
+    return false
+  }
+
+  return (
+    isString(parsed.email) ||
+    isString(parsed.userId) ||
+    isString(userInfo.email) ||
+    isString(userInfo.userId) ||
+    isNumber(userInfo.userId)
+  )
 }
 
 const SIGN_IN_URL = /https:\/\/\S+/
@@ -648,46 +771,42 @@ export async function listCursorModels(options: CursorOptions = {}): Promise<Bri
 }
 
 function parseModelsJson(stdout: string): BridgeModel[] {
-  try {
-    const parsed = JSON.parse(stdout) as unknown
+  const parsed = parseJson(stdout)
 
-    const entries = Array.isArray(parsed)
-      ? parsed
-      : isRecord(parsed) && Array.isArray(parsed.models)
-        ? parsed.models
-        : []
+  const entries = isJsonArray(parsed)
+    ? parsed
+    : isJsonObject(parsed) && isJsonArray(parsed.models)
+      ? parsed.models
+      : []
 
-    return entries.flatMap((entry): BridgeModel[] => {
-      if (typeof entry === 'string' && entry.trim()) {
-        return [{ id: entry.trim(), label: entry.trim(), description: '', efforts: [] }]
-      }
+  return entries.flatMap((entry): BridgeModel[] => {
+    if (isString(entry) && entry.trim()) {
+      return [{ id: entry.trim(), label: entry.trim(), description: '', efforts: [] }]
+    }
 
-      if (!isRecord(entry) || typeof entry.id !== 'string' || !entry.id.trim()) {
-        return []
-      }
+    if (!isJsonObject(entry) || !isString(entry.id) || !entry.id.trim()) {
+      return []
+    }
 
-      const id = entry.id.trim()
+    const id = entry.id.trim()
 
-      const label =
-        typeof entry.label === 'string' && entry.label.trim()
-          ? entry.label.trim()
-          : typeof entry.name === 'string' && entry.name.trim()
-            ? entry.name.trim()
-            : id
+    const label =
+      isString(entry.label) && entry.label.trim()
+        ? entry.label.trim()
+        : isString(entry.name) && entry.name.trim()
+          ? entry.name.trim()
+          : id
 
-      return [
-        {
-          id,
-          label,
-          description: typeof entry.description === 'string' ? entry.description : '',
-          efforts: [],
-          ...(entry.isDefault === true || entry.default === true ? { isDefault: true } : {}),
-        },
-      ]
-    })
-  } catch {
-    return []
-  }
+    return [
+      {
+        id,
+        label,
+        description: isString(entry.description) ? entry.description : '',
+        efforts: [],
+        isDefault: entry.isDefault === true || entry.default === true ? true : undefined,
+      },
+    ]
+  })
 }
 
 function parseModelsText(stdout: string): BridgeModel[] {

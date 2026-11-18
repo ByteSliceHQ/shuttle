@@ -10,6 +10,7 @@ import {
   REVIEW_BASE_CONFIG_KEY,
 } from './stack'
 import { StackWorkspaceOps } from './stack-ops'
+import { nonEmpty, orElse } from './text'
 import {
   repoCheckoutPath,
   resolvePath,
@@ -63,12 +64,13 @@ export function checkoutRefScript(input: {
   const target = shellQuote(input.target)
   const auth = `-c http.extraheader=${shellQuote(`Authorization: Basic ${input.basicAuth}`)}`
   const fetch = `git -C ${source} ${auth} fetch --depth 1 origin`
+  const baseSha = nonEmpty(input.baseSha)
 
   return [
     `mkdir -p "$(dirname ${source})" "$(dirname ${target})"`,
     `if [ ! -d ${source}/.git ]; then git ${auth} clone --depth 1 ${shellQuote(input.cloneUrl)} ${source}; fi`,
     `${fetch} ${shellQuote(input.sha)}`,
-    ...(input.baseSha ? [`{ ${fetch} ${shellQuote(input.baseSha)} || true; }`] : []),
+    ...(baseSha === undefined ? [] : [`{ ${fetch} ${shellQuote(baseSha)} || true; }`]),
     `if [ -d ${target} ]; then git -C ${source} worktree remove --force ${target} || rm -rf ${target}; fi`,
     `git -C ${source} worktree prune`,
     `git -C ${source} worktree add -B ${shellQuote(input.branch)} ${target} ${shellQuote(input.sha)}`,
@@ -78,19 +80,19 @@ export function checkoutRefScript(input: {
     `git -C ${target} config ${shellQuote(`branch.${input.branch}.${LAYER_CONFIG_KEY}`)} 1`,
     `git -C ${target} config ${shellQuote(`branch.${input.branch}.${PARENT_CONFIG_KEY}`)} "$parent"`,
     // With the base here, what the session shows as changed is what the pull request changes.
-    ...(input.baseSha
-      ? [
-          `if git -C ${target} cat-file -e ${shellQuote(`${input.baseSha}^{commit}`)} 2>/dev/null; then ${[
+    ...(baseSha === undefined
+      ? []
+      : [
+          `if git -C ${target} cat-file -e ${shellQuote(`${baseSha}^{commit}`)} 2>/dev/null; then ${[
             REVIEW_BASE_CONFIG_KEY,
             BASE_CONFIG_KEY,
           ]
             .map(
               (key) =>
-                `git -C ${target} config ${shellQuote(`branch.${input.branch}.${key}`)} ${shellQuote(input.baseSha ?? '')}`,
+                `git -C ${target} config ${shellQuote(`branch.${input.branch}.${key}`)} ${shellQuote(baseSha)}`,
             )
             .join(' && ')}; fi`,
-        ]
-      : []),
+        ]),
   ].join(' && ')
 }
 
@@ -241,7 +243,7 @@ export class ContainerWorkspace implements Workspace {
 
       if (created.exitCode !== 0) {
         throw new Error(
-          `Could not create the session worktree for ${name}: ${created.stderr.trim() || `exit ${created.exitCode}`}`,
+          `Could not create the session worktree for ${name}: ${orElse(created.stderr.trim(), `exit ${created.exitCode}`)}`,
         )
       }
     }
@@ -254,11 +256,12 @@ export class ContainerWorkspace implements Workspace {
 
     // The base must be a commit GitHub already has, so local agent commits stay in the
     // diff. Sessions record it at worktree creation; older ones fall back to merge-base.
-    const fallbacks = baseBranch
-      ? [`refs/remotes/origin/${baseBranch}`, `refs/heads/${baseBranch}`].map(
-          (ref) => `git merge-base HEAD ${shellQuote(ref)} 2>/dev/null`,
-        )
-      : []
+    const fallbacks =
+      baseBranch !== undefined && baseBranch !== ''
+        ? [`refs/remotes/origin/${baseBranch}`, `refs/heads/${baseBranch}`].map(
+            (ref) => `git merge-base HEAD ${shellQuote(ref)} 2>/dev/null`,
+          )
+        : []
 
     const baseResult = await this.exec(
       [
@@ -271,8 +274,8 @@ export class ContainerWorkspace implements Workspace {
 
     const baseSha = baseResult.stdout.trim().split('\n')[0] ?? ''
 
-    if (baseResult.exitCode !== 0 || !baseSha) {
-      throw new Error(baseResult.stderr.trim() || `Failed to resolve a base commit in ${cwd}`)
+    if (baseResult.exitCode !== 0 || baseSha === '') {
+      throw new Error(orElse(baseResult.stderr.trim(), `Failed to resolve a base commit in ${cwd}`))
     }
 
     const [diff, untracked] = await Promise.all([
@@ -288,19 +291,23 @@ export class ContainerWorkspace implements Workspace {
     ])
 
     if (diff.exitCode !== 0) {
-      throw new Error(diff.stderr.trim() || `git diff failed in ${cwd}`)
+      throw new Error(orElse(diff.stderr.trim(), `git diff failed in ${cwd}`))
     }
 
     if (untracked.exitCode !== 0) {
-      throw new Error(untracked.stderr.trim() || `git ls-files failed in ${cwd}`)
+      throw new Error(orElse(untracked.stderr.trim(), `git ls-files failed in ${cwd}`))
     }
 
     const files: ChangesetFile[] = []
     const diffTokens = diff.stdout.split('\0').filter(Boolean)
 
     for (let index = 0; index + 1 < diffTokens.length; index += 2) {
-      const code = diffTokens[index]!
-      const path = diffTokens[index + 1]!
+      const code = diffTokens[index]
+      const path = diffTokens[index + 1]
+
+      if (code === undefined || path === undefined) {
+        continue
+      }
 
       if (code.startsWith('D')) {
         files.push({ path, status: 'deleted', content: null })
@@ -387,7 +394,7 @@ export class ContainerWorkspace implements Workspace {
         cloneUrl,
         basicAuth: basic,
         sha: ref.sha,
-        ...(ref.baseSha ? { baseSha: ref.baseSha } : {}),
+        baseSha: nonEmpty(ref.baseSha),
       }),
       { timeoutMs: DEFAULT_EXEC_TIMEOUT_MS },
       host,
@@ -395,7 +402,7 @@ export class ContainerWorkspace implements Workspace {
 
     if (checkedOut.exitCode !== 0) {
       throw new Error(
-        `Could not check out ${ref.sha} of ${repo.name}: ${checkedOut.stderr.trim() || `exit ${checkedOut.exitCode}`}`,
+        `Could not check out ${ref.sha} of ${repo.name}: ${orElse(checkedOut.stderr.trim(), `exit ${checkedOut.exitCode}`)}`,
       )
     }
 
@@ -412,7 +419,7 @@ export class ContainerWorkspace implements Workspace {
     const parent = parentDirectory(resolved)
 
     // Match memory-workspace behavior: creating a file implies creating parents.
-    if (parent) {
+    if (parent !== null) {
       await host.mkdir(parent)
     }
 
@@ -428,7 +435,7 @@ export class ContainerWorkspace implements Workspace {
     const resolved = resolvePath(path, cwd)
     const parent = parentDirectory(resolved)
 
-    if (parent) {
+    if (parent !== null) {
       await host.mkdir(parent)
     }
 
@@ -447,7 +454,7 @@ export class ContainerWorkspace implements Workspace {
     const replacements = current.split(oldText).length - 1
     const parent = parentDirectory(resolved)
 
-    if (parent) {
+    if (parent !== null) {
       await host.mkdir(parent)
     }
 
@@ -479,7 +486,7 @@ export class ContainerWorkspace implements Workspace {
 
     if (result.exitCode !== 0) {
       throw new Error(
-        result.stderr.trim() || `listFiles failed for ${root} (exit ${result.exitCode})`,
+        orElse(result.stderr.trim(), `listFiles failed for ${root} (exit ${result.exitCode})`),
       )
     }
 
@@ -503,7 +510,7 @@ export class ContainerWorkspace implements Workspace {
   }
 
   async kill(execId?: string): Promise<void> {
-    const pid = execId ? this.activePids.get(execId) : undefined
+    const pid = execId === undefined ? undefined : this.activePids.get(execId)
 
     if (pid === undefined) {
       return
@@ -522,7 +529,7 @@ export class ContainerWorkspace implements Workspace {
       host,
     )
 
-    if (existing.stdout.trim()) {
+    if (existing.stdout.trim() !== '') {
       return
     }
 
@@ -549,7 +556,7 @@ export class ContainerWorkspace implements Workspace {
 
     if (seeded.exitCode !== 0) {
       throw new Error(
-        `Could not seed the demo repository: ${seeded.stderr.trim() || `exit ${seeded.exitCode}`}`,
+        `Could not seed the demo repository: ${orElse(seeded.stderr.trim(), `exit ${seeded.exitCode}`)}`,
       )
     }
   }
@@ -584,10 +591,9 @@ export class ContainerWorkspace implements Workspace {
     timeoutSeconds: number,
     execId: string,
   ): Promise<ExecResult> {
-    const process = await host.exec(
-      timedBashArgv(command, timeoutSeconds),
-      options?.cwd ? { cwd: options.cwd } : {},
-    )
+    const process = await host.exec(timedBashArgv(command, timeoutSeconds), {
+      cwd: nonEmpty(options?.cwd),
+    })
 
     const { pid } = process
 
@@ -620,12 +626,12 @@ export class ContainerWorkspace implements Workspace {
             exitCode: output.exitCode,
           })
         },
-        (error: unknown) => {
+        (cause: unknown) => {
           clearTimeout(timer)
 
           resolve({
             stdout: '',
-            stderr: `${error instanceof Error ? error.message : String(error)}\n`,
+            stderr: `${cause instanceof Error ? cause.message : String(cause)}\n`,
             exitCode: 1,
           })
         },

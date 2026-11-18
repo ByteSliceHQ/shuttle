@@ -25,6 +25,7 @@ const comment = (commentId: number, rootId = commentId): PullComment => ({
 
 const fold = (events: readonly { type: string; payload: unknown }[]) =>
   events.reduce(
+    // SAFETY: the fixtures carry the `type` and `payload` the projection reads; the envelope fields it ignores are left out.
     (state, event) => pullThreads.reduce(state, event as never),
     pullThreads.initialState,
   )
@@ -46,6 +47,7 @@ describe('pullThreads in the browser', () => {
       { rootId: 1, resolved: true, comments: [comment(1), comment(2, 1)] },
     ])
 
+    // SAFETY: the fixture carries the `type` and `payload` the projection reads; the envelope fields it ignores are left out.
     const synced = pullThreads.reduce(built, {
       type: 'pulls.threads.synced',
       payload: { ...pull, syncedAt: 10, threads: [] },

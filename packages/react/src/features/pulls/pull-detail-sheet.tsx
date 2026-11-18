@@ -4,6 +4,7 @@ import { ExternalLink, GitPullRequest, LoaderCircle, MessageSquareReply } from '
 import { Markdown } from '../../components/markdown'
 import { Button } from '../../components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '../../components/ui/sheet'
+import { hasText } from '../../lib/text'
 import { compactRelativeTime, fullDateTime } from '../../lib/time'
 import { useNow } from '../../lib/use-now'
 import { Link, useApi, useNavigate } from '../../shuttle'
@@ -127,7 +128,7 @@ function PullDetail({
             {checkLabel(pull.checkRollup)}
           </dd>
           <dt className="text-muted-foreground">Review</dt>
-          <dd className={review ? undefined : 'text-muted-foreground'}>
+          <dd className={hasText(review) ? undefined : 'text-muted-foreground'}>
             {review ?? 'No reviews yet'}
           </dd>
           <dt className="text-muted-foreground">Changes</dt>
@@ -192,7 +193,7 @@ function PullDetail({
 
         <section>
           <h3 className="text-muted-foreground mb-1.5 text-[11px] font-medium">Description</h3>
-          {body ? (
+          {body !== '' ? (
             <div dir="auto" className="bg-card/60 rounded-lg border px-3.5 py-3">
               <Markdown text={body} className="text-[12.5px] leading-relaxed wrap-anywhere" />
             </div>
@@ -214,7 +215,7 @@ function PullDetail({
             </a>
           </Button>
           <div className="ml-auto flex items-center gap-2">
-            {pull.reviewDecision === 'changes_requested' && authoringRunId ? (
+            {pull.reviewDecision === 'changes_requested' && hasText(authoringRunId) ? (
               <Button variant="outline" size="sm" asChild>
                 <Link to={{ page: 'session', sessionId: authoringRunId }}>
                   <MessageSquareReply />
@@ -222,7 +223,7 @@ function PullDetail({
                 </Link>
               </Button>
             ) : null}
-            {pull.reviewingRunId ? (
+            {hasText(pull.reviewingRunId) ? (
               <Button variant="brand" size="sm" asChild>
                 <Link to={{ page: 'session', sessionId: pull.reviewingRunId }}>
                   <GitPullRequest />

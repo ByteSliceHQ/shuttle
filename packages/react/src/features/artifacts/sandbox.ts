@@ -8,6 +8,7 @@ import type {
   SandboxWorkspaceRepo,
 } from '@shuttle/api'
 
+import { hasText } from '../../lib/text'
 import { type ShuttleHost } from '../../shuttle'
 
 /**
@@ -59,12 +60,12 @@ export interface SandboxIdentity {
 function sandboxQuery(identity: SandboxIdentity, extra?: Record<string, string>): string {
   const params = new URLSearchParams(extra)
 
-  if (identity.folderId) {
+  if (hasText(identity.folderId)) {
     params.set('folderId', identity.folderId)
   }
 
   const query = params.toString()
-  return query ? `?${query}` : ''
+  return query !== '' ? `?${query}` : ''
 }
 
 function sandboxBase(runId: string): string {
@@ -78,15 +79,15 @@ export function sandboxTerminalUrl(
 ): string {
   const params: Record<string, string> = {}
 
-  if (options.cwd) {
+  if (hasText(options.cwd)) {
     params.cwd = options.cwd
   }
 
-  if (options.cols) {
+  if (options.cols !== undefined && options.cols !== 0) {
     params.cols = String(options.cols)
   }
 
-  if (options.rows) {
+  if (options.rows !== undefined && options.rows !== 0) {
     params.rows = String(options.rows)
   }
 
@@ -114,11 +115,11 @@ export function previewUrl(
       ? window.location
       : undefined
 
-  const host = previewHost ?? `${at?.hostname.replace(/^www\./, '') ?? ''}`
+  const host = previewHost ?? at?.hostname.replace(/^www\./, '') ?? ''
 
-  const workerPort = backend?.previewPort
+  const workerPort = hasText(backend?.previewPort)
     ? `:${backend.previewPort}`
-    : at?.port
+    : hasText(at?.port)
       ? `:${at.port}`
       : ''
 
@@ -140,7 +141,9 @@ function isLoopbackAddress(host: string): boolean {
 }
 
 export function sanitizeFolderLabel(folderId: string): string {
-  return folderId.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 48) || 'folder'
+  const label = folderId.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 48)
+
+  return label !== '' ? label : 'folder'
 }
 
 /** Extract a localhost / loopback port for sandbox preview rewriting. */
@@ -160,7 +163,7 @@ export function loopbackPreviewPort(target: string): number | null {
     return null
   }
 
-  const port = match[1] ? Number(match[1]) : 80
+  const port = hasText(match[1]) ? Number(match[1]) : 80
   return Number.isFinite(port) && port >= 1 && port <= 65535 ? port : null
 }
 
@@ -172,13 +175,13 @@ export function resolveBrowserTarget(
 ): string {
   const trimmed = target.trim()
 
-  if (!trimmed) {
+  if (trimmed === '') {
     return ''
   }
 
   const loopbackPort = loopbackPreviewPort(trimmed)
 
-  if (loopbackPort != null && folderId) {
+  if (loopbackPort !== null && hasText(folderId)) {
     return previewUrl(loopbackPort, folderId, previewHost, backend)
   }
 

@@ -45,7 +45,7 @@ export function createSubmitReviewEffect(env: ShuttleEnv, storage?: DurableObjec
 
       if (!repo) {
         return failed(
-          input.fullName
+          input.fullName !== ''
             ? `${input.fullName} is not linked to this session, so the review cannot be sent.`
             : 'The review does not say which pull request it is for.',
         )
@@ -59,7 +59,9 @@ export function createSubmitReviewEffect(env: ShuttleEnv, storage?: DurableObjec
         // place makes it refuse the whole review, so those are moved into the body.
         const [files, commitId] = await Promise.all([
           listPullFiles(env, repo, input.number),
-          input.commitId || getPullRequest(env, repo, input.number).then((pull) => pull.headSha),
+          input.commitId !== ''
+            ? input.commitId
+            : getPullRequest(env, repo, input.number).then((pull) => pull.headSha),
         ])
 
         const { anchored, unanchored } = partitionByAnchor(input.comments, files)
@@ -94,25 +96,34 @@ export function createSubmitReviewEffect(env: ShuttleEnv, storage?: DurableObjec
             ? ('changes_requested' as const)
             : ('commented' as const)
 
-      const signals = recordReview({
+      const reviewedAt = {
         fullName: input.fullName,
         number: input.number,
         runId: ctx.runId,
-        ...(input.threadId ? { threadId: input.threadId } : {}),
         verdict: mappedVerdict,
         updatedAt: Date.now(),
-      })
+      }
+
+      const signals = recordReview(
+        input.threadId !== undefined && input.threadId !== ''
+          ? { ...reviewedAt, threadId: input.threadId }
+          : reviewedAt,
+      )
 
       await pullsStub.signal(Array.isArray(signals) ? signals : [signals])
 
+      const submitted = {
+        fullName: input.fullName,
+        number: input.number,
+        verdict: input.verdict,
+        commentCount: input.comments.length - unanchoredCount,
+      }
+
       return [
-        shuttleModule.input('review.submitted', {
-          fullName: input.fullName,
-          number: input.number,
-          verdict: input.verdict,
-          commentCount: input.comments.length - unanchoredCount,
-          ...(unanchoredCount > 0 ? { unanchoredCount } : {}),
-        }),
+        shuttleModule.input(
+          'review.submitted',
+          unanchoredCount > 0 ? { ...submitted, unanchoredCount } : submitted,
+        ),
       ]
     },
   })

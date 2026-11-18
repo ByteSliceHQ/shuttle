@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
+import { z } from 'zod'
+
 import {
   codeStorageClient,
   codeStorageConfigured,
@@ -20,14 +22,18 @@ async function testKey(): Promise<string> {
     'verify',
   ])
 
-  const der = Buffer.from(await crypto.subtle.exportKey('pkcs8', pair.privateKey))
-  const body = der.toString('base64').replaceAll(/(.{64})/g, '$1\n')
+  const der = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey))
+  const body = btoa(String.fromCodePoint(...der)).replaceAll(/(.{64})/g, '$1\n')
 
   return `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----\n`
 }
 
-function claims(token: string): Record<string, unknown> {
-  return JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8'))
+const ClaimsSchema = z.looseObject({ exp: z.number(), iat: z.number() })
+
+function claims(token: string) {
+  const payload = (token.split('.')[1] ?? '').replaceAll('-', '+').replaceAll('_', '/')
+
+  return ClaimsSchema.parse(JSON.parse(atob(payload)))
 }
 
 const ORG = 'AQz2U7YhUr93mdvwWRF0xxKRNthpC0Gb'
@@ -83,7 +89,7 @@ describe('code storage tokens', () => {
     const token = claims(await readToken(client, 'org-1/a--b', 'sandbox-clone'))
 
     expect(token).toMatchObject({ iss: 'acme', repo: 'org-1/a--b', scopes: ['git:read'] })
-    expect(Number(token.exp) - Number(token.iat)).toBeLessThanOrEqual(TOKEN_TTL_SECONDS)
+    expect(token.exp - token.iat).toBeLessThanOrEqual(TOKEN_TTL_SECONDS)
   })
 
   test('a session token is confined to its repository and its branches', async () => {
@@ -102,6 +108,6 @@ describe('code storage tokens', () => {
       ],
     })
 
-    expect(Number(token.exp) - Number(token.iat)).toBeLessThanOrEqual(TOKEN_TTL_SECONDS)
+    expect(token.exp - token.iat).toBeLessThanOrEqual(TOKEN_TTL_SECONDS)
   })
 })

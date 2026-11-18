@@ -2,6 +2,7 @@ import type { AutoReviewMode } from '@shuttle/api'
 import { defineProjection } from '@swirls/looms/core'
 
 import { useTenant } from '../../shuttle'
+import { isNamespaceEvent } from '../events/namespace-events'
 import type { PullsEvent } from '../events/shuttle-events'
 import type { PublishedPull, PullStackPosition } from '../sessions/session-feed'
 
@@ -51,23 +52,21 @@ export function withLinkedSession(
   linked: readonly LinkedSession[],
   next: LinkedSession,
 ): readonly LinkedSession[] {
-  const index = linked.findIndex(
+  const current = linked.find(
     (session) => session.runId === next.runId && session.role === next.role,
   )
 
-  if (index === -1) {
+  if (current === undefined) {
     return [...linked, next]
   }
 
-  const current = linked[index]!
+  const threadId = next.threadId
 
-  if (!next.threadId || current.threadId === next.threadId) {
+  if (threadId === undefined || threadId === '' || current.threadId === threadId) {
     return linked
   }
 
-  return linked.map((session, position) =>
-    position === index ? { ...session, threadId: next.threadId } : session,
-  )
+  return linked.map((session) => (session === current ? { ...session, threadId } : session))
 }
 
 export interface PullInboxState {
@@ -96,6 +95,10 @@ export const pullInbox = defineProjection<PullInboxState, PullsEvent>({
   name: 'pullInbox',
   initialState: emptyPullInbox,
   reduce(state, event): PullInboxState {
+    if (!isNamespaceEvent(event, 'pulls')) {
+      return state
+    }
+
     switch (event.type) {
       case 'pulls.pull.upserted': {
         const payload = event.payload
@@ -221,7 +224,7 @@ export const pullInbox = defineProjection<PullInboxState, PullsEvent>({
         const linkedSessions = withLinkedSession(existing.linkedSessions, {
           runId: payload.runId,
           role: payload.role,
-          ...(payload.threadId ? { threadId: payload.threadId } : {}),
+          threadId: payload.threadId === '' ? undefined : payload.threadId,
         })
 
         if (linkedSessions === existing.linkedSessions) {
@@ -268,7 +271,10 @@ export const pullInbox = defineProjection<PullInboxState, PullsEvent>({
         }
       }
 
-      default:
+      case 'pulls.comment.upserted':
+      case 'pulls.comment.removed':
+      case 'pulls.thread.resolution':
+      case 'pulls.threads.synced':
         return state
     }
   },
@@ -283,7 +289,7 @@ export type PullLaneId =
   | 'opened_by_shuttle'
 
 export function laneForPull(pull: PullInboxSummary): PullLaneId {
-  if (pull.reviewingRunId) {
+  if (pull.reviewingRunId !== null) {
     return 'reviewing'
   }
 
@@ -374,14 +380,18 @@ export function stacksOf(pulls: readonly PullInboxSummary[]): readonly PullStack
       claimed.add(pullKey(layer.fullName, layer.number))
     }
 
-    const first = ordered[0]!
+    const first = ordered[0]
+
+    if (first === undefined) {
+      continue
+    }
 
     stacks.push({
       key,
       fullName: first.fullName,
       native: true,
       number: first.stack?.number ?? null,
-      baseRef: ordered[0]?.baseRef ?? 'main',
+      baseRef: first.baseRef,
       layers: ordered,
     })
   }
@@ -421,15 +431,12 @@ export function stacksOf(pulls: readonly PullInboxSummary[]): readonly PullStack
       const chain: PullInboxSummary[] = [root]
       let tip = root
 
-      while (true) {
-        const next = children.get(tip.headRef)?.[0]
+      let next = children.get(tip.headRef)?.[0]
 
-        if (!next || claimed.has(pullKey(next.fullName, next.number))) {
-          break
-        }
-
+      while (next !== undefined && !claimed.has(pullKey(next.fullName, next.number))) {
         chain.push(next)
         tip = next
+        next = children.get(tip.headRef)?.[0]
       }
 
       if (chain.length < 2) {
@@ -445,7 +452,7 @@ export function stacksOf(pulls: readonly PullInboxSummary[]): readonly PullStack
         fullName,
         native: false,
         number: null,
-        baseRef: chain[0]!.baseRef,
+        baseRef: root.baseRef,
         layers: chain,
       })
     }
@@ -501,7 +508,7 @@ export function groupPullsByLane(
   for (const pull of remaining) {
     const runId = authorRunId(pull)
 
-    if (runId) {
+    if (runId !== undefined && runId !== '') {
       totals.set(runId, (totals.get(runId) ?? 0) + 1)
 
       const key = `${laneForPull(pull)}:${runId}`
@@ -515,9 +522,9 @@ export function groupPullsByLane(
     const lane = laneForPull(pull)
     const runId = authorRunId(pull)
     const key = `${lane}:${runId}`
-    const group = runId ? byLaneSession.get(key) : undefined
+    const group = runId === undefined || runId === '' ? undefined : byLaneSession.get(key)
 
-    if (!runId || !group || group.length < 2) {
+    if (runId === undefined || runId === '' || group === undefined || group.length < 2) {
       lanes.get(lane)?.push({ kind: 'pull', pull })
       continue
     }
@@ -555,7 +562,9 @@ export function shuttleStackPosition(headRef: string): PullStackPosition | undef
   const layered = /^shuttle\/[^/]+-stack([1-9]\d*)?\/[^/]+\/([1-9]\d*)$/.exec(headRef)
 
   if (layered) {
-    return { id: layered[1] ? Number(layered[1]) : 1, layer: Number(layered[2]) }
+    const stackId = layered[1]
+
+    return { id: stackId === undefined ? 1 : Number(stackId), layer: Number(layered[2]) }
   }
 
   return /^shuttle\/[^/]+\/[^/]+$/.test(headRef) ? { id: 1, layer: 1 } : undefined
@@ -612,8 +621,8 @@ export function authoredPullsForSession(inbox: PullInboxState, runId: string): P
         number: pull.number,
         url: pull.url,
         draft: pull.draft,
-        ...(author?.threadId ? { threadId: author.threadId } : {}),
-        ...(stack ? { stack } : {}),
+        threadId: author?.threadId === '' ? undefined : author?.threadId,
+        stack,
       }
     })
 }

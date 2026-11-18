@@ -26,7 +26,7 @@ function event(
 }
 
 function fold(events: readonly SessionEvent[]) {
-  return events.reduce(sessionFeed.reduce, sessionFeed.initialState)
+  return events.reduce((state, next) => sessionFeed.reduce(state, next), sessionFeed.initialState)
 }
 
 /** The feed in reading order: message ids for people, text for agents, kinds for the rest. */
@@ -435,48 +435,47 @@ describe('session feed', () => {
   })
 })
 
+const turnStarted = (turn: number) =>
+  event('runtime.effect.attempt.started', {
+    effectId: `thr_conductor:llm_turn_${turn}`,
+    attempt: 1,
+  })
+
+const steer = (messageId: string, interrupt = false) =>
+  event(
+    'agent.steered',
+    { turn: 0, messageId, message: { role: 'user', content: messageId }, interrupt },
+    'thr_conductor',
+  )
+
+const said = (messageId: string) => event('shuttle.user.said', { messageId, text: messageId })
+
+// A turn is recorded in one go when it ends, after anything sent while it ran.
+const turnRecorded = (turn: number, text: string) => [
+  event(
+    'shuttle.vendor.tool_started',
+    { turn, toolCall: { id: `call_${turn}`, name: 'bash', arguments: {} } },
+    'thr_conductor',
+  ),
+  event(
+    'shuttle.vendor.tool_finished',
+    { turn, toolCallId: `call_${turn}`, result: 'ok' },
+    'thr_conductor',
+  ),
+  event('agent.message', { turn, message: { role: 'assistant', content: text } }, 'thr_conductor'),
+  event('agent.turn.settled', { turn }, 'thr_conductor'),
+]
+
 describe('messages sent while an agent is mid-turn', () => {
-  const turnStarted = (turn: number) =>
-    event('runtime.effect.attempt.started', {
-      effectId: `thr_conductor:llm_turn_${turn}`,
-      attempt: 1,
-    })
-
-  const steer = (messageId: string, interrupt = false) =>
-    event(
-      'agent.steered',
-      { turn: 0, messageId, message: { role: 'user', content: messageId }, interrupt },
-      'thr_conductor',
-    )
-
-  const said = (messageId: string) => event('shuttle.user.said', { messageId, text: messageId })
-
-  // A turn is recorded in one go when it ends, after anything sent while it ran.
-  const turnRecorded = (turn: number, text: string) => [
-    event(
-      'shuttle.vendor.tool_started',
-      { turn, toolCall: { id: `call_${turn}`, name: 'bash', arguments: {} } },
-      'thr_conductor',
-    ),
-    event(
-      'shuttle.vendor.tool_finished',
-      { turn, toolCallId: `call_${turn}`, result: 'ok' },
-      'thr_conductor',
-    ),
-    event(
-      'agent.message',
-      { turn, message: { role: 'assistant', content: text } },
-      'thr_conductor',
-    ),
-    event('agent.turn.settled', { turn }, 'thr_conductor'),
-  ]
-
   test('wait for the turn, then follow what it did', () => {
     const running = fold([said('m1'), steer('m1'), turnStarted(1), said('m2'), steer('m2')])
 
     expect(running.queued).toEqual({ m2: 'thr_conductor' })
 
-    const settled = [...turnRecorded(1, 'Server is up.')].reduce(sessionFeed.reduce, running)
+    const settled = [...turnRecorded(1, 'Server is up.')].reduce(
+      (state, next) => sessionFeed.reduce(state, next),
+      running,
+    )
 
     expect(order(settled)).toEqual(['m1', 'tools', 'Server is up.', 'm2'])
     expect(settled.queued).toEqual({})
@@ -530,7 +529,7 @@ describe('streaming turns', () => {
       event('agent.turn.text_delta', { turn: 1, delta: text }, 'thr_narrator')
 
     const streamed = [think('Hmm'), think('…'), delta('Hel'), delta('lo')].reduce(
-      streamingTurns.reduce,
+      (state, next) => streamingTurns.reduce(state, next),
       streamingTurns.initialState,
     )
 

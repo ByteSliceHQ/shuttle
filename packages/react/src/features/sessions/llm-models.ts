@@ -166,7 +166,7 @@ export function getOpenRouterModel(modelId: string): OpenRouterModel | undefined
 export function readStoredLlmModel(): OpenRouterModelId {
   try {
     const stored = localStorage.getItem(STORAGE_KEY)?.trim()
-    return stored && isOpenRouterModelId(stored) ? stored : DEFAULT_OPENROUTER_MODEL
+    return stored !== undefined && isOpenRouterModelId(stored) ? stored : DEFAULT_OPENROUTER_MODEL
   } catch {
     return DEFAULT_OPENROUTER_MODEL
   }

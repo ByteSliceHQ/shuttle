@@ -9,9 +9,9 @@ function bucketFor(width: number, thresholds: readonly number[]): number {
  * when the width crosses a threshold, not on every pixel of a resize. Until the element
  * mounts it reports the widest bucket.
  */
-export function useWidthBucket<T extends HTMLElement>(
+export function useWidthBucket(
   thresholds: readonly number[],
-): [(node: T | null) => void, number] {
+): [(node: HTMLElement | null) => void, number] {
   const [bucket, setBucket] = useState(thresholds.length)
 
   const [observer] = useState(() =>
@@ -20,17 +20,17 @@ export function useWidthBucket<T extends HTMLElement>(
       : new ResizeObserver((entries) => {
           const entry = entries.at(-1)
 
-          if (entry) {
+          if (entry !== undefined) {
             setBucket(bucketFor(entry.contentRect.width, thresholds))
           }
         }),
   )
 
   const ref = useCallback(
-    (node: T | null) => {
+    (node: HTMLElement | null) => {
       observer?.disconnect()
 
-      if (node) {
+      if (node !== null) {
         setBucket(bucketFor(node.getBoundingClientRect().width, thresholds))
         observer?.observe(node)
       }

@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 /** What the page and the app say to each other. The page only ever sees `preload.ts`'s bridge. */
 export const CHANNELS = {
   /** Sync. Answers with `DesktopInfo`. */
@@ -32,8 +34,8 @@ export interface DesktopNotice {
  * A place inside the app, as a path the page's router understands. Anything else is refused, so
  * a link or a notification can never send the window to another site.
  */
-export function appPath(value: unknown): string | null {
-  return typeof value === 'string' && /^\/(?!\/)[A-Za-z0-9\-._~%!$&'()*+,;=:@/?]*$/.test(value)
+export function appPath(value: string | undefined): string | null {
+  return value !== undefined && /^\/(?!\/)[A-Za-z0-9\-._~%!$&'()*+,;=:@/?]*$/.test(value)
     ? value
     : null
 }
@@ -52,6 +54,19 @@ export interface DesktopInfo {
   readonly deviceName: string
   readonly platform: string
 }
+
+export const desktopInfoSchema: z.ZodType<DesktopInfo> = z.object({
+  deviceId: z.string(),
+  deviceName: z.string(),
+  platform: z.string(),
+})
+
+/** What the page sends with `notify`. A `path` that is not a string is dropped, not refused. */
+export const desktopNoticeSchema: z.ZodType<DesktopNotice> = z.object({
+  title: z.string(),
+  body: z.string(),
+  path: z.string().optional().catch(undefined),
+})
 
 export interface RunnerStatus {
   readonly status:
@@ -82,3 +97,17 @@ export interface UpdateStatus {
   readonly progress?: number
   readonly message?: string
 }
+
+export const runnerStatusSchema: z.ZodType<RunnerStatus> = z.object({
+  status: z.enum([
+    'starting',
+    'preparing',
+    'connecting',
+    'online',
+    'offline',
+    'unauthorized',
+    'error',
+  ]),
+  message: z.string().optional(),
+  backend: z.object({ id: z.string(), label: z.string(), isolation: z.string() }).optional(),
+})

@@ -31,9 +31,13 @@ function unescapeHtml(text: string): string {
     .replaceAll('&amp;', '&')
 }
 
+function isLang(lang: string): lang is (typeof langs)[number] {
+  return langs.some((known) => known === lang)
+}
+
 export function highlight(html: string): string {
   return html.replace(CODE_BLOCK, (_, lang: string, code: string) => {
-    if (!(langs as readonly string[]).includes(lang)) {
+    if (!isLang(lang)) {
       throw new Error(`No highlighting loaded for "${lang}". Add it to langs in build-pages.ts.`)
     }
 

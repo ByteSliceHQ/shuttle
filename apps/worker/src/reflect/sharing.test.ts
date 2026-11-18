@@ -9,6 +9,7 @@ const session = scopedRunId('orgA0000000000000000000000000000', 'session_1')
 
 function envWith(access: SessionAccess | null) {
   return fakeEnv({
+    // SAFETY: `mayShareLessons` only calls `getByName(...).getAccess()` on the run namespace.
     LOOMS_RUN: { getByName: () => ({ getAccess: async () => access }) as never },
   })
 }

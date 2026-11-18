@@ -1,5 +1,6 @@
 import { parseComparison, type SandboxCommit } from '@shuttle/api'
 
+import { hasText } from '../../lib/text'
 import type { PullInboxState, PullInboxSummary } from '../pulls/pulls'
 import type { WorkspaceRepo } from './sandbox'
 
@@ -17,20 +18,26 @@ export interface RunPull {
   readonly role: 'author' | 'reviewer'
 }
 
+/** The first of several comparisons that tells two things apart, for sorting by more than one key. */
+function firstDifference(...differences: readonly number[]): number {
+  return differences.find((difference) => difference !== 0) ?? 0
+}
+
 /** Every pull request linked to the session: open ones first, then by repository and stack. */
 export function runPulls(inbox: PullInboxState, runId: string): RunPull[] {
   return Object.values(inbox.pulls)
     .flatMap((pull) => {
       const link = pull.linkedSessions.find((session) => session.runId === runId)
 
-      return link ? [{ pull, role: link.role }] : []
+      return link !== undefined ? [{ pull, role: link.role }] : []
     })
-    .toSorted(
-      (a, b) =>
-        Number(b.pull.state === 'open') - Number(a.pull.state === 'open') ||
-        a.pull.fullName.localeCompare(b.pull.fullName) ||
-        (a.pull.stack?.position ?? 0) - (b.pull.stack?.position ?? 0) ||
+    .toSorted((a, b) =>
+      firstDifference(
+        Number(b.pull.state === 'open') - Number(a.pull.state === 'open'),
+        a.pull.fullName.localeCompare(b.pull.fullName),
+        (a.pull.stack?.position ?? 0) - (b.pull.stack?.position ?? 0),
         a.pull.number - b.pull.number,
+      ),
     )
 }
 
@@ -70,7 +77,7 @@ export function pullShown(
     (run) =>
       run.role === 'author' &&
       run.pull.state === 'open' &&
-      repoOfPull([repo], run.pull) &&
+      repoOfPull([repo], run.pull) !== undefined &&
       pullComparison(run, repo) === against,
   )
 }
@@ -107,14 +114,14 @@ export function pullSync(
 
   const tip = tipOf(repo, pull.headRef)
 
-  if (!tip) {
+  if (tip === undefined) {
     return null
   }
 
   const published = repo.published?.find((entry) => entry.branch === pull.headRef)
 
   const same =
-    published && tip.tree
+    published !== undefined && tip.tree !== undefined && tip.tree !== ''
       ? published.tree === tip.tree
       : tip.sha === pull.headSha ||
         pull.headSha.startsWith(tip.sha) ||
@@ -124,7 +131,7 @@ export function pullSync(
     return 'unpushed'
   }
 
-  return repo.head.branch === pull.headRef && repo.dirty ? 'uncommitted' : 'pushed'
+  return repo.head.branch === pull.headRef && repo.dirty === true ? 'uncommitted' : 'pushed'
 }
 
 /** One stop on the line from where the changes start to where they end. */
@@ -157,15 +164,15 @@ export function railSpan(
 ): { readonly from: number; readonly to: number } | null {
   const comparison = repo.comparison
 
-  if (comparison && !comparison.baseSha) {
+  if (comparison !== undefined && !hasText(comparison.baseSha)) {
     return null
   }
 
   const indexOf = (sha: string | null | undefined) =>
-    sha ? points.findIndex((point) => 'sha' in point && point.sha === sha) : -1
+    hasText(sha) ? points.findIndex((point) => 'sha' in point && point.sha === sha) : -1
 
   const from = Math.max(0, indexOf(comparison?.baseSha))
-  const to = comparison?.headSha ? indexOf(comparison.headSha) : points.length - 1
+  const to = hasText(comparison?.headSha) ? indexOf(comparison.headSha) : points.length - 1
 
   return to > from ? { from, to } : null
 }
@@ -182,7 +189,7 @@ export function railBrackets(
     // The branch checked out runs on to the working tree.
     return sha === null
       ? points.length - 1
-      : sha
+      : hasText(sha)
         ? points.findIndex((point) => 'sha' in point && point.sha === sha)
         : -1
   }
@@ -208,7 +215,7 @@ export function comparisonTitle(
   const parsed = parseComparison(against)
   const shown = pullShown(against, pulls, repo)
 
-  if (shown) {
+  if (shown !== undefined) {
     return `PR #${shown.pull.number}`
   }
 
@@ -219,12 +226,13 @@ export function comparisonTitle(
     case 'ref': {
       const commit = repo.commits?.find((item) => item.sha.startsWith(parsed.ref))
 
-      return commit ? `Since ${shortSha(commit.sha)}` : `Compared with ${parsed.ref}`
+      return commit !== undefined ? `Since ${shortSha(commit.sha)}` : `Compared with ${parsed.ref}`
     }
 
     case 'range':
       return `${parsed.head} from ${parsed.base}`
-    default:
+    case 'session':
+    case undefined:
       return 'All changes in this session'
   }
 }
@@ -261,5 +269,5 @@ export function shortRef(name: string): string {
 
 /** A commit as people read it: its first seven characters. */
 export function shortSha(sha: string | null | undefined): string {
-  return sha ? sha.slice(0, 7) : ''
+  return hasText(sha) ? sha.slice(0, 7) : ''
 }

@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 /**
  * Who may open a session. The record lives in the session's own Durable Object storage, so the
  * check that guards a request reads it from the object the request is about to reach.
@@ -33,55 +35,58 @@ export interface Actor {
   readonly email: string
 }
 
-type AccessStorage = Pick<DurableObjectStorage, 'get' | 'put'>
-
-function isUserId(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= 128
+export interface AccessStorage {
+  get<T>(key: string): Promise<T | undefined>
+  put(key: string, value: SessionAccess): Promise<void>
 }
 
-export function parseSessionAccess(value: unknown): SessionAccess | null {
-  if (!value || typeof value !== 'object') {
-    return null
-  }
+const UserIdSchema = z.string().min(1).max(128)
 
-  const record = value as { ownerId?: unknown; memberIds?: unknown; visibility?: unknown }
+/** Decodes a stored or submitted access record into a normalized `SessionAccess`. */
+export const SessionAccessSchema = z
+  .object({
+    ownerId: z.union([z.null(), UserIdSchema]),
+    // Entries that are not valid person ids are dropped rather than failing the whole record.
+    memberIds: z.array(z.unknown()).transform((entries) =>
+      entries.flatMap((entry) => {
+        const id = UserIdSchema.safeParse(entry)
 
-  const ownerId =
-    record.ownerId === null ? null : isUserId(record.ownerId) ? record.ownerId : undefined
-
-  if (ownerId === undefined || !Array.isArray(record.memberIds)) {
-    return null
-  }
-
-  return {
+        return id.success ? [id.data] : []
+      }),
+    ),
+    visibility: z.unknown().optional(),
+  })
+  .transform(({ ownerId, memberIds, visibility }): SessionAccess => ({
     ownerId,
-    memberIds: [...new Set(record.memberIds.filter(isUserId))].filter((id) => id !== ownerId),
+    memberIds: [...new Set(memberIds)].filter((id) => id !== ownerId),
     // Without an owner there is no one a session could be private to.
-    visibility: ownerId !== null && record.visibility !== 'public' ? 'private' : 'public',
-  }
-}
+    visibility: ownerId !== null && visibility !== 'public' ? 'private' : 'public',
+  }))
 
 /** Whether everyone in the organization can open the session. */
 export function isPublicSession(access: SessionAccess | null): boolean {
-  return !access || access.visibility === 'public'
+  return access === null || access.visibility === 'public'
 }
 
 export async function readSessionAccess(storage: AccessStorage): Promise<SessionAccess | null> {
-  return parseSessionAccess(await storage.get(ACCESS_STORAGE_KEY))
+  const parsed = SessionAccessSchema.safeParse(await storage.get(ACCESS_STORAGE_KEY))
+
+  return parsed.success ? parsed.data : null
 }
 
 export async function writeSessionAccess(
   storage: AccessStorage,
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- SAFETY: this is the validation boundary for access values; `SessionAccessSchema` decodes it on the next line before use, and the tests feed it malformed input on purpose.
   value: unknown,
 ): Promise<SessionAccess> {
-  const access = parseSessionAccess(value)
+  const parsed = SessionAccessSchema.safeParse(value)
 
-  if (!access) {
+  if (!parsed.success) {
     throw new Error('invalid session access')
   }
 
-  await storage.put(ACCESS_STORAGE_KEY, access)
-  return access
+  await storage.put(ACCESS_STORAGE_KEY, parsed.data)
+  return parsed.data
 }
 
 export function isOrgAdmin(actor: Pick<Actor, 'role'>): boolean {
@@ -93,7 +98,7 @@ export function canOpenSession(
   access: SessionAccess | null,
   actor: Pick<Actor, 'userId'>,
 ): boolean {
-  if (!access || isPublicSession(access)) {
+  if (access === null || isPublicSession(access)) {
     return true
   }
 

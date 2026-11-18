@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 import {
   BRIDGE_EVENTS_FILE,
   BRIDGE_INPUT_FILE,
@@ -19,6 +21,23 @@ import {
  * that file by byte offset, so a vendor turn that lasts many minutes survives the Worker or its
  * Durable Objects restarting in the middle: the next read picks up where the last one stopped.
  */
+
+const signInFiles = z.record(z.string(), z.string())
+
+const modelList = z.object({
+  models: z
+    .array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+        description: z.string(),
+        efforts: z.array(z.string()),
+        defaultEffort: z.string().optional(),
+        isDefault: z.boolean().optional(),
+      }),
+    )
+    .optional(),
+})
 
 /** The part of a Durable Object container that agent runs need. */
 export interface AgentRunContainer {
@@ -144,7 +163,7 @@ export async function startAgentRun(
     container,
     ['bash', '-c', script, 'bash', dir, ...bridgeArgv(options, input.mode, '--dir', dir)],
     {
-      ...(input.env ? { env: { ...input.env } } : {}),
+      env: input.env === undefined ? undefined : { ...input.env },
       stdin: textStream(JSON.stringify(input.request)),
     },
   )
@@ -266,7 +285,7 @@ export async function collectAgentFiles(
     throw new Error(`could not read agent sign-in files: ${collected.stderr.trim()}`)
   }
 
-  return JSON.parse(new TextDecoder().decode(collected.stdout)) as Record<string, string>
+  return signInFiles.parse(JSON.parse(new TextDecoder().decode(collected.stdout)))
 }
 
 /**
@@ -284,7 +303,7 @@ export async function listAgentModels(
     throw new Error(`could not list ${harness} models: ${listed.stderr.trim()}`)
   }
 
-  const parsed = JSON.parse(new TextDecoder().decode(listed.stdout)) as { models?: BridgeModel[] }
+  const parsed = modelList.parse(JSON.parse(new TextDecoder().decode(listed.stdout)))
 
   return parsed.models ?? []
 }

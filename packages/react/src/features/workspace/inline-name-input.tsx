@@ -31,7 +31,7 @@ export function InlineNameInput({
     settled.current = true
     const trimmed = value.replace(/\s+/g, ' ').trim()
 
-    if (trimmed && (commitUnchanged || trimmed !== initialValue)) {
+    if (trimmed !== '' && (commitUnchanged || trimmed !== initialValue)) {
       onCommit(trimmed)
     } else {
       onCancel()

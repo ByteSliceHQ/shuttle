@@ -88,12 +88,10 @@ export function ContextUsage({ runId, modelId }: { runId: string; modelId: OpenR
       openTimerRef.current = null
     }
 
-    if (closeTimerRef.current === null) {
-      closeTimerRef.current = setTimeout(() => {
-        closeTimerRef.current = null
-        setOpen(false)
-      }, HOVER_CLOSE_DELAY)
-    }
+    closeTimerRef.current ??= setTimeout(() => {
+      closeTimerRef.current = null
+      setOpen(false)
+    }, HOVER_CLOSE_DELAY)
   }
 
   return (

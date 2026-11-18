@@ -17,6 +17,14 @@ import { fileURLToPath } from 'node:url'
 
 import { Daytona } from '@daytona/sdk'
 
+import { parseJson, type JsonValue } from '../bridge/lsp/json'
+import {
+  decodeDiagnosticsReply,
+  decodeStatusReply,
+  type LspDiagnosticsReply,
+  type LspStatusReply,
+} from '../bridge/lsp/protocol'
+
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const source = join(root, 'bridge/lsp')
 
@@ -35,7 +43,7 @@ const sandbox = await daytona.create({
   name,
   labels: { app: 'shuttle', purpose: 'lsp-smoke' },
   autoStopInterval: 15,
-  ...(snapshot ? { snapshot } : {}),
+  snapshot: snapshot === '' ? undefined : snapshot,
 })
 
 let failed = false
@@ -57,17 +65,34 @@ async function run(label: string, command: string, timeoutSeconds = 120): Promis
   return output
 }
 
-function expect(label: string, output: string, check: (reply: any) => boolean): void {
-  let ok = false
-
-  try {
-    ok = check(JSON.parse(output))
-  } catch {
-    // Not a reply.
-  }
+/** Passes when `output` decodes to a reply and `check` accepts it. */
+function expectReply<Reply>(
+  label: string,
+  output: string,
+  decode: (value: JsonValue | undefined) => Reply | undefined,
+  check: (reply: Reply) => boolean,
+): void {
+  const reply = decode(parseJson(output))
+  const ok = reply !== undefined && check(reply)
 
   failed ||= !ok
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}`)
+}
+
+function expect(
+  label: string,
+  output: string,
+  check: (reply: LspDiagnosticsReply) => boolean,
+): void {
+  expectReply(label, output, decodeDiagnosticsReply, check)
+}
+
+function expectStatus(
+  label: string,
+  output: string,
+  check: (reply: LspStatusReply) => boolean,
+): void {
+  expectReply(label, output, decodeStatusReply, check)
 }
 
 try {
@@ -94,7 +119,7 @@ try {
     }
   }
 
-  const files: Record<string, string> = {
+  const files = {
     'package.json': JSON.stringify({ name: 'smoke', private: true, type: 'module' }),
     'tsconfig.json': JSON.stringify({
       compilerOptions: { strict: true, noEmit: true },
@@ -105,7 +130,7 @@ try {
   }
 
   for (const [path, content] of Object.entries(files)) {
-    await sandbox.fs.uploadFile(Buffer.from(content), `${project}/${path}`)
+    await sandbox.fs.uploadFileStream(new TextEncoder().encode(content), `${project}/${path}`)
   }
 
   if (baked) {
@@ -128,7 +153,7 @@ try {
     (reply) =>
       reply.status === 'ok' &&
       reply.diagnostics.length === 1 &&
-      reply.diagnostics[0].code === '2322',
+      reply.diagnostics[0]?.code === '2322',
   )
 
   expect(
@@ -137,8 +162,10 @@ try {
     (reply) => reply.status === 'ok' && reply.diagnostics.length === 1,
   )
 
-  await sandbox.fs.uploadFile(
-    Buffer.from('import { add } from "./math"\n\nexport const total: number = add(1, 2)\n'),
+  await sandbox.fs.uploadFileStream(
+    new TextEncoder().encode(
+      'import { add } from "./math"\n\nexport const total: number = add(1, 2)\n',
+    ),
     `${project}/src/main.ts`,
   )
 
@@ -159,12 +186,14 @@ try {
     (reply) =>
       reply.status === 'ok' &&
       reply.diagnostics.length === 1 &&
-      reply.diagnostics[0].code === '2322',
+      reply.diagnostics[0]?.code === '2322',
   )
 
   // An unsaved edit, as the editor sends one: the text arrives in a file that is read once.
-  await sandbox.fs.uploadFile(
-    Buffer.from('import { add } from "./math"\n\nexport const total: string = add(1, 2)\n'),
+  await sandbox.fs.uploadFileStream(
+    new TextEncoder().encode(
+      'import { add } from "./math"\n\nexport const total: string = add(1, 2)\n',
+    ),
     '/tmp/shuttle-lsp-draft-smoke',
   )
 
@@ -174,8 +203,7 @@ try {
       'diagnostics (unsaved edit)',
       `${diagnose('src/main.ts')} --text-file /tmp/shuttle-lsp-draft-smoke; test -e /tmp/shuttle-lsp-draft-smoke && echo 'draft file left behind'`,
     ),
-    (reply) =>
-      reply.status === 'ok' && reply.diagnostics.length === 0 && Array.isArray(reply.diagnostics),
+    (reply) => reply.status === 'ok' && reply.diagnostics.length === 0,
   )
 
   expect(
@@ -184,8 +212,8 @@ try {
     (reply) =>
       reply.status === 'ok' &&
       reply.diagnostics.length === 1 &&
-      reply.diagnostics[0].endLine === 3 &&
-      reply.diagnostics[0].endColumn > reply.diagnostics[0].column,
+      reply.diagnostics[0]?.endLine === 3 &&
+      (reply.diagnostics[0]?.endColumn ?? 0) > (reply.diagnostics[0]?.column ?? 0),
   )
 
   expect(
@@ -194,10 +222,10 @@ try {
     (reply) => reply.status === 'unsupported',
   )
 
-  expect(
+  expectStatus(
     'one daemon, one server',
     await run('status', `${cli} status`),
-    (reply) => reply.servers.length === 1 && reply.servers[0].root === project,
+    (reply) => reply.servers.length === 1 && reply.servers[0]?.root === project,
   )
 
   // The image has no `ps`, so running processes are read from /proc.

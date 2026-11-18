@@ -54,7 +54,7 @@ export function stallGuard(outer: AbortSignal | undefined, silentMs = MODEL_STAL
     controller.abort(outer?.reason)
   }
 
-  if (outer?.aborted) {
+  if (outer?.aborted === true) {
     onOuterAbort()
   } else {
     outer?.addEventListener('abort', onOuterAbort, { once: true })

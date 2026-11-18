@@ -88,8 +88,13 @@ export function bridgeDigest(dir: string): string {
   return hash.digest('hex').slice(0, 16)
 }
 
+export interface StagedBridge {
+  readonly path: string
+  readonly discard: () => void
+}
+
 /** Copies the bridge's files to a fresh folder and hands back its path and a way to remove it. */
-export function stageBridge(dir: string): { readonly path: string; readonly discard: () => void } {
+export function stageBridge(dir: string): StagedBridge {
   const path = mkdtempSync(join(tmpdir(), 'shuttle-bridge-'))
 
   for (const name of bridgeFiles(dir)) {
@@ -110,5 +115,9 @@ export function findBridge(): string | null {
     resolve(import.meta.dir, '../../worker/bridge'),
   ]
 
-  return candidates.find((path) => path && existsSync(join(path, 'main.ts'))) ?? null
+  return (
+    candidates.find(
+      (path) => path !== undefined && path !== '' && existsSync(join(path, 'main.ts')),
+    ) ?? null
+  )
 }

@@ -49,6 +49,13 @@ const AppSearch = z.object({
     .catch(undefined),
 })
 
+/** Sends the person to sign in. `throw: true` makes `redirect` throw, which this declares to the compiler. */
+function toSignIn(invite: string | undefined): never {
+  redirect({ to: '/sign-in', search: { invite }, throw: true })
+
+  throw new Error('redirect returned without throwing')
+}
+
 /**
  * Everything behind the sign-in. Its `beforeLoad` settles who is signed in before any page
  * under it loads, so every loader and component below can rely on a tenant.
@@ -58,15 +65,16 @@ export const Route = createFileRoute('/_app')({
   beforeLoad: async ({ context: { queryClient }, search: { invite }, preload }) => {
     // The app opens as whoever was last signed in here, and the Worker's answer corrects it.
     // An invitation changes who that is, so it always waits for the Worker.
-    const tenant = invite
-      ? await queryClient.query({ ...tenantQuery, staleTime: 0 })
-      : await queryClient.query({ ...tenantQuery, staleTime: 'static' })
+    const tenant =
+      invite !== undefined
+        ? await queryClient.query({ ...tenantQuery, staleTime: 0 })
+        : await queryClient.query({ ...tenantQuery, staleTime: 'static' })
 
     if (!tenant) {
-      throw redirect({ to: '/sign-in', search: { invite } })
+      toSignIn(invite)
     }
 
-    if (invite) {
+    if (invite !== undefined) {
       await acceptInvitation(invite)
 
       // Everything on the page belongs to the previous organization, so start again in the new
@@ -185,7 +193,7 @@ function Notice({
     <div className="flex min-h-dvh items-center justify-center px-6">
       <div className="flex max-w-sm flex-col items-start gap-3">
         <h1 className="text-[15px] font-semibold tracking-tight">{title}</h1>
-        {detail ? (
+        {detail !== undefined && detail !== '' ? (
           <p className="text-muted-foreground text-[13px] leading-relaxed text-pretty">{detail}</p>
         ) : null}
         {children}

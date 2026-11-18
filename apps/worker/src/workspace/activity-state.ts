@@ -1,6 +1,12 @@
-import type { RunState } from '@swirls/looms/core'
+import {
+  isJsonNumber,
+  isJsonString,
+  type JsonObject,
+  type JsonValue,
+  type RunState,
+} from '@swirls/looms/core'
 
-import { isRecord } from '../json'
+import { jsonObject } from '../json'
 import type { SessionActivity } from './scope'
 
 export type OpenToolCallState = 'executing' | 'spawned_child' | 'awaiting_effects'
@@ -55,7 +61,7 @@ export interface SessionActivityState {
 export interface ActivityEventLike {
   readonly seq: number
   readonly type: string
-  readonly payload: unknown
+  readonly payload: JsonValue
   readonly threadId?: string | null
   readonly effectId?: string | null
   readonly id?: string
@@ -75,16 +81,17 @@ export const initialSessionActivityState: SessionActivityState = {
   threads: {},
 }
 
-function asRecord(value: unknown): { readonly [key: string]: unknown } {
-  return isRecord(value) ? value : {}
+function asRecord(value: JsonValue | undefined): JsonObject {
+  return jsonObject(value)
 }
 
-function asString(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null
+/** The string, or null when it is missing or empty. */
+function asString(value: JsonValue | undefined): string | null {
+  return isJsonString(value) && value.length > 0 ? value : null
 }
 
-function asNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
+function asNumber(value: JsonValue | undefined): number | null {
+  return isJsonNumber(value) && Number.isFinite(value) ? value : null
 }
 
 function withoutKey<T>(
@@ -95,9 +102,7 @@ function withoutKey<T>(
     return record
   }
 
-  const next = { ...record }
-  delete next[key]
-  return next
+  return Object.fromEntries(Object.entries(record).filter(([name]) => name !== key))
 }
 
 function withoutApprovalsForThread(
@@ -302,7 +307,7 @@ export function reduceSessionActivity(
     case 'runtime.thread.started': {
       const threadId = asString(payload.threadId) ?? asString(event.threadId)
 
-      if (!threadId) {
+      if (threadId === null) {
         return state
       }
 
@@ -356,7 +361,7 @@ export function reduceSessionActivity(
     case 'runtime.thread.cancelled': {
       const threadId = asString(payload.threadId) ?? asString(event.threadId)
 
-      if (!threadId) {
+      if (threadId === null) {
         return {
           ...state,
           bindingSandbox: false,
@@ -372,7 +377,7 @@ export function reduceSessionActivity(
       const isPrimaryThread =
         threadId === state.rootThreadId ||
         threadId === state.conductorThreadId ||
-        (!state.conductorThreadId && Object.keys(nextThreads).length === 0)
+        (state.conductorThreadId === null && Object.keys(nextThreads).length === 0)
 
       return {
         ...state,
@@ -388,7 +393,7 @@ export function reduceSessionActivity(
       const threadId = asString(event.threadId) ?? asString(payload.threadId)
       const waitId = asString(payload.waitId)
 
-      if (!threadId || !waitId) {
+      if (threadId === null || waitId === null) {
         return state
       }
 
@@ -422,7 +427,7 @@ export function reduceSessionActivity(
       const threadId = asString(event.threadId) ?? asString(payload.threadId)
       const waitId = asString(payload.waitId)
 
-      if (!threadId) {
+      if (threadId === null) {
         return state
       }
 
@@ -445,7 +450,7 @@ export function reduceSessionActivity(
       if (existing.kind === 'other') {
         return putThread(state, threadId, {
           ...existing,
-          activeWaits: waitId ? existing.activeWaits.filter((id) => id !== waitId) : [],
+          activeWaits: waitId !== null ? existing.activeWaits.filter((id) => id !== waitId) : [],
         })
       }
 
@@ -459,8 +464,8 @@ export function reduceSessionActivity(
       const effectId = asString(payload.effectId) ?? asString(event.effectId)
 
       if (
-        (threadId && threadId === state.rootThreadId) ||
-        (effectId && effectId.endsWith(':bind_sandbox'))
+        (threadId !== null && threadId === state.rootThreadId) ||
+        (effectId !== null && effectId.endsWith(':bind_sandbox'))
       ) {
         return { ...state, bindingSandbox: false }
       }
@@ -502,9 +507,8 @@ export function reduceSessionActivity(
       const messageId = asString(payload.messageId)
       return {
         ...state,
-        pendingUserMessages: messageId
-          ? state.pendingUserMessages.filter((id) => id !== messageId)
-          : [],
+        pendingUserMessages:
+          messageId !== null ? state.pendingUserMessages.filter((id) => id !== messageId) : [],
         queuedForConductor: payload.queued === true,
       }
     }
@@ -543,7 +547,7 @@ export function reduceSessionActivity(
         const call = asRecord(item)
         const callId = asString(call.id)
 
-        if (callId && !openToolCalls[callId]) {
+        if (callId !== null && openToolCalls[callId] === undefined) {
           openToolCalls = { ...openToolCalls, [callId]: 'executing' }
         }
       }
@@ -614,7 +618,7 @@ export function reduceSessionActivity(
       const thread = ensureAgentThread(state.threads, threadId)
       const toolCallId = asString(payload.toolCallId)
 
-      if (!toolCallId) {
+      if (toolCallId === null) {
         return state
       }
 
@@ -632,7 +636,7 @@ export function reduceSessionActivity(
       const thread = ensureAgentThread(state.threads, threadId)
       const toolCallId = asString(payload.toolCallId)
 
-      if (!toolCallId) {
+      if (toolCallId === null) {
         return state
       }
 
@@ -649,7 +653,7 @@ export function reduceSessionActivity(
       const threadId = asString(event.threadId) ?? DEFAULT_THREAD_ID
       const thread = ensureAgentThread(state.threads, threadId)
       const toolCallId = asString(payload.toolCallId)
-      const openToolCalls = toolCallId ? withoutKey(thread.openToolCalls, toolCallId) : {}
+      const openToolCalls = toolCallId !== null ? withoutKey(thread.openToolCalls, toolCallId) : {}
 
       return putThread(state, threadId, {
         ...thread,
@@ -741,7 +745,7 @@ export function reduceSessionActivity(
 
       return {
         ...state,
-        pendingApprovals: approvalId ? withoutKey(state.pendingApprovals, approvalId) : {},
+        pendingApprovals: approvalId !== null ? withoutKey(state.pendingApprovals, approvalId) : {},
       }
     }
 
@@ -753,18 +757,17 @@ export function reduceSessionActivity(
 function waitAwaitsApproval(wait: RunState['waits'][string]): boolean {
   const tag = asRecord(wait.tag)
 
-  if (typeof tag.approvalId === 'string' && tag.approvalId.length > 0) {
+  if (asString(tag.approvalId) !== null) {
     return true
   }
 
   if ('type' in wait.on) {
-    const types = Array.isArray(wait.on.type) ? wait.on.type : [wait.on.type]
+    const waitedOn: JsonValue = wait.on.type
+    const types: readonly JsonValue[] = Array.isArray(waitedOn) ? waitedOn : [waitedOn]
 
     // Session mailboxes may also listen for approval.decided so they can publish PRs.
     // Only treat a wait as needing input when it is approval-only (e.g. ask_user / gate).
-    const approvalOnly = types.every(
-      (type) => typeof type === 'string' && type.startsWith('approval.'),
-    )
+    const approvalOnly = types.every((type) => asString(type)?.startsWith('approval.') === true)
 
     return approvalOnly && types.includes('approval.decided')
   }
@@ -841,7 +844,7 @@ export function deriveActivityFromRunState(run: RunState): SessionActivity {
     }
   }
 
-  const root = run.rootThreadId ? run.threads[run.rootThreadId] : undefined
+  const root = run.rootThreadId !== null ? run.threads[run.rootThreadId] : undefined
 
   if (root?.status === 'failed') {
     return 'error'

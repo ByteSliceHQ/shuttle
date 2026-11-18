@@ -4,6 +4,7 @@ import type { SessionEvent } from './event-catalog'
 import {
   CLIENT_BUFFER_CAP,
   framesOfPage,
+  OlderPage,
   OLDER_PAGE_SIZE,
   reduceGlobalEvents,
   seededState,
@@ -21,7 +22,7 @@ function frame(cursor: number, runId = 'session_a', type = 'agent.message'): Glo
     payload: {},
     threadId: 'thr_1',
     origin: { type: 'system' },
-  } as SessionEvent
+  } satisfies SessionEvent
 
   return {
     cursor,
@@ -148,9 +149,9 @@ describe('reduceGlobalEvents', () => {
 
 describe('framesOfPage', () => {
   test('reads the frames of a page', () => {
-    expect(framesOfPage({ events: [frame(1), frame(2)] }).map((item) => item.cursor)).toEqual([
-      1, 2,
-    ])
+    expect(
+      framesOfPage(OlderPage.parse({ events: [frame(1), frame(2)] })).map((item) => item.cursor),
+    ).toEqual([1, 2])
   })
 
   test('leaves out what is not a frame and keeps the rest', () => {
@@ -165,13 +166,13 @@ describe('framesOfPage', () => {
       ],
     }
 
-    expect(framesOfPage(page).map((item) => item.cursor)).toEqual([1, 5])
+    expect(framesOfPage(OlderPage.parse(page)).map((item) => item.cursor)).toEqual([1, 5])
   })
 
   test('finds nothing in an answer that is not a page', () => {
-    expect(framesOfPage(null)).toEqual([])
-    expect(framesOfPage({})).toEqual([])
-    expect(framesOfPage({ events: 'none' })).toEqual([])
+    expect(framesOfPage(OlderPage.parse(null))).toEqual([])
+    expect(framesOfPage(OlderPage.parse({}))).toEqual([])
+    expect(framesOfPage(OlderPage.parse({ events: 'none' }))).toEqual([])
   })
 })
 

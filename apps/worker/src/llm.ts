@@ -5,6 +5,8 @@ import {
   tool,
   type JSONSchema7,
   type LanguageModel,
+  type TextStreamPart,
+  type ToolSet,
 } from 'ai'
 
 import type { AgentTurnResult, LlmAdapter, LlmCompleteArgs, LlmToolSpec } from '@swirls/looms/agent'
@@ -123,18 +125,6 @@ function toolCallInput(call: { input?: unknown }): JsonValue {
   return asJson(input ?? {})
 }
 
-function streamPartText(part: { type: string; text?: unknown; delta?: unknown }): string {
-  if (typeof part.text === 'string' && part.text.length > 0) {
-    return part.text
-  }
-
-  if (typeof part.delta === 'string' && part.delta.length > 0) {
-    return part.delta
-  }
-
-  return ''
-}
-
 export type ReasoningEffort = 'high' | 'medium' | 'low'
 
 /** Frontier high-effort models get more thinking; everything else stays medium. */
@@ -188,15 +178,13 @@ export function createReasoningLlm(options: ReasoningLlmOptions): LlmAdapter {
       let thinkingEndedAt: number | undefined
 
       const noteThinking = async (delta: string) => {
-        if (!delta) {
+        if (delta === '') {
           return
         }
 
         const now = Date.now()
 
-        if (thinkingStartedAt === undefined) {
-          thinkingStartedAt = now
-        }
+        thinkingStartedAt ??= now
 
         thinkingEndedAt = now
         thinking += delta
@@ -206,7 +194,7 @@ export function createReasoningLlm(options: ReasoningLlmOptions): LlmAdapter {
       const finishThinking = () => {
         const text = thinking.trim()
 
-        if (!text || !observer) {
+        if (text === '' || observer === undefined) {
           return
         }
 
@@ -218,18 +206,14 @@ export function createReasoningLlm(options: ReasoningLlmOptions): LlmAdapter {
         observer.onComplete(text, durationMs)
       }
 
-      const handlePart = async (part: {
-        type: string
-        text?: unknown
-        delta?: unknown
-      }): Promise<void> => {
+      const handlePart = async (part: TextStreamPart<ToolSet>): Promise<void> => {
         if (part.type === 'reasoning-start') {
           thinkingStartedAt ??= Date.now()
           return
         }
 
         if (part.type === 'reasoning-delta') {
-          await noteThinking(streamPartText(part))
+          await noteThinking(part.text)
           return
         }
 
@@ -243,10 +227,8 @@ export function createReasoningLlm(options: ReasoningLlmOptions): LlmAdapter {
             thinkingEndedAt = Date.now()
           }
 
-          const delta = streamPartText(part)
-
-          if (delta) {
-            await args.onTextDelta?.(delta)
+          if (part.text !== '') {
+            await args.onTextDelta?.(part.text)
           }
         }
       }
@@ -292,7 +274,11 @@ export function createReasoningLlm(options: ReasoningLlmOptions): LlmAdapter {
             result.usage,
           ])
 
-          if (!thinking.trim() && reasoningText?.trim()) {
+          if (
+            thinking.trim() === '' &&
+            reasoningText !== undefined &&
+            reasoningText.trim() !== ''
+          ) {
             await noteThinking(reasoningText)
           }
 
@@ -310,8 +296,8 @@ export function createReasoningLlm(options: ReasoningLlmOptions): LlmAdapter {
             message: { role: 'assistant', content: text, toolCalls },
             toolCalls,
             usage: {
-              input: usage?.inputTokens ?? 0,
-              output: usage?.outputTokens ?? text.length,
+              input: usage.inputTokens ?? 0,
+              output: usage.outputTokens ?? text.length,
             },
           }
         } catch (cause) {
@@ -341,7 +327,7 @@ export function createReasoningLlm(options: ReasoningLlmOptions): LlmAdapter {
 
       const { reasoningText } = result.finalStep
 
-      if (!thinking.trim() && reasoningText?.trim()) {
+      if (thinking.trim() === '' && reasoningText !== undefined && reasoningText.trim() !== '') {
         await noteThinking(reasoningText)
       }
 
@@ -359,8 +345,8 @@ export function createReasoningLlm(options: ReasoningLlmOptions): LlmAdapter {
         message: { role: 'assistant', content: result.text, toolCalls },
         toolCalls,
         usage: {
-          input: result.usage?.inputTokens ?? 0,
-          output: result.usage?.outputTokens ?? result.text.length,
+          input: result.usage.inputTokens ?? 0,
+          output: result.usage.outputTokens ?? result.text.length,
         },
       }
     },
@@ -373,10 +359,7 @@ export function createStubThinkingLlm(): LlmAdapter {
     complete: async (args) => {
       const last = args.messages.toReversed().find((message) => message.role === 'user')
 
-      const text =
-        typeof last?.content === 'string'
-          ? last.content
-          : 'Stub LLM: set OPENROUTER_API_KEY for live model calls.'
+      const text = last?.content ?? 'Stub LLM: set OPENROUTER_API_KEY for live model calls.'
 
       const thought = `Considering how to respond to: ${text.slice(0, 120)}`
       const observer = args.signal ? thinkingObservers.get(args.signal) : undefined

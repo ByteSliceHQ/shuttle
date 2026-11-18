@@ -3,6 +3,8 @@ import { createRequire } from 'node:module'
 import { availableParallelism, homedir, totalmem } from 'node:os'
 import { dirname, join } from 'node:path'
 
+import { z } from 'zod'
+
 import type { RunnerBackendInfo } from '@shuttle/runner-protocol'
 
 import {
@@ -23,7 +25,19 @@ import {
   TOOLS_SCRIPT,
   toolsDigest,
 } from '../provision'
-import { ANNOUNCE_PID, collect, HTTP_SCRIPT, readAnnouncedPid, text } from './shared'
+import { nonEmpty } from '../text'
+import {
+  ANNOUNCE_PID,
+  collect,
+  HTTP_SCRIPT,
+  readAnnouncedPid,
+  sandboxHttpResponseSchema,
+  stdinOf,
+  text,
+} from './shared'
+
+/** What `msb inspect --format json` says about a sandbox. */
+const sandboxStatusSchema = z.object({ status: z.string().optional() })
 
 /**
  * A sandbox in a small virtual machine of its own, kept by microsandbox (`msb`).
@@ -67,7 +81,7 @@ export function findMicrosandbox(): MicrosandboxRuntime | null {
   const library = process.platform === 'darwin' ? 'libkrunfw.5.dylib' : 'libkrunfw.so.5'
 
   for (const folder of folders) {
-    if (!folder) {
+    if (folder === undefined || folder === '') {
       continue
     }
 
@@ -120,7 +134,7 @@ export class MicrosandboxBackend implements LocalBackend {
     options: { readonly stdin?: Uint8Array } = {},
   ): Promise<ExecOutput> {
     const child = Bun.spawn([this.runtime.msb, ...args], {
-      stdin: options.stdin ? new Blob([options.stdin as Uint8Array<ArrayBuffer>]) : 'ignore',
+      stdin: stdinOf(options.stdin),
       stdout: 'pipe',
       stderr: 'pipe',
       env: { ...process.env, ...this.env },
@@ -143,9 +157,11 @@ export class MicrosandboxBackend implements LocalBackend {
     const result = await this.cli(args, options)
 
     if (result.exitCode !== 0) {
-      const said = text(result.stderr).trim() || text(result.stdout).trim()
+      const said = nonEmpty(text(result.stderr).trim()) ?? text(result.stdout).trim()
 
-      throw new Error(`Could not ${what}: ${said.slice(-2000) || `exit ${result.exitCode}`}`)
+      throw new Error(
+        `Could not ${what}: ${nonEmpty(said.slice(-2000)) ?? `exit ${result.exitCode}`}`,
+      )
     }
 
     return text(result.stdout).trim()
@@ -161,7 +177,7 @@ export class MicrosandboxBackend implements LocalBackend {
         'exec',
         '--quiet',
         '--no-tty',
-        ...(options.stdin ? [] : ['--no-stdin']),
+        ...(options.stdin === undefined ? ['--no-stdin'] : []),
         this.name,
         '--',
         ...argv,
@@ -185,7 +201,7 @@ export class MicrosandboxBackend implements LocalBackend {
 
     if (found.exitCode !== 0) {
       await this.create()
-    } else if ((JSON.parse(text(found.stdout)) as { status?: string }).status !== 'Running') {
+    } else if (sandboxStatusSchema.parse(JSON.parse(text(found.stdout))).status !== 'Running') {
       await this.must(['start', this.name], 'start the sandbox')
     }
 
@@ -271,7 +287,7 @@ export class MicrosandboxBackend implements LocalBackend {
 
     const source = findBridge()
 
-    if (!source) {
+    if (source === null) {
       throw new Error('This runner has no copy of the agent bridge to put in the sandbox.')
     }
 
@@ -323,6 +339,7 @@ export class MicrosandboxBackend implements LocalBackend {
     await this.ensure()
 
     const env = options.env ?? {}
+    const workdir = nonEmpty(options.cwd)
 
     const child = Bun.spawn(
       [
@@ -332,7 +349,7 @@ export class MicrosandboxBackend implements LocalBackend {
         // Without this the runtime holds everything the command prints until it ends, and the
         // pid that lets a command be stopped would arrive too late to be of use.
         '--stream',
-        ...(options.cwd ? ['--workdir', options.cwd] : []),
+        ...(workdir === undefined ? [] : ['--workdir', workdir]),
         // Named, not given: the runtime takes each value from its own environment, so a secret
         // never appears in a command line another process on this machine could read.
         ...Object.keys(env).flatMap((name) => ['--env', name]),
@@ -345,7 +362,7 @@ export class MicrosandboxBackend implements LocalBackend {
         ...argv,
       ],
       {
-        stdin: options.stdin ? new Blob([options.stdin as Uint8Array<ArrayBuffer>]) : 'ignore',
+        stdin: stdinOf(options.stdin),
         stdout: 'pipe',
         stderr: 'pipe',
         env: { ...process.env, ...this.env, ...env },
@@ -401,10 +418,12 @@ export class MicrosandboxBackend implements LocalBackend {
     })
 
     if (result.exitCode !== 0) {
-      throw new Error(text(result.stderr).trim() || `nothing answered on port ${request.port}`)
+      throw new Error(
+        nonEmpty(text(result.stderr).trim()) ?? `nothing answered on port ${request.port}`,
+      )
     }
 
-    return JSON.parse(text(result.stdout)) as SandboxHttpResponse
+    return sandboxHttpResponseSchema.parse(JSON.parse(text(result.stdout)))
   }
 
   async openTerminal(options: {
@@ -417,7 +436,8 @@ export class MicrosandboxBackend implements LocalBackend {
     await this.ensure()
 
     // A session's files are only here once it has worked here.
-    const there = options.cwd ? await this.inGuest(['test', '-d', options.cwd]) : null
+    const cwd = nonEmpty(options.cwd)
+    const there = cwd === undefined ? null : await this.inGuest(['test', '-d', cwd])
 
     const child = Bun.spawn(
       [
@@ -426,7 +446,7 @@ export class MicrosandboxBackend implements LocalBackend {
         '--quiet',
         '--tty',
         '--workdir',
-        there?.exitCode === 0 && options.cwd ? options.cwd : '/workspace',
+        there?.exitCode === 0 && cwd !== undefined ? cwd : '/workspace',
         '--env',
         'TERM=xterm-256color',
         '--env',

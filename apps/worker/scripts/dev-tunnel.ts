@@ -9,7 +9,6 @@ import { existsSync } from 'node:fs'
  */
 import { spawn, which, type Subprocess } from 'bun'
 
-import type { ShuttleEnv } from '../src/env'
 import { createAppJwt } from '../src/github/client'
 import { parseTunnelUrl, parseTunnelUrlFromMetrics, signWebhookBody } from './dev-tunnel-lib'
 
@@ -42,11 +41,11 @@ if (!webhookSecret) {
   skip('GITHUB_WEBHOOK_SECRET is empty (run bun run dev so dev-setup can fill it)')
 }
 
-const githubEnv = {
+const githubCredentials = {
   GITHUB_APP_ID: appId,
   GITHUB_APP_PRIVATE_KEY: privateKey,
   GITHUB_WEBHOOK_SECRET: webhookSecret,
-} as ShuttleEnv
+}
 
 /**
  * Prefer a real cloudflared binary.
@@ -125,7 +124,7 @@ async function waitForUrl(url: string, label: string, timeoutMs = 90_000): Promi
 }
 
 async function syncWebhookConfig(tunnelOrigin: string): Promise<void> {
-  const jwt = await createAppJwt(githubEnv)
+  const jwt = await createAppJwt(githubCredentials)
   const url = `${tunnelOrigin}${WEBHOOK_PATH}`
 
   const response = await fetch('https://api.github.com/app/hook/config', {
@@ -200,22 +199,14 @@ function spawnTunnel(binary: string): TunnelHandle {
     stdin: 'ignore',
   })
 
-  const deferred: {
-    settled: boolean
-    resolve: ((url: string) => void) | null
-    reject: ((error: Error) => void) | null
-  } = { settled: false, resolve: null, reject: null }
-
-  const url = new Promise<string>((resolve, reject) => {
-    deferred.resolve = resolve
-    deferred.reject = reject
-  })
+  let settled = false
+  const { promise: url, resolve: resolveUrl, reject: rejectUrl } = Promise.withResolvers<string>()
 
   const onChunk = (chunk: Uint8Array) => {
     const text = new TextDecoder().decode(chunk)
     process.stderr.write(text)
 
-    if (deferred.settled) {
+    if (settled) {
       return
     }
 
@@ -223,8 +214,8 @@ function spawnTunnel(binary: string): TunnelHandle {
       const found = parseTunnelUrl(line)
 
       if (found) {
-        deferred.settled = true
-        deferred.resolve?.(found)
+        settled = true
+        resolveUrl(found)
         return
       }
     }
@@ -247,9 +238,9 @@ function spawnTunnel(binary: string): TunnelHandle {
   })()
 
   void child.exited.then((code) => {
-    if (!deferred.settled) {
-      deferred.settled = true
-      deferred.reject?.(new Error(`cloudflared exited before publishing a URL (code ${code})`))
+    if (!settled) {
+      settled = true
+      rejectUrl(new Error(`cloudflared exited before publishing a URL (code ${code})`))
     }
   })
 
@@ -305,14 +296,19 @@ async function runOnce(binary: string): Promise<void> {
     await syncWebhookConfig(origin)
     console.log(`[tunnel] GitHub App webhook → ${origin}${WEBHOOK_PATH}`)
   } catch (error) {
-    console.warn(`[tunnel] webhook sync failed: ${error instanceof Error ? error.message : error}`)
+    console.warn(
+      `[tunnel] webhook sync failed: ${error instanceof Error ? error.message : String(error)}`,
+    )
   }
 
   try {
     await selfTest(origin)
     console.log(`[tunnel] webhooks live  ${origin}${WEBHOOK_PATH}  (self-test ok)`)
   } catch (error) {
-    console.warn(`[tunnel] self-test failed: ${error instanceof Error ? error.message : error}`)
+    console.warn(
+      `[tunnel] self-test failed: ${error instanceof Error ? error.message : String(error)}`,
+    )
+
     console.log(`[tunnel] webhooks live  ${origin}${WEBHOOK_PATH}  (self-test failed)`)
   }
 
@@ -336,7 +332,7 @@ for (;;) {
     await runOnce(binary)
     backoffMs = 1_000
   } catch (error) {
-    console.warn(`[tunnel] ${error instanceof Error ? error.message : error}`)
+    console.warn(`[tunnel] ${error instanceof Error ? error.message : String(error)}`)
   }
 
   if (!keepRunning) {

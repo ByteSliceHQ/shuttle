@@ -1,16 +1,54 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 
-type Json = unknown
+import {
+  definedFields,
+  field,
+  isJsonObject,
+  isNumber,
+  isString,
+  parseJson,
+  stringField,
+  type JsonObject,
+  type JsonValue,
+} from './json.ts'
 
 interface Pending {
-  readonly resolve: (value: Json) => void
+  readonly resolve: (value: JsonValue) => void
   readonly reject: (error: Error) => void
 }
 
 export interface LspHandlers {
-  onNotification(method: string, params: Json): void
+  onNotification(method: string, params: JsonValue | undefined): void
   /** A request from the server. The returned value is sent back as the result. */
-  onRequest(method: string, params: Json): Json
+  onRequest(method: string, params: JsonValue | undefined): JsonValue | undefined
+}
+
+const CR = 0x0d
+const LF = 0x0a
+
+/** Where the blank line that ends a header sits in `bytes`, or -1. */
+function headerEnd(bytes: Uint8Array): number {
+  for (let index = 0; index + 3 < bytes.length; index += 1) {
+    if (
+      bytes[index] === CR &&
+      bytes[index + 1] === LF &&
+      bytes[index + 2] === CR &&
+      bytes[index + 3] === LF
+    ) {
+      return index
+    }
+  }
+
+  return -1
+}
+
+function concat(first: Uint8Array, second: Uint8Array): Uint8Array {
+  const joined = new Uint8Array(first.length + second.length)
+
+  joined.set(first)
+  joined.set(second, first.length)
+
+  return joined
 }
 
 /**
@@ -20,7 +58,7 @@ export interface LspHandlers {
 export class LspConnection {
   private nextId = 1
   private readonly pending = new Map<number, Pending>()
-  private buffer: Buffer = Buffer.alloc(0)
+  private buffer: Uint8Array = new Uint8Array(0)
   /** Resolves with the exit code once the server has exited. */
   readonly exited: Promise<number | null>
 
@@ -32,8 +70,8 @@ export class LspConnection {
     this.child = child
     this.handlers = handlers
 
-    child.stdout.on('data', (chunk: Buffer) => {
-      this.buffer = Buffer.concat([this.buffer, chunk])
+    child.stdout.on('data', (chunk: Uint8Array) => {
+      this.buffer = concat(this.buffer, chunk)
       this.drain()
     })
 
@@ -56,117 +94,111 @@ export class LspConnection {
     })
   }
 
-  request<T = Json>(method: string, params?: Json): Promise<T> {
+  request(method: string, params?: JsonValue): Promise<JsonValue> {
     const id = this.nextId
     this.nextId += 1
 
-    return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (value: Json) => void, reject })
-      this.send({ id, method, ...(params === undefined ? {} : { params }) })
+    return new Promise<JsonValue>((resolve, reject) => {
+      this.pending.set(id, { resolve, reject })
+      this.send(definedFields({ id, method, params }))
     })
   }
 
-  notify(method: string, params?: Json): void {
-    this.send({ method, ...(params === undefined ? {} : { params }) })
+  notify(method: string, params?: JsonValue): void {
+    this.send(definedFields({ method, params }))
   }
 
   kill(): void {
     this.child.kill('SIGTERM')
   }
 
-  private send(message: Record<string, Json>): void {
+  private send(message: JsonObject): void {
     if (!this.child.stdin.writable) {
       return
     }
 
-    const body = Buffer.from(JSON.stringify({ jsonrpc: '2.0', ...message }), 'utf8')
+    const body = new TextEncoder().encode(JSON.stringify({ jsonrpc: '2.0', ...message }))
     this.child.stdin.write(`Content-Length: ${body.length}\r\n\r\n`)
     this.child.stdin.write(body)
   }
 
   private drain(): void {
     for (;;) {
-      const headerEnd = this.buffer.indexOf('\r\n\r\n')
+      const end = headerEnd(this.buffer)
 
-      if (headerEnd < 0) {
+      if (end < 0) {
         return
       }
 
-      const header = this.buffer.subarray(0, headerEnd).toString('ascii')
+      const header = new TextDecoder().decode(this.buffer.subarray(0, end))
       const length = Number(/content-length:\s*(\d+)/i.exec(header)?.[1])
 
       if (!Number.isFinite(length)) {
         // Not a frame. Drop the header and look for the next one.
-        this.buffer = this.buffer.subarray(headerEnd + 4)
+        this.buffer = this.buffer.subarray(end + 4)
         continue
       }
 
-      const start = headerEnd + 4
+      const start = end + 4
 
       if (this.buffer.length < start + length) {
         return
       }
 
-      const body = this.buffer.subarray(start, start + length).toString('utf8')
+      const body = new TextDecoder().decode(this.buffer.subarray(start, start + length))
       this.buffer = this.buffer.subarray(start + length)
       this.receive(body)
     }
   }
 
   private receive(body: string): void {
-    let message: {
-      id?: number | string
-      method?: string
-      params?: Json
-      result?: Json
-      error?: { message?: string }
-    }
+    const message = parseJson(body)
 
-    try {
-      message = JSON.parse(body)
-    } catch {
+    if (!isJsonObject(message)) {
       return
     }
 
-    if (typeof message !== 'object' || message === null) {
-      return
-    }
+    const method = stringField(message, 'method')
+    const rawId = field(message, 'id')
+    const id = isString(rawId) || isNumber(rawId) ? rawId : undefined
 
-    if (typeof message.method === 'string') {
-      if (message.id === undefined) {
-        this.handlers.onNotification(message.method, message.params)
+    if (method !== undefined) {
+      if (id === undefined) {
+        this.handlers.onNotification(method, field(message, 'params'))
         return
       }
 
-      let result: Json = null
+      let result: JsonValue = null
 
       try {
-        result = this.handlers.onRequest(message.method, message.params) ?? null
+        result = this.handlers.onRequest(method, field(message, 'params')) ?? null
       } catch {
         // Answer null rather than leave the server waiting.
       }
 
-      this.send({ id: message.id, result })
+      this.send({ id, result })
       return
     }
 
-    if (typeof message.id !== 'number') {
+    if (!isNumber(id)) {
       return
     }
 
-    const waiter = this.pending.get(message.id)
+    const waiter = this.pending.get(id)
 
     if (!waiter) {
       return
     }
 
-    this.pending.delete(message.id)
+    this.pending.delete(id)
 
-    if (message.error) {
-      waiter.reject(new Error(message.error.message ?? 'language server returned an error'))
+    const error = field(message, 'error')
+
+    if (isJsonObject(error)) {
+      waiter.reject(new Error(stringField(error, 'message') ?? 'language server returned an error'))
       return
     }
 
-    waiter.resolve(message.result)
+    waiter.resolve(field(message, 'result') ?? null)
   }
 }

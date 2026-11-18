@@ -57,12 +57,12 @@ export function SessionRow({
   onRename?: () => void
   onArchive?: () => void
 }) {
-  const hasMenu = Boolean(onRename || onArchive)
+  const hasMenu = onRename !== undefined || onArchive !== undefined
   const tone = resolveSessionIndicator({ activity, status, unread })
   const needsAttention = !active && (tone === 'needs_input' || tone === 'ready')
 
   return (
-    <div className={cn(sidebarRowClass(active), 'float-in', dimmed && 'opacity-60')}>
+    <div className={cn(sidebarRowClass(active), 'float-in', dimmed === true && 'opacity-60')}>
       <Link
         to={{ page: 'session', sessionId: runId }}
         title={title}

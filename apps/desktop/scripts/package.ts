@@ -48,11 +48,15 @@ async function run(command: readonly string[], cwd: string, env?: Record<string,
   }
 }
 
+/** Updates are only offered by a build that was signed with a real identity. */
+const hasIdentity = identity !== undefined && identity !== ''
+const signed = hasIdentity && identity !== '-'
+
 mkdirSync(staging, { recursive: true })
 
 writeFileSync(
   join(staging, 'desktop.config.json'),
-  `${JSON.stringify({ url, autoUpdate: Boolean(identity && identity !== '-'), ...(image ? { image } : {}) }, null, 2)}\n`,
+  `${JSON.stringify({ url, autoUpdate: signed, image: image === '' ? undefined : image }, null, 2)}\n`,
 )
 
 // The agent bridge, which the built-in sandbox copies into itself. Tests stay behind.
@@ -74,11 +78,11 @@ await run(
     'dmg',
     'zip',
     // "-" is an ad hoc signature: enough to run on Apple Silicon, not enough for Gatekeeper.
-    `-c.mac.identity=${identity || '-'}`,
-    `-c.mac.notarize=${identity ? 'true' : 'false'}`,
+    `-c.mac.identity=${hasIdentity ? identity : '-'}`,
+    `-c.mac.notarize=${hasIdentity ? 'true' : 'false'}`,
     '--publish',
     'never',
   ],
   root,
-  identity ? {} : { CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
+  hasIdentity ? {} : { CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
 )

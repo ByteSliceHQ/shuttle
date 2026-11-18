@@ -8,6 +8,7 @@ import {
   launch,
   spawn,
   wait,
+  asJson,
   type EventEnvelope,
   type JsonValue,
   type RuntimeEffect,
@@ -18,7 +19,6 @@ import {
 import { AttachmentInputSchema } from '../agents/attachment-input'
 import { isHardStop } from '../agents/intake'
 import { withAttachmentManifest } from '../assets/sandbox'
-import { jsonObject } from '../json'
 import { reflectionRunId } from '../tenancy/run-id'
 import {
   buildConductorInput,
@@ -34,6 +34,7 @@ import {
   type ConductorState,
   queuedAttachments,
 } from './conductor'
+import type { JsonObjectBuilder } from './json-object'
 import { appendPrPublishEffects, withPrApprovalDecision } from './publish-effects'
 import { routeForEffects } from './route-effects'
 import { shuttleModule, type AttachmentRef, type MessageAuthor } from './scope'
@@ -159,8 +160,33 @@ export interface SessionState {
   } | null
 }
 
-function asObject(value: unknown): { [key: string]: JsonValue } {
-  return jsonObject(value)
+function asObject(value: JsonValue | undefined): { [key: string]: JsonValue } {
+  return isJsonObject(value) ? value : {}
+}
+
+type AuthorAndAttachments = { author?: MessageAuthor; attachments?: readonly AttachmentRef[] }
+
+/** `author` and `attachments`, each only when there is one. */
+function withAuthorAndAttachments(
+  author: MessageAuthor | undefined,
+  attachments: readonly AttachmentRef[] | undefined,
+): AuthorAndAttachments {
+  const present: AuthorAndAttachments = {}
+
+  if (author !== undefined) {
+    present.author = author
+  }
+
+  if (attachments !== undefined) {
+    present.attachments = attachments
+  }
+
+  return present
+}
+
+/** True for a string that is neither missing nor empty. */
+function isPresent(value: string | undefined | null): value is string {
+  return value !== undefined && value !== null && value !== ''
 }
 
 /** The first line of `text`, kept short enough for a pull request title. */
@@ -171,8 +197,10 @@ function firstLine(text: string): string {
 }
 
 /** Once a requested pull request's gate is open, the request is done. */
-function settlePrRequest(state: SessionState, approvalId: unknown): SessionState {
-  return state.pendingPrRequest && state.pendingPrRequest.approvalId === approvalId
+function settlePrRequest(state: SessionState, approvalId: JsonValue | undefined): SessionState {
+  const request = state.pendingPrRequest
+
+  return request !== undefined && request !== null && request.approvalId === approvalId
     ? { ...state, pendingPrRequest: null }
     : state
 }
@@ -185,10 +213,14 @@ function asString(value: JsonValue | undefined): string | null {
   return Predicate.isString(value) ? value : null
 }
 
+type EventLike = {
+  readonly type: string | undefined
+  readonly payload: JsonValue | undefined
+  readonly threadId: string | undefined
+}
+
 /** The checked fields of an event embedded in a wait wake-up, or null when it is not an object. */
-function asEventLike(
-  value: unknown,
-): { readonly type?: string; readonly payload?: JsonValue; readonly threadId?: string } | null {
+function asEventLike(value: JsonValue | undefined): EventLike | null {
   if (!isJsonObject(value)) {
     return null
   }
@@ -196,9 +228,9 @@ function asEventLike(
   const { type, payload, threadId } = value
 
   return {
-    ...(typeof type === 'string' ? { type } : {}),
-    ...(payload !== undefined ? { payload } : {}),
-    ...(typeof threadId === 'string' ? { threadId } : {}),
+    type: Predicate.isString(type) ? type : undefined,
+    payload,
+    threadId: Predicate.isString(threadId) ? threadId : undefined,
   }
 }
 
@@ -224,7 +256,7 @@ function kindFromEvaluator(event: EventEnvelope, fallback?: InterjectionKind): I
 
   const route = readKind(output.route)
 
-  if (route) {
+  if (route !== null) {
     return route
   }
 
@@ -232,7 +264,7 @@ function kindFromEvaluator(event: EventEnvelope, fallback?: InterjectionKind): I
   const kindAnswer = asObject(answers.kind)
   const fromAnswer = readKind(kindAnswer.value)
 
-  if (fromAnswer) {
+  if (fromAnswer !== null) {
     return fromAnswer
   }
 
@@ -240,7 +272,7 @@ function kindFromEvaluator(event: EventEnvelope, fallback?: InterjectionKind): I
 }
 
 function bypassIntakeKind(message: PendingMessage): InterjectionKind | null {
-  if (message.forceKind) {
+  if (message.forceKind !== undefined) {
     return message.forceKind
   }
 
@@ -299,7 +331,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
           !Predicate.isString(item.name) ||
           !Predicate.isString(item.fullName) ||
           !Predicate.isString(item.defaultBranch) ||
-          typeof item.private !== 'boolean'
+          !Predicate.isBoolean(item.private)
         ) {
           return []
         }
@@ -334,7 +366,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
       const ownerId = asString(input.ownerId)
 
       return {
-        speakerIds: ownerId ? [ownerId] : [],
+        speakerIds: isPresent(ownerId) ? [ownerId] : [],
         initialAttachments: AttachmentInputSchema.array().parse(input.attachments ?? []),
         goal: asString(input.goal) ?? 'Improve the repository',
         repoUrl: asString(input.repoUrl),
@@ -379,14 +411,14 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
 
         case 'shuttle.pr.proposed': {
           return settlePrRequest(
-            withPrProposal(state, event.payload, event.threadId ?? null),
+            withPrProposal(state, asObject(asJson(event.payload)), event.threadId ?? null),
             event.payload.approvalId,
           )
         }
 
         case 'shuttle.pr.requested': {
           // One publish at a time: while a gate is open or publishing, the button asks again later.
-          if (state.pendingPrPublish) {
+          if (state.pendingPrPublish !== null) {
             return state
           }
 
@@ -452,20 +484,20 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
               ]
             })
 
+            const pull = state.pull
+            const gateFullName = Predicate.isString(payload.fullName) ? payload.fullName : ''
+            const gateNumber = Predicate.isNumber(payload.number) ? payload.number : 0
+            const gateCommitId = Predicate.isString(payload.commitId) ? payload.commitId : ''
+
             return {
               ...state,
               pendingReviewSubmit: {
                 approvalId,
                 // The session knows which pull request it reviews; what the gate carries is only
                 // a fallback for a session that was not started on one.
-                fullName:
-                  state.pull?.fullName ||
-                  (Predicate.isString(payload.fullName) ? payload.fullName : ''),
-                number:
-                  state.pull?.number || (Predicate.isNumber(payload.number) ? payload.number : 0),
-                commitId:
-                  (Predicate.isString(payload.commitId) ? payload.commitId : '') ||
-                  (state.pull?.headSha ?? ''),
+                fullName: pull !== null && pull.fullName !== '' ? pull.fullName : gateFullName,
+                number: pull !== null && pull.number !== 0 ? pull.number : gateNumber,
+                commitId: gateCommitId !== '' ? gateCommitId : (pull?.headSha ?? ''),
                 summary: Predicate.isString(payload.summary) ? payload.summary : 'Shuttle review',
                 verdict,
                 comments,
@@ -480,7 +512,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         case 'shuttle.pr.published': {
           return withStackPublished(
             withPrPublishSettled(state, event.payload.approvalId),
-            event.payload,
+            asObject(asJson(event.payload)),
           )
         }
 
@@ -527,7 +559,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
           return {
             ...state,
             speakerIds:
-              author && !state.speakerIds.includes(author.id)
+              author !== undefined && !state.speakerIds.includes(author.id)
                 ? [...state.speakerIds, author.id]
                 : state.speakerIds,
             pendingMessages: [
@@ -537,8 +569,12 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
                 text: payload.text,
                 forceKind: payload.forceKind,
                 targetThreadId: payload.targetThreadId,
-                ...(author ? { author } : {}),
-                ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
+                ...withAuthorAndAttachments(
+                  author,
+                  payload.attachments !== undefined && payload.attachments.length > 0
+                    ? payload.attachments
+                    : undefined,
+                ),
               },
             ],
             processedMessageIds: [...state.processedMessageIds, payload.messageId],
@@ -580,8 +616,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
               text: pending.text,
               forceKind: pending.forceKind,
               targetThreadId: pending.targetThreadId,
-              ...(pending.author ? { author: pending.author } : {}),
-              ...(pending.attachments ? { attachments: pending.attachments } : {}),
+              ...withAuthorAndAttachments(pending.author, pending.attachments),
             },
           }
         }
@@ -603,8 +638,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
               kind: payload.kind,
               targetThreadId: payload.targetThreadId,
               text: payload.text,
-              ...(bypassed?.author ? { author: bypassed.author } : {}),
-              ...(bypassed?.attachments ? { attachments: bypassed.attachments } : {}),
+              ...withAuthorAndAttachments(bypassed?.author, bypassed?.attachments),
             },
             mailboxEpoch: state.mailboxEpoch + 1,
           }
@@ -618,7 +652,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
           // Stable wait ids stay completed forever unless we bump the epoch.
           const base = { ...state, mailboxEpoch: state.mailboxEpoch + 1 }
 
-          if (tag.kind === 'shuttle-intake' && base.activeIntake) {
+          if (tag.kind === 'shuttle-intake' && base.activeIntake !== null) {
             const kind = base.activeIntake.forceKind ?? kindFromEvaluator(event, 'task')
             return {
               ...base,
@@ -628,10 +662,10 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
                 kind,
                 targetThreadId: base.activeIntake.targetThreadId ?? null,
                 text: base.activeIntake.text,
-                ...(base.activeIntake.author ? { author: base.activeIntake.author } : {}),
-                ...(base.activeIntake.attachments
-                  ? { attachments: base.activeIntake.attachments }
-                  : {}),
+                ...withAuthorAndAttachments(
+                  base.activeIntake.author,
+                  base.activeIntake.attachments,
+                ),
               },
             }
           }
@@ -648,7 +682,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
           if (tag.kind === 'shuttle-conductor') {
             const childThreadId = asString(tag.childThreadId)
 
-            if (!childThreadId) {
+            if (!isPresent(childThreadId)) {
               return base
             }
 
@@ -674,7 +708,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
 
             if (
               definitionName === 'worker' &&
-              childThreadId &&
+              isPresent(childThreadId) &&
               !base.workerThreadIds.includes(childThreadId)
             ) {
               return {
@@ -689,9 +723,9 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             embedded?.type === 'runtime.thread.failed' ||
             embedded?.type === 'runtime.thread.cancelled'
           ) {
-            const threadId = asString(embeddedPayload.threadId) ?? embedded?.threadId
+            const threadId = asString(embeddedPayload.threadId) ?? embedded.threadId
 
-            if (!threadId) {
+            if (!isPresent(threadId)) {
               return base
             }
 
@@ -710,12 +744,11 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             pendingRoute: null,
             mailboxEpoch: state.mailboxEpoch + 1,
             conductor:
-              queued && route
+              queued && route !== null
                 ? queueForConductor(state.conductor, {
                     messageId: route.messageId,
                     text: route.text,
-                    ...(route.author ? { author: route.author } : {}),
-                    ...(route.attachments ? { attachments: route.attachments } : {}),
+                    ...withAuthorAndAttachments(route.author, route.attachments),
                   })
                 : state.conductor,
           }
@@ -740,7 +773,69 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
           return { ...state, reflectionLaunched: true }
         }
 
-        default:
+        case 'agent.context.compacted':
+        case 'agent.effects.requested':
+        case 'agent.lineage':
+        case 'agent.message':
+        case 'agent.message.received':
+        case 'agent.session.cancel.requested':
+        case 'agent.session.message.submitted':
+        case 'agent.session.steer.delivered':
+        case 'agent.session.turn.closed':
+        case 'agent.session.turn.started':
+        case 'agent.spawn.requested':
+        case 'agent.steered':
+        case 'agent.tool.result':
+        case 'agent.tool_call.requested':
+        case 'agent.turn.settled':
+        case 'agent.turn.started':
+        case 'agent.turn.stopped':
+        case 'agent.turn.text_delta':
+        case 'agent.turn.usage':
+        case 'approval.requested':
+        case 'approval.timed_out':
+        case 'evaluator.evaluated':
+        case 'evaluator.requested':
+        case 'runtime.child.close.requested':
+        case 'runtime.child.settled':
+        case 'runtime.effect.ambiguous':
+        case 'runtime.effect.attempt.started':
+        case 'runtime.effect.cancel.requested':
+        case 'runtime.effect.cancelled':
+        case 'runtime.effect.completed':
+        case 'runtime.effect.dispatch.deferred':
+        case 'runtime.effect.dispatched':
+        case 'runtime.effect.failed':
+        case 'runtime.effect.heartbeat':
+        case 'runtime.effect.queued':
+        case 'runtime.effect.retry.scheduled':
+        case 'runtime.effect.timed_out':
+        case 'runtime.effect.worker.started':
+        case 'runtime.fork.elided':
+        case 'runtime.run.cancelled':
+        case 'runtime.run.completed':
+        case 'runtime.run.forked':
+        case 'runtime.run.launched':
+        case 'runtime.run.started':
+        case 'runtime.signal.received':
+        case 'runtime.snapshot.taken':
+        case 'runtime.thread.cancel.requested':
+        case 'runtime.thread.cancelled':
+        case 'runtime.thread.completed':
+        case 'runtime.thread.failed':
+        case 'runtime.timer.fired':
+        case 'runtime.timer.set':
+        case 'runtime.wait.registered':
+        case 'shuttle.pr.discarded':
+        case 'shuttle.review.comment.drafted':
+        case 'shuttle.sandbox.moved':
+        case 'shuttle.team.changed':
+        case 'shuttle.turn.thinking_delta':
+        case 'shuttle.turn.thought':
+        case 'shuttle.vendor.message':
+        case 'shuttle.vendor.tool_finished':
+        case 'shuttle.vendor.tool_started':
+        case 'shuttle.vendor.turn_started':
           return state
       }
     },
@@ -748,8 +843,8 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
       const effects: RuntimeEffect[] = []
       const conductorThreadId = liveConductorThreadId(state.conductor)
 
-      if (!state.sandboxBound && state.sandboxName) {
-        const bindInput = {
+      if (!state.sandboxBound && isPresent(state.sandboxName)) {
+        const bindInput: JsonObjectBuilder = {
           sandboxName: state.sandboxName,
           repos: state.repos.map((repo) => ({
             installationId: repo.installationId,
@@ -759,16 +854,15 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             defaultBranch: repo.defaultBranch,
             private: repo.private,
           })),
-          ...(state.pull
-            ? {
-                pull: {
-                  fullName: state.pull.fullName,
-                  number: state.pull.number,
-                  headSha: state.pull.headSha,
-                  baseSha: state.pull.baseSha,
-                },
-              }
-            : {}),
+        }
+
+        if (state.pull !== null) {
+          bindInput.pull = {
+            fullName: state.pull.fullName,
+            number: state.pull.number,
+            headSha: state.pull.headSha,
+            baseSha: state.pull.baseSha,
+          }
         }
 
         effects.push(invoke('shuttle.bindSandbox', bindInput, 'bind_sandbox'))
@@ -778,24 +872,32 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
 
       // The PR button: open the publish gate on the conductor's thread, so the card sits with the
       // agent's work. The gate's invoke key makes a repeat of this a no-op.
-      if (state.pendingPrRequest && !state.pendingPrPublish) {
+      if (
+        state.pendingPrRequest !== undefined &&
+        state.pendingPrRequest !== null &&
+        state.pendingPrPublish === null
+      ) {
         const request = state.pendingPrRequest
 
+        const gateInput: JsonObjectBuilder = {
+          approvalId: request.approvalId,
+          title: request.title,
+          body: request.body,
+          draft: request.draft,
+          repos: isPresent(request.repo) ? [request.repo] : [],
+          fallbackTitle: firstLine(state.goal),
+        }
+
+        if (isPresent(request.repo)) {
+          gateInput.repo = request.repo
+        }
+
+        if (isPresent(conductorThreadId)) {
+          gateInput.threadId = conductorThreadId
+        }
+
         effects.push(
-          invoke(
-            'shuttle.preparePrPublishGate',
-            {
-              approvalId: request.approvalId,
-              title: request.title,
-              body: request.body,
-              draft: request.draft,
-              repos: request.repo ? [request.repo] : [],
-              ...(request.repo ? { repo: request.repo } : {}),
-              ...(conductorThreadId ? { threadId: conductorThreadId } : {}),
-              fallbackTitle: firstLine(state.goal),
-            },
-            `prepare_pr_${request.approvalId}`,
-          ),
+          invoke('shuttle.preparePrPublishGate', gateInput, `prepare_pr_${request.approvalId}`),
         )
       }
 
@@ -820,7 +922,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         )
       }
 
-      if (state.pull && state.sandboxBound && !state.reviewerSpawned) {
+      if (state.pull !== null && state.sandboxBound && !state.reviewerSpawned) {
         const childThreadId = deterministicThreadId(ctx.threadId, 'reviewer', 'main')
 
         effects.push(
@@ -850,7 +952,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
 
       // Route before spawning so task/idea/constraint can queue onto state, then the next
       // wake includes those messages in the conductor's spawn input.
-      if (state.pendingRoute) {
+      if (state.pendingRoute !== null) {
         const route = state.pendingRoute
         const { summary, queued } = routeForEffects(state, route, effects, ctx.threadId, ctx.runId)
 
@@ -880,6 +982,30 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
           ...queuedAttachments(state.conductor),
         ]
 
+        const conductorInput: JsonObjectBuilder = {
+          text: withAttachmentManifest(
+            buildConductorInput({
+              runId: ctx.runId,
+              goal: state.goal,
+              briefText: state.briefText,
+              briefVersion: state.briefVersion,
+              repoUrl: state.repoUrl,
+              repos: state.repos,
+              lessons: state.lessons,
+              playbookVersion: state.playbookVersion,
+              conductor: state.conductor,
+              speakerIds: state.speakerIds,
+            }),
+            ctx.runId,
+            state.initialAttachments,
+          ),
+          repos: state.repos.map((repo) => repo.fullName),
+        }
+
+        if (startingFiles.length > 0) {
+          conductorInput.attachments = startingFiles
+        }
+
         effects.push(
           emit(
             shuttleModule.input('playbook.loaded', {
@@ -904,31 +1030,12 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             childThreadId,
             kind: 'agent',
             definitionName: 'conductor',
-            input: {
-              text: withAttachmentManifest(
-                buildConductorInput({
-                  runId: ctx.runId,
-                  goal: state.goal,
-                  briefText: state.briefText,
-                  briefVersion: state.briefVersion,
-                  repoUrl: state.repoUrl,
-                  repos: state.repos,
-                  lessons: state.lessons,
-                  playbookVersion: state.playbookVersion,
-                  conductor: state.conductor,
-                  speakerIds: state.speakerIds,
-                }),
-                ctx.runId,
-                state.initialAttachments,
-              ),
-              repos: state.repos.map((repo) => repo.fullName),
-              ...(startingFiles.length > 0 ? { attachments: startingFiles } : {}),
-            },
+            input: conductorInput,
           }),
         )
       }
 
-      if (state.activeIntake) {
+      if (state.activeIntake !== null) {
         effects.push(
           spawn({
             childThreadId: state.activeIntake.childThreadId,
@@ -959,10 +1066,10 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
 
       const next = state.pendingMessages[0]
 
-      if (next) {
+      if (next !== undefined) {
         const bypassKind = bypassIntakeKind(next)
 
-        if (bypassKind) {
+        if (bypassKind !== null) {
           effects.push(
             emit(
               shuttleModule.input('intake.bypassed', {
@@ -1028,7 +1135,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         )
       }
 
-      if (conductorThreadId) {
+      if (conductorThreadId !== null) {
         effects.push(
           wait({
             waitId: createWaitId(
@@ -1054,10 +1161,9 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
 
       if (
         !state.reflectionLaunched &&
-        conductorThreadId &&
+        conductorThreadId !== null &&
         state.workerThreadIds.length === 0 &&
         state.pendingMessages.length === 0 &&
-        !state.activeIntake &&
         state.processedMessageIds.length > 0
       ) {
         const reflectionRun = reflectionRunId(ctx.runId)

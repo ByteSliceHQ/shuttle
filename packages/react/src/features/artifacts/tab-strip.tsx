@@ -10,6 +10,7 @@ import {
 } from '../../components/ui/dropdown-menu'
 import { ScrollArea } from '../../components/ui/scroll-area'
 import { cn } from '../../lib/cn'
+import { hasText } from '../../lib/text'
 import type { ArtifactTab, ArtifactTabKind } from '../workspace/workspace'
 import { artifactTypeFor, launchableArtifactTypes, type ArtifactType } from './artifact-types'
 
@@ -36,7 +37,7 @@ export function TabStrip({
   const order = tabs.map((tab) => tab.tabId)
 
   function dropOn(targetId: string) {
-    if (!draggingId || draggingId === targetId) {
+    if (!hasText(draggingId) || draggingId === targetId) {
       return
     }
 

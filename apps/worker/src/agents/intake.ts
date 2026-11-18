@@ -138,7 +138,7 @@ export const intake = defineEvaluator({
   skipModel: ({ text }) => {
     const kind = isHardStop(text) ? 'stop' : isStatusCheck(text) ? 'question' : null
 
-    if (!kind) {
+    if (kind === null) {
       return undefined
     }
 

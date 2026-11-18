@@ -1,12 +1,25 @@
 import { describe, expect, test } from 'bun:test'
 
+import { z } from 'zod'
+
 import { MAX_ASSET_BYTES, type AssetRef } from '../assets/store'
 import type { Actor } from '../tenancy/access'
 import { fakeEnv } from '../testing/fake-env'
 import { fakeBucket } from '../testing/fake-r2'
 import { handleAssetRoutes } from './assets'
 
-const actor = { userId: 'user_1', orgId: 'org_1', name: 'Ada', email: 'ada@example.com' } as Actor
+const actor: Actor = {
+  userId: 'user_1',
+  orgId: 'org_1',
+  role: 'member',
+  name: 'Ada',
+  email: 'ada@example.com',
+}
+
+const UploadedSchema = z.object({
+  asset: z.object({ id: z.string(), name: z.string(), mediaType: z.string(), size: z.number() }),
+})
+
 const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4])
 
 function upload(
@@ -32,7 +45,7 @@ async function uploaded(response: Response | null): Promise<AssetRef> {
     throw new Error(`upload answered ${response?.status}`)
   }
 
-  return ((await response.json()) as { asset: AssetRef }).asset
+  return UploadedSchema.parse(await response.json()).asset
 }
 
 describe('session assets', () => {

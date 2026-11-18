@@ -46,7 +46,7 @@ test('an invitation for someone else cannot be accepted', async () => {
     headers: aliceHeaders,
   })
 
-  await expect(
+  return expect(
     auth.api.acceptInvitation({ body: { invitationId: invitation.id }, headers: malloryHeaders }),
   ).rejects.toThrow()
 })

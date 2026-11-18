@@ -4,8 +4,9 @@ import {
   canOpenSession,
   canShareSession,
   isPublicSession,
-  parseSessionAccess,
   readSessionAccess,
+  SessionAccessSchema,
+  type SessionAccess,
   writeSessionAccess,
 } from './access'
 
@@ -17,11 +18,12 @@ function memoryStorage() {
   const values = new Map<string, unknown>()
 
   return {
-    get: async (key: string) => values.get(key),
-    put: async (key: string, value: unknown) => {
+    // SAFETY: the fake hands back exactly what was `put`, so the caller's `T` is what it stored.
+    get: async <T>(key: string) => values.get(key) as T | undefined,
+    put: async (key: string, value: SessionAccess) => {
       values.set(key, value)
     },
-  } as unknown as Pick<DurableObjectStorage, 'get' | 'put'>
+  }
 }
 
 describe('session access', () => {
@@ -48,7 +50,9 @@ describe('session access', () => {
     expect(isPublicSession(null)).toBe(true)
 
     // With no owner there is no one it could be private to, whatever was asked for.
-    expect(parseSessionAccess({ ownerId: null, memberIds: [], visibility: 'private' })).toEqual({
+    expect(
+      SessionAccessSchema.parse({ ownerId: null, memberIds: [], visibility: 'private' }),
+    ).toEqual({
       ownerId: null,
       memberIds: [],
       visibility: 'public',
@@ -78,11 +82,13 @@ describe('session access', () => {
     expect(await readSessionAccess(storage)).toEqual(saved)
 
     expect(
-      parseSessionAccess({ ownerId: 'alice', memberIds: [], visibility: 'public' })?.visibility,
+      SessionAccessSchema.parse({ ownerId: 'alice', memberIds: [], visibility: 'public' })
+        .visibility,
     ).toBe('public')
 
-    expect(parseSessionAccess({ ownerId: 'alice' })).toBeNull()
-    expect(parseSessionAccess({ memberIds: [] })).toBeNull()
-    await expect(writeSessionAccess(storage, 'everyone')).rejects.toThrow('invalid session access')
+    expect(SessionAccessSchema.safeParse({ ownerId: 'alice' }).success).toBe(false)
+    expect(SessionAccessSchema.safeParse({ memberIds: [] }).success).toBe(false)
+
+    return expect(writeSessionAccess(storage, 'everyone')).rejects.toThrow('invalid session access')
   })
 })

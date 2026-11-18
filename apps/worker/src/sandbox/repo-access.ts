@@ -33,7 +33,7 @@ const githubUrl = (repo: LinkedSandboxRepo) => `https://github.com/${repo.fullNa
 export function repoUrls(env: ShuttleEnv, repo: LinkedSandboxRepo, orgId: string | null): string[] {
   return [
     githubUrl(repo),
-    ...(orgId && codeStorageConfigured(env)
+    ...(orgId !== null && orgId !== '' && codeStorageConfigured(env)
       ? [codeStorageGitUrl(env, codeStorageRepoName(orgId, repo.fullName))]
       : []),
   ]
@@ -82,7 +82,7 @@ export async function repoAccess(
   repo: LinkedSandboxRepo,
   orgId: string | null,
 ): Promise<RepoAccess> {
-  if (orgId && codeStorageConfigured(env)) {
+  if (orgId !== null && orgId !== '' && codeStorageConfigured(env)) {
     const client = codeStorageClient(env)
     const repoName = codeStorageRepoName(orgId, repo.fullName)
 
@@ -113,7 +113,7 @@ export async function sessionRemote(
   orgId: string | null,
   runId: string,
 ): Promise<RepoAccess | null> {
-  if (!orgId || !codeStorageConfigured(env)) {
+  if (orgId === null || orgId === '' || !codeStorageConfigured(env)) {
     return null
   }
 

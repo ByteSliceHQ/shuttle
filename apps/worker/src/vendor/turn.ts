@@ -1,8 +1,11 @@
+import { z } from 'zod'
+
 import type { AgentTurnResult, LlmCompleteArgs } from '@swirls/looms/agent'
 
 import {
   SHUTTLE_PROPOSE_PULL_REQUEST,
   type BridgeEvent,
+  type BridgeTurnRequest,
   type BridgePullProposal,
   type BridgeToolKind,
 } from '../../bridge/protocol'
@@ -11,6 +14,7 @@ import type { CredentialPayload } from '../credentials/store'
 import type { SessionSandboxStub } from '../env'
 import type { VendorHarnessId } from '../harness'
 import { getStepObserver, getThinkingObserver, type VendorStep } from '../llm'
+import { present } from '../present'
 import { SHARE_FILE_TOOL } from '../tools/share-file'
 import { vendorHarnessInfo } from './harnesses'
 import type { VendorModelChoice } from './models'
@@ -25,6 +29,8 @@ type SandboxForTurn = Pick<
   SessionSandboxStub,
   'startAgentRun' | 'readAgentEvents' | 'agentRunState' | 'stopAgentRun' | 'collectAgentFiles'
 >
+
+type Writable<T> = { -readonly [K in keyof T]: T[K] }
 
 type TurnStorage = Pick<DurableObjectStorage, 'get' | 'put'>
 
@@ -128,28 +134,28 @@ function unreadUserText(args: LlmCompleteArgs): string {
   return args.messages
     .slice(lastReply + 1)
     .filter((message) => message.role === 'user')
-    .map((message) =>
-      typeof message.content === 'string' ? message.content : JSON.stringify(message.content),
-    )
+    .map((message) => message.content)
     .join('\n\n')
+}
+
+export interface VendorToolCall {
+  readonly id: string
+  readonly name: string
+  readonly arguments: Record<string, string>
 }
 
 /** Shapes a vendor tool like one of Shuttle's own so the session view renders it the same way. */
 export function vendorToolCall(
   tool: { id: string; kind: BridgeToolKind; title: string },
   cwd = '',
-): {
-  id: string
-  name: string
-  arguments: Record<string, string>
-} {
+): VendorToolCall {
   if (tool.kind === 'command') {
     return { id: tool.id, name: 'bash', arguments: { command: tool.title } }
   }
 
   if (tool.kind === 'file_change') {
     // Agents report absolute paths. Inside the session's worktree the prefix is only noise.
-    const path = cwd ? tool.title.replaceAll(`${cwd.replace(/\/$/, '')}/`, '') : tool.title
+    const path = cwd === '' ? tool.title : tool.title.replaceAll(`${cwd.replace(/\/$/, '')}/`, '')
 
     return { id: tool.id, name: 'edit_file', arguments: { path } }
   }
@@ -185,7 +191,10 @@ export async function runVendorTurn(
   // context with, say, the narrator answering a side question.
   // A vendor conversation lives in the home directory of the person who ran it. In a session
   // that moves between people's sandboxes, each person's turns continue their own.
-  const whose = deps.signInStaysInSandbox && deps.billedTo ? `:for:${deps.billedTo}` : ''
+  const billedTo = present(deps.billedTo)
+
+  const whose =
+    deps.signInStaysInSandbox === true && billedTo !== undefined ? `:for:${billedTo}` : ''
 
   let conversationKey = deps.member
     ? `shuttle:vendor:${harness}${whose}:member`
@@ -201,9 +210,7 @@ export async function runVendorTurn(
     const { state } = await sandbox.agentRunState(conversation.pending.runKey)
 
     if (state === 'exited' || state === 'missing') {
-      conversation = conversation.vendorThreadId
-        ? { vendorThreadId: conversation.vendorThreadId }
-        : {}
+      conversation = resumable(conversation)
     } else {
       conversationKey = `shuttle:vendor:${harness}${whose}:thread:${owner}`
       conversation = (await storage.get<VendorConversation>(conversationKey)) ?? {}
@@ -237,10 +244,10 @@ export async function runVendorTurn(
 
   const stored = await deps.credentials.get(harness)
 
-  if (deps.signInStaysInSandbox && !conversation.pending) {
+  if (deps.signInStaysInSandbox === true && conversation.pending === undefined) {
     // The work never falls back to someone else's sign-in. The person it is for has to connect.
     // On a machine, the sign-in is a file there and is never recorded, so only the file counts.
-    if (!stored && !deps.onMachine) {
+    if (stored === null && deps.onMachine !== true) {
       return {
         message: {
           role: 'assistant',
@@ -256,9 +263,10 @@ export async function runVendorTurn(
       return {
         message: {
           role: 'assistant',
-          content: deps.onMachine
-            ? `${info.label} is not signed in on this machine, where this session runs. Sign in from the message box, or move the session to the cloud, then send the message again.`
-            : `${info.label} is not signed in in the cloud, where this session runs. Sign in from the message box, or move the session to your machine, then send the message again.`,
+          content:
+            deps.onMachine === true
+              ? `${info.label} is not signed in on this machine, where this session runs. Sign in from the message box, or move the session to the cloud, then send the message again.`
+              : `${info.label} is not signed in in the cloud, where this session runs. Sign in from the message box, or move the session to your machine, then send the message again.`,
         },
         usage: { input: 0, output: 0 },
       }
@@ -274,31 +282,51 @@ export async function runVendorTurn(
 
     // Recorded before the agent starts, so a restart mid-turn rejoins this run and never
     // starts a second agent on the same prompt.
-    pending = { runKey, offset: 0, ...(owner ? { owner } : {}) }
+    pending = { runKey, offset: 0, owner: present(owner) }
     // Shuttle's notes go out with this prompt, once.
     const prompt = withNotes(conversation.notes, unreadUserText(args))
+    const shared = present(deps.shareInstructions)
     await save({ ...withoutNotes(conversation), pending })
 
-    await sandbox.startAgentRun({
-      runKey,
-      mode: 'turn',
-      request: {
-        harness,
-        prompt,
-        cwd: deps.cwd,
-        instructions: [
-          SANDBOX_INSTRUCTIONS,
-          ...(canPropose ? [PULL_REQUEST_INSTRUCTIONS] : []),
-          ...(deps.shareInstructions ? [deps.shareInstructions] : []),
-        ].join('\n'),
-        ...(canPropose ? { shuttleTools: { proposePullRequest: true } } : {}),
-        ...(deps.choice?.model ? { model: deps.choice.model } : {}),
-        ...(deps.choice?.effort ? { effort: deps.choice.effort } : {}),
-        ...(conversation.vendorThreadId ? { vendorThreadId: conversation.vendorThreadId } : {}),
-      },
-      ...(stored?.env ? { env: stored.env } : {}),
-      ...(stored?.files && !deps.signInStaysInSandbox ? { files: stored.files } : {}),
-    })
+    const request: Writable<BridgeTurnRequest> = {
+      harness,
+      prompt,
+      cwd: deps.cwd,
+      instructions: [
+        SANDBOX_INSTRUCTIONS,
+        ...(canPropose ? [PULL_REQUEST_INSTRUCTIONS] : []),
+        ...(shared === undefined ? [] : [shared]),
+      ].join('\n'),
+    }
+
+    const model = present(deps.choice?.model)
+    const effort = present(deps.choice?.effort)
+    const vendorThreadId = present(conversation.vendorThreadId)
+
+    if (canPropose) {
+      request.shuttleTools = { proposePullRequest: true }
+    }
+
+    if (model !== undefined) {
+      request.model = model
+    }
+
+    if (effort !== undefined) {
+      request.effort = effort
+    }
+
+    if (vendorThreadId !== undefined) {
+      request.vendorThreadId = vendorThreadId
+    }
+
+    const started = { runKey, mode: 'turn' as const, request }
+    const withEnv = stored?.env === undefined ? started : { ...started, env: stored.env }
+
+    await sandbox.startAgentRun(
+      deps.signInStaysInSandbox === true || stored?.files === undefined
+        ? withEnv
+        : { ...withEnv, files: stored.files },
+    )
   }
 
   const { runKey } = pending
@@ -331,8 +359,8 @@ export async function runVendorTurn(
         type: 'started',
         harness,
         label: info.label,
-        ...(model ? { model } : {}),
-        ...(deps.billedTo ? { billedTo: deps.billedTo } : {}),
+        model: present(model),
+        billedTo,
       })
     }
   }
@@ -378,9 +406,10 @@ export async function runVendorTurn(
         await step({
           type: 'thought',
           text: event.text,
-          ...(thinkingStartedAt === undefined
-            ? {}
-            : { durationMs: Math.max(0, Date.now() - thinkingStartedAt) }),
+          durationMs:
+            thinkingStartedAt === undefined
+              ? undefined
+              : Math.max(0, Date.now() - thinkingStartedAt),
         })
 
         thinkingStartedAt = undefined
@@ -405,11 +434,12 @@ export async function runVendorTurn(
           toolCallId: event.id,
           result: event.output ?? '',
           // The output stays the result. The error only says how it ended.
-          ...(event.status === 'completed'
-            ? {}
-            : {
-                error: event.exitCode === undefined ? event.status : `exit code ${event.exitCode}`,
-              }),
+          error:
+            event.status === 'completed'
+              ? undefined
+              : event.exitCode === undefined
+                ? event.status
+                : `exit code ${event.exitCode}`,
         })
 
         break
@@ -432,14 +462,14 @@ export async function runVendorTurn(
         break
       }
 
-      default: {
+      case 'login_prompt':
+      case 'login_done':
         break
-      }
     }
   }
 
   while (!done) {
-    if (signal?.aborted && stopRequestedAt === undefined) {
+    if (signal?.aborted === true && stopRequestedAt === undefined) {
       stopRequestedAt = Date.now()
       await sandbox.stopAgentRun(runKey)
     }
@@ -481,11 +511,11 @@ export async function runVendorTurn(
     await sleep(POLL_MS)
   }
 
-  await save(conversation.vendorThreadId ? { vendorThreadId: conversation.vendorThreadId } : {})
+  await save(resumable(conversation))
 
   // Agents refresh their sign-in while they work. Keep the newest copy, or the next container
   // would start from a stale one.
-  if (info.credentialFiles.length > 0 && !deps.signInStaysInSandbox) {
+  if (info.credentialFiles.length > 0 && deps.signInStaysInSandbox !== true) {
     try {
       const { files } = await sandbox.collectAgentFiles(info.credentialFiles)
 
@@ -497,7 +527,7 @@ export async function runVendorTurn(
     }
   }
 
-  if (signal?.aborted) {
+  if (signal?.aborted === true) {
     // What the agent had already said still belongs in the history of a stopped turn.
     await releaseHeldMessage()
     throw new Error('Aborted')
@@ -519,14 +549,14 @@ export async function runVendorTurn(
         type: 'tool_finished',
         toolCallId: id,
         result: JSON.stringify(result.ok ? { ok: true, path, asset: result.asset } : result),
-        ...(result.ok ? {} : { error: result.error }),
+        error: result.ok ? undefined : result.error,
       })
     }
   } catch {
     // Showing files is best effort; the turn's result still stands.
   }
 
-  const text = heldMessage?.trim() || done?.text.trim() || ''
+  const text = present(heldMessage?.trim()) ?? present(done?.text.trim()) ?? ''
 
   if (done?.status === 'failed') {
     const reason = done.error ?? 'unknown error'
@@ -538,26 +568,24 @@ export async function runVendorTurn(
     const failure = `${info.label} could not finish this turn: ${reason}.${hint}`
 
     return {
-      message: { role: 'assistant', content: text ? `${text}\n\n${failure}` : failure },
+      message: { role: 'assistant', content: text === '' ? failure : `${text}\n\n${failure}` },
       usage,
     }
   }
 
-  const content = text || `${info.label} finished without a message.`
+  const content = text === '' ? `${info.label} finished without a message.` : text
 
   // Handed to Looms as the conductor's own call, so the person gets the same publish card a
   // Shuttle agent's proposal makes, and Shuttle publishes it the same way.
-  if (proposal && canPropose) {
+  if (proposal !== undefined && canPropose) {
+    const base = { title: proposal.title, body: proposal.body, draft: proposal.draft }
+    const repo = present(proposal.repo)
+
     const toolCalls = [
       {
         id: `vendor_pr_${proposal.id}`,
         name: SHUTTLE_PROPOSE_PULL_REQUEST,
-        arguments: {
-          title: proposal.title,
-          body: proposal.body,
-          draft: proposal.draft,
-          ...(proposal.repo ? { repo: proposal.repo } : {}),
-        },
+        arguments: repo === undefined ? base : { ...base, repo },
       },
     ]
 
@@ -565,6 +593,13 @@ export async function runVendorTurn(
   }
 
   return { message: { role: 'assistant', content }, usage }
+}
+
+/** What a conversation keeps when its turn is over: the agent's thread, and nothing else. */
+function resumable(conversation: VendorConversation): VendorConversation {
+  const vendorThreadId = present(conversation.vendorThreadId)
+
+  return vendorThreadId === undefined ? {} : { vendorThreadId }
 }
 
 function withoutNotes(conversation: VendorConversation): VendorConversation {
@@ -591,12 +626,17 @@ export function withNotes(notes: readonly string[] | undefined, prompt: string):
 export function proposalToolResult(args: Pick<LlmCompleteArgs, 'messages'>): string | null {
   const last = args.messages.at(-1)
 
-  if (last?.role !== 'tool' || !last.toolCallId) {
+  if (last?.role !== 'tool' || last.toolCallId === undefined || last.toolCallId === '') {
     return null
   }
 
   const call = args.messages
-    .findLast((message) => message.role === 'assistant' && message.toolCalls?.length)
+    .findLast(
+      (message) =>
+        message.role === 'assistant' &&
+        message.toolCalls !== undefined &&
+        message.toolCalls.length > 0,
+    )
     ?.toolCalls?.find((entry) => entry.id === last.toolCallId)
 
   return call?.name === SHUTTLE_PROPOSE_PULL_REQUEST && call.id.startsWith('vendor_pr_')
@@ -604,23 +644,34 @@ export function proposalToolResult(args: Pick<LlmCompleteArgs, 'messages'>): str
     : null
 }
 
+export interface ProposalOutcome {
+  readonly forPerson: string
+  readonly forAgent: string
+}
+
+/** What a proposal's result says. A part that is missing or the wrong type counts as absent. */
+const ProposalResultSchema = z.object({
+  pulls: z
+    .array(
+      z.object({
+        fullName: z.string().optional().catch(undefined),
+        number: z.number().optional().catch(undefined),
+        url: z.string().catch(''),
+        outcome: z.string().optional().catch(undefined),
+      }),
+    )
+    .catch([]),
+  error: z.string().catch(''),
+  message: z.string().catch(''),
+})
+
+const NO_PROPOSAL_RESULT = { pulls: [], error: '', message: '' }
+
 /** What became of a proposed pull request, for the person and for the agent. */
-export function describeProposalOutcome(result: string): { forPerson: string; forAgent: string } {
-  let parsed: unknown = null
+export function describeProposalOutcome(result: string): ProposalOutcome {
+  const value = readProposalResult(result)
 
-  try {
-    parsed = JSON.parse(result)
-  } catch {
-    // Not JSON: say what it says.
-  }
-
-  const value = (parsed && typeof parsed === 'object' ? parsed : {}) as {
-    pulls?: { fullName?: string; number?: number; url?: string; outcome?: string }[]
-    error?: string
-    message?: string
-  }
-
-  const pulls = (value.pulls ?? []).filter((pull) => pull.url)
+  const pulls = value.pulls.filter((pull) => pull.url !== '')
 
   if (pulls.length > 0) {
     const list = pulls
@@ -642,14 +693,14 @@ export function describeProposalOutcome(result: string): { forPerson: string; fo
     }
   }
 
-  if (value.error) {
+  if (value.error !== '') {
     return {
       forPerson: `The pull request could not be published: ${value.error}`,
       forAgent: `Publishing the pull request you proposed failed: ${value.error}. Fix the cause if it is in the code, then propose it again.`,
     }
   }
 
-  if (value.message || /discard/i.test(result)) {
+  if (value.message !== '' || /discard/i.test(result)) {
     return {
       forPerson: 'The pull request was discarded. Nothing was published.',
       forAgent: 'The user discarded the pull request you proposed; nothing was published.',
@@ -659,7 +710,16 @@ export function describeProposalOutcome(result: string): { forPerson: string; fo
   const said = result.trim().slice(0, 500)
 
   return {
-    forPerson: said || 'The pull request proposal ended.',
+    forPerson: said === '' ? 'The pull request proposal ended.' : said,
     forAgent: `Your pull request proposal ended: ${said}`,
+  }
+}
+
+function readProposalResult(result: string): z.infer<typeof ProposalResultSchema> {
+  try {
+    return ProposalResultSchema.catch(NO_PROPOSAL_RESULT).parse(JSON.parse(result))
+  } catch {
+    // Not JSON: say what it says.
+    return NO_PROPOSAL_RESULT
   }
 }

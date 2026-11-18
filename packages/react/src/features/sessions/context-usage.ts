@@ -1,9 +1,9 @@
 import type { ProjectionDefinition } from '@swirls/looms/core'
 
-import { jsonFields, jsonNumber } from '../../lib/json'
+import { jsonNumber } from '../../lib/json'
 import type { SessionEvent } from '../events/event-catalog'
 import type { SessionFeed } from './session-feed'
-import { currentBrief } from './session-feed'
+import { currentBrief, eventFields } from './session-feed'
 
 export interface TurnUsage {
   readonly threadId: string | null
@@ -60,7 +60,7 @@ const initialUsage: ContextUsageState = {
 export function estimateTokens(text: string): number {
   const trimmed = text.trim()
 
-  if (!trimmed) {
+  if (trimmed === '') {
     return 0
   }
 
@@ -117,7 +117,7 @@ function estimateFromFeed(feed: SessionFeed): Record<ContextCategoryId, number> 
       case 'agent': {
         conversationTokens += estimateTokens(item.text)
 
-        if (item.thought) {
+        if (item.thought !== undefined) {
           conversationTokens += estimateTokens(item.thought.text)
         }
 
@@ -141,7 +141,7 @@ function estimateFromFeed(feed: SessionFeed): Record<ContextCategoryId, number> 
             toolTokens += estimateTokens(JSON.stringify(call.result))
           }
 
-          if (call.error) {
+          if (call.error !== undefined && call.error !== '') {
             toolTokens += estimateTokens(call.error)
           }
         }
@@ -152,11 +152,15 @@ function estimateFromFeed(feed: SessionFeed): Record<ContextCategoryId, number> 
       case 'question': {
         conversationTokens += estimateTokens(item.title)
 
-        if (item.thought) {
+        if (item.thought !== undefined) {
           conversationTokens += estimateTokens(item.thought.text)
         }
 
-        if (item.decision?.answer) {
+        if (
+          item.decision !== undefined &&
+          item.decision.answer !== null &&
+          item.decision.answer !== ''
+        ) {
           conversationTokens += estimateTokens(item.decision.answer)
         }
 
@@ -275,7 +279,7 @@ function reduceUsage(state: ContextUsageState, event: SessionEvent): ContextUsag
     return state
   }
 
-  const payload = jsonFields(event.payload)
+  const payload = eventFields(event)
   const input = jsonNumber(payload.input) ?? 0
   const output = jsonNumber(payload.output) ?? 0
   const turn = jsonNumber(payload.turn) ?? 0

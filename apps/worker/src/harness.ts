@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 /**
  * Which agent runs a session. `shuttle` is the Looms loop on OpenRouter; every other harness is a
  * vendor agent that runs inside the sandbox container under the developer's own subscription.
@@ -15,12 +17,16 @@ export const HARNESS_STORAGE_KEY = 'shuttle:harness'
 const ACP_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/
 
 function isBuiltIn(value: string): value is BuiltInHarness {
-  return (BUILT_IN_HARNESSES as readonly string[]).includes(value)
+  return BUILT_IN_HARNESSES.some((harness) => harness === value)
+}
+
+function isAcpHarness(value: string): value is AcpHarness {
+  return value.startsWith('acp:') && ACP_NAME.test(value.slice(4))
 }
 
 /** The harness id for `value`, or null when it is not one Shuttle knows how to run. */
-export function parseHarness(value: unknown): HarnessId | null {
-  if (typeof value !== 'string') {
+export function parseHarness(value: string | undefined): HarnessId | null {
+  if (value === undefined) {
     return null
   }
 
@@ -30,8 +36,8 @@ export function parseHarness(value: unknown): HarnessId | null {
     return trimmed
   }
 
-  if (trimmed.startsWith('acp:') && ACP_NAME.test(trimmed.slice(4))) {
-    return trimmed as AcpHarness
+  if (isAcpHarness(trimmed)) {
+    return trimmed
   }
 
   return null
@@ -43,22 +49,26 @@ export function isVendorHarness(harness: HarnessId): harness is VendorHarnessId 
 
 type HarnessStorage = Pick<DurableObjectStorage, 'get' | 'put'>
 
+async function readHarnessValue(storage: HarnessStorage): Promise<string | undefined> {
+  return z.string().safeParse(await storage.get(HARNESS_STORAGE_KEY)).data
+}
+
 /** The harness set on this run, or null when none has been chosen for it yet. */
 export async function readPinnedHarness(storage: HarnessStorage): Promise<HarnessId | null> {
-  return parseHarness(await storage.get<string>(HARNESS_STORAGE_KEY))
+  return parseHarness(await readHarnessValue(storage))
 }
 
 export async function readStoredHarness(storage: HarnessStorage): Promise<HarnessId> {
-  return parseHarness(await storage.get<string>(HARNESS_STORAGE_KEY)) ?? DEFAULT_HARNESS
+  return parseHarness(await readHarnessValue(storage)) ?? DEFAULT_HARNESS
 }
 
 export async function writeStoredHarness(
   storage: HarnessStorage,
-  value: unknown,
+  value: string,
 ): Promise<HarnessId> {
   const harness = parseHarness(value)
 
-  if (!harness) {
+  if (harness === null) {
     throw new Error('unknown harness')
   }
 

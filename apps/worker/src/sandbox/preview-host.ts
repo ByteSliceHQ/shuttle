@@ -4,14 +4,14 @@ import { isLocal } from '../https'
 export function parsePreviewHost(hostname: string): { port: number; folderId: string } | null {
   const match = hostname.match(/^p(\d{2,5})-([a-zA-Z0-9-]+)\./)
 
-  if (!match) {
+  if (match === null) {
     return null
   }
 
   const port = Number(match[1])
   const folderId = match[2] ?? ''
 
-  if (!Number.isFinite(port) || port < 1 || port > 65535 || !folderId) {
+  if (!Number.isFinite(port) || port < 1 || port > 65535 || folderId === '') {
     return null
   }
 
@@ -23,7 +23,7 @@ export function parsePreviewHost(hostname: string): { port: number; folderId: st
  * name under its domain, and the ones that are neither the app nor a preview are not Shuttle.
  */
 export function isOwnHost(hostname: string, webUrl: string | undefined): boolean {
-  if (!webUrl || isLocal(hostname)) {
+  if (webUrl === undefined || webUrl === '' || isLocal(hostname)) {
     return true
   }
 

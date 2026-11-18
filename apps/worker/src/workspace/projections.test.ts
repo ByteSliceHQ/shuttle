@@ -1,18 +1,26 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { EventEnvelope } from '@swirls/looms/core'
+import type { EventEnvelope, JsonValue } from '@swirls/looms/core'
 
 import { workspaceTree } from './projections'
 
-function event(type: string, payload: object, ts: number, idempotencyKey?: string): EventEnvelope {
+function event(
+  type: string,
+  payload: JsonValue,
+  ts: number,
+  idempotencyKey?: string,
+): EventEnvelope {
   return {
     type,
     payload,
     seq: 1,
     id: `e-${ts}`,
+    runId: 'workspace',
+    threadId: null,
+    origin: { type: 'system' },
     ts,
-    ...(idempotencyKey ? { idempotencyKey } : {}),
-  } as EventEnvelope
+    idempotencyKey,
+  }
 }
 
 function launchedSession() {

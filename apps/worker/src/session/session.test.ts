@@ -5,6 +5,7 @@ import { z } from 'zod'
 
 import { agent, defineAgent, type AgentDefinition, type Message } from '@swirls/looms/agent'
 import { approval } from '@swirls/looms/approval'
+import { type JsonValue } from '@swirls/looms/core'
 import { evaluator } from '@swirls/looms/evaluator'
 import { createLooms, type Looms } from '@swirls/looms/runtime'
 
@@ -98,12 +99,18 @@ async function startCodingSession(
   })
 }
 
-function conductorSpawnedPayloads(events: readonly { type: string; payload: unknown }[]) {
+const ConductorSpawnedPayload = z.object({
+  childThreadId: z.string(),
+  generation: z.number().optional(),
+  reason: z.string().optional(),
+})
+
+const ApprovalRequestedPayload = z.object({ approvalId: z.string(), description: z.string() })
+
+function conductorSpawnedPayloads(events: readonly { type: string; payload: JsonValue }[]) {
   return events
     .filter((event) => event.type === 'shuttle.conductor.spawned')
-    .map(
-      (event) => event.payload as { childThreadId: string; generation?: number; reason?: string },
-    )
+    .map((event) => ConductorSpawnedPayload.parse(event.payload))
 }
 
 describe('shuttle session routing', () => {
@@ -154,7 +161,7 @@ describe('shuttle session routing', () => {
       conversational: true,
       maxTurns: 500,
       runTurn: async ({ messages, input }) => {
-        const text = lastUserText(messages) || String(input.text ?? '')
+        const text = lastUserText(messages) || (input.text ?? '')
 
         if (text.includes('Build a todo app')) {
           turnStarted = true
@@ -209,7 +216,7 @@ describe('shuttle session routing', () => {
       conversational: true,
       maxTurns: 500,
       runTurn: ({ messages, input }) => {
-        const text = lastUserText(messages) || String(input.text ?? '')
+        const text = lastUserText(messages) || (input.text ?? '')
         seen.push(text)
 
         return {
@@ -354,7 +361,7 @@ describe('shuttle session routing', () => {
       conversational: true,
       maxTurns: 500,
       runTurn: ({ messages, input }) => {
-        const text = lastUserText(messages) || String(input.text ?? '')
+        const text = lastUserText(messages) || (input.text ?? '')
         turns.push({ text, sponsor: sponsorOfMessages(messages) })
 
         return { message: { role: 'assistant', content: 'ok' }, done: true }
@@ -428,7 +435,7 @@ describe('shuttle session routing', () => {
       conversational: true,
       maxTurns: 500,
       runTurn: ({ messages, input }) => {
-        const text = lastUserText(messages) || String(input.text ?? '')
+        const text = lastUserText(messages) || (input.text ?? '')
         seen.push(text)
 
         return { message: { role: 'assistant', content: `ack: ${text.slice(0, 40)}` }, done: true }
@@ -474,7 +481,7 @@ describe('shuttle session routing', () => {
       conversational: true,
       maxTurns: 500,
       runTurn: ({ messages, input }) => {
-        const text = lastUserText(messages) || String(input.text ?? '')
+        const text = lastUserText(messages) || (input.text ?? '')
         seen.push(text)
 
         return { message: { role: 'assistant', content: `ack: ${text.slice(0, 40)}` }, done: true }
@@ -532,7 +539,7 @@ describe('shuttle session routing', () => {
       maxTurns: 500,
       runTurn: ({ messages, input }) => {
         attempts += 1
-        const text = lastUserText(messages) || String(input.text ?? '')
+        const text = lastUserText(messages) || (input.text ?? '')
         seen.push(text)
 
         if (attempts === 1) {
@@ -581,7 +588,7 @@ describe('shuttle session routing', () => {
       maxTurns: 500,
       runTurn: ({ input }) => {
         attempts += 1
-        const text = String(input.text ?? '')
+        const text = input.text ?? ''
         spawnInputs.push(text)
 
         if (attempts === 1) {
@@ -627,10 +634,10 @@ describe('shuttle session routing', () => {
   })
 })
 
-function publishGates(events: readonly { type: string; payload: unknown }[]) {
+function publishGates(events: readonly { type: string; payload: JsonValue }[]) {
   return events
     .filter((event) => event.type === 'approval.requested')
-    .map((event) => event.payload as { approvalId: string; description: string })
+    .map((event) => ApprovalRequestedPayload.parse(event.payload))
     .filter((payload) => payload.approvalId.startsWith('pr_publish_'))
 }
 

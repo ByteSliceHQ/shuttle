@@ -47,7 +47,7 @@ export function PullPublishCard({
             actionId,
             outcome: 'approve',
             payload: {
-              title: title.trim() || 'Shuttle changes',
+              title: title.trim() === '' ? 'Shuttle changes' : title.trim(),
               body,
               draft: actionId === 'update' ? (existing?.draft ?? true) : actionId === 'draft',
             },
@@ -57,6 +57,8 @@ export function PullPublishCard({
   // Once the session has the decision the card stays locked: the feed replaces it with the outcome.
   const pending = decide.isPending || decide.isSuccess
   const error = decide.error?.message
+  const parentLabel = jsonText(item.defaults?.parentPullLabel)
+  const restackLabel = jsonText(item.defaults?.restackLabel)
 
   return (
     <div className={cn('flex gap-3', className)} data-approval-id={item.approvalId}>
@@ -93,10 +95,10 @@ export function PullPublishCard({
           />
         ) : (
           <div className="mt-3 flex flex-col gap-2">
-            {existing ? (
+            {existing !== null ? (
               <p className="text-muted-foreground text-[11px]">
                 Pushes this layer’s changes to{' '}
-                {existing.url ? (
+                {existing.url !== null ? (
                   <a
                     href={existing.url}
                     target="_blank"
@@ -112,20 +114,15 @@ export function PullPublishCard({
                 description with these.
               </p>
             ) : null}
-            {jsonText(item.defaults?.parentPullLabel) ? (
+            {parentLabel !== undefined && parentLabel !== '' ? (
               <p className="text-muted-foreground text-[11px]">
-                Stacks on{' '}
-                <span className="text-foreground/90 font-mono">
-                  {jsonText(item.defaults?.parentPullLabel)}
-                </span>
+                Stacks on <span className="text-foreground/90 font-mono">{parentLabel}</span>
               </p>
             ) : null}
-            {jsonText(item.defaults?.restackLabel) ? (
+            {restackLabel !== undefined && restackLabel !== '' ? (
               <p className="text-muted-foreground text-[11px]">
                 Will force-update{' '}
-                <span className="text-foreground/90 font-mono">
-                  {jsonText(item.defaults?.restackLabel)}
-                </span>
+                <span className="text-foreground/90 font-mono">{restackLabel}</span>
               </p>
             ) : null}
             <input
@@ -143,7 +140,7 @@ export function PullPublishCard({
               className="min-h-24 resize-none text-[13px]"
             />
             <div className="flex flex-wrap items-center justify-end gap-2">
-              {error ? (
+              {error !== undefined && error !== '' ? (
                 <span className="text-status-failed mr-auto min-w-0 text-xs break-words">
                   {error}
                 </span>
@@ -157,7 +154,7 @@ export function PullPublishCard({
               >
                 Discard
               </Button>
-              {existing ? (
+              {existing !== null ? (
                 <Button
                   type="button"
                   variant="brand"
@@ -203,7 +200,7 @@ function existingPull(
 ): { label: string; url: string | null; draft: boolean } | null {
   const label = jsonText(item.defaults?.existingPullLabel)
 
-  return label
+  return label !== undefined && label !== ''
     ? {
         label,
         url: jsonText(item.defaults?.existingPullUrl) ?? null,
@@ -216,15 +213,15 @@ function publishHeading(item: Extract<FeedItem, { kind: 'question' }>): string {
   const existing = existingPull(item)
 
   if (!item.decision) {
-    return existing ? `Update ${existing.label}` : 'Publish pull requests'
+    return existing !== null ? `Update ${existing.label}` : 'Publish pull requests'
   }
 
   if (item.decision.answer === null) {
-    return existing ? 'Update discarded' : 'Pull requests discarded'
+    return existing !== null ? 'Update discarded' : 'Pull requests discarded'
   }
 
   if (!item.publish) {
-    return existing ? 'Update approved' : 'Publish approved'
+    return existing !== null ? 'Update approved' : 'Publish approved'
   }
 
   switch (item.publish.status) {
@@ -232,7 +229,9 @@ function publishHeading(item: Extract<FeedItem, { kind: 'question' }>): string {
       return publishedHeading(item.publish.pulls)
 
     case 'failed':
-      return existing ? `Couldn’t update ${existing.label}` : 'Couldn’t publish pull requests'
+      return existing !== null
+        ? `Couldn’t update ${existing.label}`
+        : 'Couldn’t publish pull requests'
 
     default: {
       const exhaustive: never = item.publish
@@ -289,7 +288,9 @@ function PublishPending({
   return (
     <p className="text-muted-foreground mt-2 flex items-center gap-1.5 text-xs">
       <LoaderCircle className="size-3 animate-spin" />
-      {existingPull(item) ? 'Pushing changes…' : 'Committing changes and opening pull requests…'}
+      {existingPull(item) !== null
+        ? 'Pushing changes…'
+        : 'Committing changes and opening pull requests…'}
     </p>
   )
 }

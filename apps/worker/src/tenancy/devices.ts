@@ -132,7 +132,7 @@ export async function removeDevice(
     .bind(orgId, userId, deviceId)
     .run()
 
-  return (done.meta.changes ?? 0) > 0
+  return done.meta.changes > 0
 }
 
 /** The token a request carries as `Authorization: Bearer …`, if it carries one. */

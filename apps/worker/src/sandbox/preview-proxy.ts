@@ -1,10 +1,12 @@
+import { z } from 'zod'
+
 import { ensureContainerRunning, type DurableContainer } from './container-runtime'
 
 const PREVIEW_READY_ATTEMPTS = 20
 const PREVIEW_READY_WAIT_MS = 250
 
-export function isNotListeningError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
+export function isNotListeningError(cause: unknown): boolean {
+  const message = cause instanceof Error ? cause.message : String(cause)
   return /container is not listening/i.test(message)
 }
 
@@ -24,7 +26,7 @@ export function wantsHtmlErrorPage(request: Request): boolean {
     return true
   }
 
-  if (dest && dest !== 'empty') {
+  if (dest !== null && dest !== '' && dest !== 'empty') {
     return false
   }
 
@@ -85,6 +87,8 @@ export function previewUnavailableResponse(
   port: number,
   detail?: string,
 ): Response {
+  const hasDetail = detail !== undefined && detail !== ''
+
   const headers = new Headers({
     'retry-after': '2',
     'cache-control': 'no-store',
@@ -94,7 +98,7 @@ export function previewUnavailableResponse(
   if (!wantsHtmlErrorPage(request)) {
     headers.set('content-type', 'text/plain; charset=utf-8')
     return new Response(
-      `Port ${port} is not accepting connections in the sandbox.\n${detail ? `${detail}\n` : ''}`,
+      `Port ${port} is not accepting connections in the sandbox.\n${hasDetail ? `${detail}\n` : ''}`,
       { status: 503, headers },
     )
   }
@@ -112,7 +116,7 @@ export function previewUnavailableResponse(
       `<p>Start a server on this port in the sandbox and it will show up here.</p>`,
       `<p>If one is already running, make sure it listens on <code>0.0.0.0:${port}</code>.</p>`,
       `<p class="wait"><span class="dot"></span>Waiting for port ${port}</p>`,
-      detail ? `<pre>${escapeHtml(detail)}</pre>` : '',
+      hasDetail ? `<pre>${escapeHtml(detail)}</pre>` : '',
       `</main><script>${UNAVAILABLE_SCRIPT}</script></body></html>`,
     ].join(''),
     { status: 503, headers },
@@ -162,6 +166,8 @@ export async function proxyContainerPreview(
     }
   }
 
-  const detail = lastError instanceof Error ? lastError.message : String(lastError ?? 'unknown')
+  const detail =
+    lastError instanceof Error ? lastError.message : z.string().catch('unknown').parse(lastError)
+
   return previewUnavailableResponse(request, port, detail)
 }

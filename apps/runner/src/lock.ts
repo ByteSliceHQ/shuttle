@@ -14,7 +14,7 @@ function alive(pid: number): boolean {
     return true
   } catch (cause) {
     // No such process. Anything else (no permission to signal it) means it exists.
-    return (cause as NodeJS.ErrnoException).code !== 'ESRCH'
+    return !(cause instanceof Error && 'code' in cause && cause.code === 'ESRCH')
   }
 }
 

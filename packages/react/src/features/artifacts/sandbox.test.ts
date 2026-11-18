@@ -71,10 +71,13 @@ describe('previewUrl', () => {
   })
 
   test('follows the page onto https, and stays on http on this machine', () => {
-    const scope = globalThis as { window?: unknown }
-    const before = scope.window
+    const before = Object.getOwnPropertyDescriptor(globalThis, 'window')
 
-    scope.window = { location: { protocol: 'https:', hostname: 'app.shuttle.example', port: '' } }
+    Object.defineProperty(globalThis, 'window', {
+      value: { location: { protocol: 'https:', hostname: 'app.shuttle.example', port: '' } },
+      configurable: true,
+      writable: true,
+    })
 
     try {
       expect(previewUrl(3000, folderId, 'shuttle.example')).toBe(
@@ -83,7 +86,11 @@ describe('previewUrl', () => {
 
       expect(new URL(previewUrl(3000, folderId, 'localhost')).protocol).toBe('http:')
     } finally {
-      scope.window = before
+      if (before === undefined) {
+        Reflect.deleteProperty(globalThis, 'window')
+      } else {
+        Object.defineProperty(globalThis, 'window', before)
+      }
     }
   })
 })

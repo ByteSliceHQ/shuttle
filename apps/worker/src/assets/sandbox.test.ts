@@ -17,11 +17,12 @@ function memoryStorage() {
   const values = new Map<string, unknown>()
 
   return {
+    // SAFETY: the fake hands back exactly what was `put`, so the caller's `T` is what it stored.
     get: async <T>(key: string) => values.get(key) as T | undefined,
-    put: async (key: string, value: unknown) => {
+    put: async (key: string, value: string[]) => {
       values.set(key, value)
     },
-  } as unknown as Pick<DurableObjectStorage, 'get' | 'put'>
+  }
 }
 
 describe('attachments in the sandbox', () => {

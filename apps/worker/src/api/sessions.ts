@@ -72,7 +72,7 @@ export const sessionsRouter = {
       .bind(orgPrefix.length, orgPrefix)
       .all()
 
-    return { sessions: result.results ?? [] }
+    return { sessions: result.results }
   }),
 
   tree: sessions.tree.handler(async ({ input, context: { env } }) => {
@@ -90,7 +90,7 @@ export const sessionsRouter = {
       .bind(input.id, input.id, input.id)
       .all()
 
-    return { sessionId: input.id, runs: result.results ?? [] }
+    return { sessionId: input.id, runs: result.results }
   }),
 
   access: {
@@ -132,7 +132,7 @@ export const sessionsRouter = {
 
   say: sessions.say.handler(async ({ input, context: { env, actor } }) => {
     // A message may be files alone.
-    if (!input.text.trim() && input.attachments.length === 0) {
+    if (input.text.trim() === '' && input.attachments.length === 0) {
       throw badRequest('messageId and text are required')
     }
 
@@ -153,10 +153,10 @@ export const sessionsRouter = {
     const message = say({
       messageId: input.messageId,
       text: input.text,
-      ...(input.forceKind ? { forceKind: input.forceKind } : {}),
-      ...(input.targetThreadId ? { targetThreadId: input.targetThreadId } : {}),
-      author: { id: actor.userId, name: actor.name || actor.email },
-      ...(attachments.length > 0 ? { attachments } : {}),
+      forceKind: input.forceKind,
+      targetThreadId: input.targetThreadId === '' ? undefined : input.targetThreadId,
+      author: { id: actor.userId, name: actor.name === '' ? actor.email : actor.name },
+      attachments: attachments.length > 0 ? attachments : undefined,
     })
 
     // Answered once the message is on the log. The browser shows it from the event stream, and
@@ -185,7 +185,7 @@ export const sessionsRouter = {
           title: (input.title ?? '').trim().slice(0, 300),
           body: (input.body ?? '').trim().slice(0, 20_000),
           draft: input.draft !== false,
-          ...(repo ? { repo } : {}),
+          repo: repo === '' ? undefined : repo,
           requestedBy: actor.userId,
         }),
         origin: { type: 'external', actorId: actor.userId },

@@ -19,7 +19,7 @@ export function linesCoveredByPatch(
 ): Set<number> {
   const lines = new Set<number>()
 
-  if (!patch) {
+  if (patch === undefined || patch === '') {
     return lines
   }
 
@@ -30,7 +30,7 @@ export function linesCoveredByPatch(
     if (line.startsWith('@@')) {
       const match = line.match(/-(\d+)(?:,\d+)? \+(\d+)(?:,\d+)?/)
 
-      if (match?.[1] && match[2]) {
+      if (match?.[1] !== undefined && match[2] !== undefined) {
         oldLine = Number(match[1])
         newLine = Number(match[2])
       }
@@ -67,6 +67,11 @@ export interface AnchoredComment {
   readonly body: string
 }
 
+export interface AnchorPartition<T> {
+  readonly anchored: T[]
+  readonly unanchored: T[]
+}
+
 /**
  * Splits `comments` into those GitHub will accept on the lines they name and those it will not:
  * a file the pull request does not touch, a file with no patch, or a line outside its hunks.
@@ -75,7 +80,7 @@ export interface AnchoredComment {
 export function partitionByAnchor<T extends AnchoredComment>(
   comments: readonly T[],
   files: readonly { readonly path: string; readonly patch?: string }[],
-): { anchored: T[]; unanchored: T[] } {
+): AnchorPartition<T> {
   const patches = new Map(files.map((file) => [file.path, file.patch]))
   const anchored: T[] = []
   const unanchored: T[] = []
@@ -110,7 +115,9 @@ export function bodyWithUnanchored(body: string, unanchored: readonly AnchoredCo
 
 /** A comment's text as GitHub shows it, with a proposed replacement as a suggestion block. */
 export function commentBody(body: string, suggestion: string | undefined): string {
-  return suggestion ? `${body}\n\n\`\`\`suggestion\n${suggestion}\n\`\`\`` : body
+  return suggestion !== undefined && suggestion !== ''
+    ? `${body}\n\n\`\`\`suggestion\n${suggestion}\n\`\`\``
+    : body
 }
 
 /** What the reviewer has drafted so far, kept so it survives the session's process restarting. */
@@ -238,8 +245,8 @@ export function createReviewTools(env: ShuttleEnv, runId: string, storage?: Dura
       const line = isJsonNumber(obj.line) ? obj.line : 0
       const side = obj.side === 'LEFT' ? ('LEFT' as const) : ('RIGHT' as const)
 
-      const severity =
-        obj.severity === 'warning' || obj.severity === 'error' ? obj.severity : ('info' as const)
+      const severity: 'info' | 'warning' | 'error' =
+        obj.severity === 'warning' || obj.severity === 'error' ? obj.severity : 'info'
 
       const body = isJsonString(obj.body) ? obj.body : ''
       const suggestion = isJsonString(obj.suggestion) ? obj.suggestion : undefined
@@ -263,29 +270,19 @@ export function createReviewTools(env: ShuttleEnv, runId: string, storage?: Dura
 
       const commentId = crypto.randomUUID()
 
-      drafted.push({
-        commentId,
-        path,
-        line,
-        side,
-        body,
-        severity,
-        ...(suggestion ? { suggestion } : {}),
-      })
+      const hasSuggestion = suggestion !== undefined && suggestion !== ''
+      const draft = { commentId, path, line, side, body, severity }
+
+      drafted.push(hasSuggestion ? { ...draft, suggestion } : draft)
 
       save()
 
       return [
         emit(
-          shuttleModule.input('review.comment.drafted', {
-            commentId,
-            path,
-            line,
-            side,
-            severity,
-            body,
-            ...(suggestion ? { suggestion } : {}),
-          }),
+          shuttleModule.input(
+            'review.comment.drafted',
+            hasSuggestion ? { ...draft, suggestion } : draft,
+          ),
           `draft_comment_${commentId}`,
         ),
       ]

@@ -137,7 +137,7 @@ function PlaceRow({
               )}
             />
             {signedIn
-              ? `Signed in${updatedAt ? ` · ${new Date(updatedAt).toLocaleDateString()}` : ''}`
+              ? `Signed in${updatedAt !== null ? ` · ${new Date(updatedAt).toLocaleDateString()}` : ''}`
               : 'Not signed in'}
           </span>
         </div>

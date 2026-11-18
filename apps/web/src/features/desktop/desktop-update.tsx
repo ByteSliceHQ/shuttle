@@ -56,14 +56,14 @@ export function DesktopUpdate() {
                 : 'Check for updates'
 
   function act() {
-    const action =
+    const request =
       status?.status === 'ready'
-        ? app?.installUpdate
+        ? app?.installUpdate?.()
         : status?.status === 'available'
-          ? app?.downloadUpdate
-          : app?.checkForUpdates
+          ? app?.downloadUpdate?.()
+          : app?.checkForUpdates?.()
 
-    void action?.().catch(() =>
+    void request?.catch(() =>
       setStatus({
         status: 'error',
         version: status?.version ?? '',

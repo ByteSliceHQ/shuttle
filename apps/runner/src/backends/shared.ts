@@ -1,4 +1,20 @@
+import { z } from 'zod'
+
+import type { SandboxHttpResponse } from '../backend'
+
 /** What every backend that drives a sandbox through a command line has in common. */
+
+/** What `HTTP_SCRIPT` prints: the sandbox's answer. */
+export const sandboxHttpResponseSchema: z.ZodType<SandboxHttpResponse> = z.object({
+  status: z.number(),
+  headers: z.array(z.tuple([z.string(), z.string()])),
+  body: z.string(),
+})
+
+/** A process's stdin: the bytes given, or none. */
+export function stdinOf(bytes: Uint8Array | undefined): Blob | 'ignore' {
+  return bytes === undefined ? 'ignore' : new Blob([new Uint8Array(bytes)])
+}
 
 /** Runs `"$@"` after printing the shell's own pid, which `exec` then hands to the command. */
 export const ANNOUNCE_PID = 'printf "%s\\n" "$$" >&2; exec "$@"'

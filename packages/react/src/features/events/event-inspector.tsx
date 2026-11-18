@@ -8,6 +8,7 @@ import { Button } from '../../components/ui/button'
 import { ScrollArea } from '../../components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs'
 import { cn } from '../../lib/cn'
+import { hasText } from '../../lib/text'
 import { eventMeta, familyColor, type SessionEvent } from './event-catalog'
 
 function Pane({ value, children }: { value: string; children: ReactNode }) {
@@ -58,13 +59,13 @@ export function EventInspector({
             </Button>
           ) : null}
         </div>
-        {threadLabel ? (
+        {hasText(threadLabel) ? (
           <p className="text-muted-foreground -mt-1 truncate px-3 pb-1.5 text-[11px]">
             on <span className="text-foreground">{threadLabel}</span>
           </p>
         ) : null}
         <Pane value="payload">
-          <JsonTree value={event.payload} defaultExpandDepth={2} />
+          <JsonTree value={asJson(event.payload)} defaultExpandDepth={2} />
         </Pane>
         <Pane value="envelope">
           <JsonTree

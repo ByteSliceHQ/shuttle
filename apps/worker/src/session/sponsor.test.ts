@@ -1,19 +1,25 @@
 import { describe, expect, test } from 'bun:test'
 
+import type { JsonObject, JsonValue } from '@swirls/looms/core'
+
 import { ACCESS_STORAGE_KEY } from '../tenancy/access'
 import { readSponsor, resolveSponsor, sponsorOfMessages, SPONSOR_STORAGE_KEY } from './sponsor'
 
-function memoryStorage(initial: Record<string, unknown> = {}) {
-  const values = new Map<string, unknown>(Object.entries(initial))
+function memoryStorage(initial: JsonObject = {}) {
+  const values = new Map<string, JsonValue>(Object.entries(initial))
   let writes = 0
 
-  const storage = {
+  const fake = {
     get: async (key: string) => values.get(key),
-    put: async (key: string, value: unknown) => {
+    put: async (key: string, value: JsonValue) => {
       writes += 1
       values.set(key, value)
     },
-  } as unknown as Pick<DurableObjectStorage, 'get' | 'put'>
+  }
+
+  // SAFETY: the code under test only calls `get(key)` and `put(key, value)`, which `fake` implements
+  // with the same results as Durable Object storage; the other overloads are never reached.
+  const storage = fake as Pick<DurableObjectStorage, 'get' | 'put'>
 
   return { storage, values, writes: () => writes }
 }

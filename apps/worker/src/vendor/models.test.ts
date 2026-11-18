@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
+import { memoryStorage } from '../testing/memory-storage'
 import {
   builtInVendorModels,
   parseVendorModelChoice,
@@ -9,15 +10,6 @@ import {
   writeVendorCatalogue,
   writeVendorModelChoice,
 } from './models'
-
-function memoryStorage() {
-  const values = new Map<string, unknown>()
-
-  return {
-    get: async (key: string) => values.get(key),
-    put: async (key: string, value: unknown) => void values.set(key, value),
-  } as unknown as Pick<DurableObjectStorage, 'get' | 'put'>
-}
 
 describe('vendor model choice', () => {
   test('keeps a model and an effort, and drops blank parts', () => {

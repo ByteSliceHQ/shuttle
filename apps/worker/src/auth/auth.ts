@@ -56,7 +56,9 @@ export function trustedWebOrigins(env: Pick<ShuttleEnv, 'SHUTTLE_WEB_URL'>): str
 }
 
 export function githubSignInEnabled(env: AuthEnv): boolean {
-  return Boolean(env.GITHUB_CLIENT_ID?.trim() && env.GITHUB_CLIENT_SECRET?.trim())
+  return (
+    (env.GITHUB_CLIENT_ID?.trim() ?? '') !== '' && (env.GITHUB_CLIENT_SECRET?.trim() ?? '') !== ''
+  )
 }
 
 /**
@@ -66,7 +68,7 @@ export function githubSignInEnabled(env: AuthEnv): boolean {
 export function authOptions(env: AuthEnv, database: BetterAuthOptions['database']) {
   const secret = env.BETTER_AUTH_SECRET?.trim()
 
-  if (!secret) {
+  if (secret === undefined || secret === '') {
     throw new AuthUnavailableError('BETTER_AUTH_SECRET')
   }
 

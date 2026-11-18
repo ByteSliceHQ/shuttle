@@ -35,13 +35,13 @@ export function withLinkedSession(
     (session) => session.runId === next.runId && session.role === next.role,
   )
 
-  if (index === -1) {
+  const current = linked[index]
+
+  if (current === undefined) {
     return [...linked, next]
   }
 
-  const current = linked[index]!
-
-  if (!next.threadId || current.threadId === next.threadId) {
+  if (next.threadId === undefined || next.threadId === '' || current.threadId === next.threadId) {
     return linked
   }
 
@@ -144,189 +144,188 @@ export const pullInbox = pullsModule.projection({
   }),
   initialState: { pulls: {}, policies: {} } satisfies PullInboxState,
   reduce(state, event): PullInboxState {
-    switch (event.type) {
-      case 'pulls.pull.upserted': {
-        const key = pullKey(event.payload.fullName, event.payload.number)
-        const existing = state.pulls[key]
+    if (event.type === 'pulls.pull.upserted') {
+      const key = pullKey(event.payload.fullName, event.payload.number)
+      const existing = state.pulls[key]
 
-        if (existing && existing.updatedAt > event.payload.updatedAt) {
-          return state
-        }
-
-        return {
-          ...state,
-          pulls: {
-            ...state.pulls,
-            [key]: {
-              installationId: event.payload.installationId,
-              fullName: event.payload.fullName,
-              number: event.payload.number,
-              title: event.payload.title,
-              body: event.payload.body,
-              url: event.payload.url,
-              state: event.payload.state,
-              draft: event.payload.draft,
-              author: event.payload.author,
-              headRef: event.payload.headRef,
-              headSha: event.payload.headSha,
-              baseRef: event.payload.baseRef,
-              baseSha: event.payload.baseSha,
-              additions: event.payload.additions,
-              deletions: event.payload.deletions,
-              reviewDecision: event.payload.reviewDecision,
-              checkRollup: event.payload.checkRollup,
-              updatedAt: event.payload.updatedAt,
-              isFork: event.payload.isFork,
-              stack: event.payload.stack ?? existing?.stack ?? null,
-              linkedSessions: existing?.linkedSessions ?? [],
-              reviewingRunId: existing?.reviewingRunId ?? null,
-            },
-          },
-        }
-      }
-
-      case 'pulls.pull.closed': {
-        const key = pullKey(event.payload.fullName, event.payload.number)
-        const existing = state.pulls[key]
-
-        if (!existing) {
-          return state
-        }
-
-        return {
-          ...state,
-          pulls: {
-            ...state.pulls,
-            [key]: {
-              ...existing,
-              state: 'closed',
-              updatedAt: Math.max(existing.updatedAt, event.payload.updatedAt),
-              reviewingRunId: null,
-            },
-          },
-        }
-      }
-
-      case 'pulls.checks.updated': {
-        let changed = false
-        const pulls = { ...state.pulls }
-
-        for (const [key, pull] of Object.entries(state.pulls)) {
-          if (pull.fullName !== event.payload.fullName || pull.headSha !== event.payload.headSha) {
-            continue
-          }
-
-          pulls[key] = {
-            ...pull,
-            checkRollup: event.payload.checkRollup,
-            updatedAt: Math.max(pull.updatedAt, event.payload.updatedAt),
-          }
-
-          changed = true
-        }
-
-        return changed ? { ...state, pulls } : state
-      }
-
-      case 'pulls.review.submitted': {
-        const key = pullKey(event.payload.fullName, event.payload.number)
-        const existing = state.pulls[key]
-
-        if (!existing) {
-          return state
-        }
-
-        let reviewDecision = existing.reviewDecision
-
-        switch (event.payload.verdict) {
-          case 'approved':
-            reviewDecision = 'approved'
-            break
-          case 'changes_requested':
-            reviewDecision = 'changes_requested'
-            break
-          case 'commented':
-            break
-
-          default: {
-            const exhaustive: never = event.payload.verdict
-            void exhaustive
-            break
-          }
-        }
-
-        return {
-          ...state,
-          pulls: {
-            ...state.pulls,
-            [key]: {
-              ...existing,
-              reviewDecision,
-              updatedAt: Math.max(existing.updatedAt, event.payload.updatedAt),
-            },
-          },
-        }
-      }
-
-      case 'pulls.pull.linked': {
-        const key = pullKey(event.payload.fullName, event.payload.number)
-        const existing = state.pulls[key]
-
-        if (!existing) {
-          return state
-        }
-
-        const linkedSessions = withLinkedSession(existing.linkedSessions, {
-          runId: event.payload.runId,
-          role: event.payload.role,
-          ...(event.payload.threadId ? { threadId: event.payload.threadId } : {}),
-        })
-
-        if (linkedSessions === existing.linkedSessions) {
-          return state
-        }
-
-        return {
-          ...state,
-          pulls: { ...state.pulls, [key]: { ...existing, linkedSessions } },
-        }
-      }
-
-      case 'pulls.repo.policy.set': {
-        return {
-          ...state,
-          policies: {
-            ...state.policies,
-            [event.payload.fullName]: {
-              installationId: event.payload.installationId,
-              folders: event.payload.folders,
-            },
-          },
-        }
-      }
-
-      case 'pulls.review.requested': {
-        const key = pullKey(event.payload.fullName, event.payload.number)
-        const existing = state.pulls[key]
-
-        if (!existing) {
-          return state
-        }
-
-        return {
-          ...state,
-          pulls: {
-            ...state.pulls,
-            [key]: {
-              ...existing,
-              reviewingRunId: event.payload.runId,
-            },
-          },
-        }
-      }
-
-      default:
+      if (existing && existing.updatedAt > event.payload.updatedAt) {
         return state
+      }
+
+      return {
+        ...state,
+        pulls: {
+          ...state.pulls,
+          [key]: {
+            installationId: event.payload.installationId,
+            fullName: event.payload.fullName,
+            number: event.payload.number,
+            title: event.payload.title,
+            body: event.payload.body,
+            url: event.payload.url,
+            state: event.payload.state,
+            draft: event.payload.draft,
+            author: event.payload.author,
+            headRef: event.payload.headRef,
+            headSha: event.payload.headSha,
+            baseRef: event.payload.baseRef,
+            baseSha: event.payload.baseSha,
+            additions: event.payload.additions,
+            deletions: event.payload.deletions,
+            reviewDecision: event.payload.reviewDecision,
+            checkRollup: event.payload.checkRollup,
+            updatedAt: event.payload.updatedAt,
+            isFork: event.payload.isFork,
+            stack: event.payload.stack ?? existing?.stack ?? null,
+            linkedSessions: existing?.linkedSessions ?? [],
+            reviewingRunId: existing?.reviewingRunId ?? null,
+          },
+        },
+      }
     }
+
+    if (event.type === 'pulls.pull.closed') {
+      const key = pullKey(event.payload.fullName, event.payload.number)
+      const existing = state.pulls[key]
+
+      if (!existing) {
+        return state
+      }
+
+      return {
+        ...state,
+        pulls: {
+          ...state.pulls,
+          [key]: {
+            ...existing,
+            state: 'closed',
+            updatedAt: Math.max(existing.updatedAt, event.payload.updatedAt),
+            reviewingRunId: null,
+          },
+        },
+      }
+    }
+
+    if (event.type === 'pulls.checks.updated') {
+      let changed = false
+      const pulls = { ...state.pulls }
+
+      for (const [key, pull] of Object.entries(state.pulls)) {
+        if (pull.fullName !== event.payload.fullName || pull.headSha !== event.payload.headSha) {
+          continue
+        }
+
+        pulls[key] = {
+          ...pull,
+          checkRollup: event.payload.checkRollup,
+          updatedAt: Math.max(pull.updatedAt, event.payload.updatedAt),
+        }
+
+        changed = true
+      }
+
+      return changed ? { ...state, pulls } : state
+    }
+
+    if (event.type === 'pulls.review.submitted') {
+      const key = pullKey(event.payload.fullName, event.payload.number)
+      const existing = state.pulls[key]
+
+      if (!existing) {
+        return state
+      }
+
+      let reviewDecision = existing.reviewDecision
+
+      switch (event.payload.verdict) {
+        case 'approved':
+          reviewDecision = 'approved'
+          break
+        case 'changes_requested':
+          reviewDecision = 'changes_requested'
+          break
+        case 'commented':
+          break
+
+        default: {
+          const exhaustive: never = event.payload.verdict
+          void exhaustive
+          break
+        }
+      }
+
+      return {
+        ...state,
+        pulls: {
+          ...state.pulls,
+          [key]: {
+            ...existing,
+            reviewDecision,
+            updatedAt: Math.max(existing.updatedAt, event.payload.updatedAt),
+          },
+        },
+      }
+    }
+
+    if (event.type === 'pulls.pull.linked') {
+      const key = pullKey(event.payload.fullName, event.payload.number)
+      const existing = state.pulls[key]
+
+      if (!existing) {
+        return state
+      }
+
+      const { threadId } = event.payload
+      const base = { runId: event.payload.runId, role: event.payload.role }
+
+      const linkedSessions = withLinkedSession(
+        existing.linkedSessions,
+        threadId === undefined || threadId === '' ? base : { ...base, threadId },
+      )
+
+      if (linkedSessions === existing.linkedSessions) {
+        return state
+      }
+
+      return {
+        ...state,
+        pulls: { ...state.pulls, [key]: { ...existing, linkedSessions } },
+      }
+    }
+
+    if (event.type === 'pulls.repo.policy.set') {
+      return {
+        ...state,
+        policies: {
+          ...state.policies,
+          [event.payload.fullName]: {
+            installationId: event.payload.installationId,
+            folders: event.payload.folders,
+          },
+        },
+      }
+    }
+
+    if (event.type === 'pulls.review.requested') {
+      const key = pullKey(event.payload.fullName, event.payload.number)
+      const existing = state.pulls[key]
+
+      if (!existing) {
+        return state
+      }
+
+      return {
+        ...state,
+        pulls: {
+          ...state.pulls,
+          [key]: {
+            ...existing,
+            reviewingRunId: event.payload.runId,
+          },
+        },
+      }
+    }
+
+    return state
   },
 })

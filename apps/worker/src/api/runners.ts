@@ -61,7 +61,7 @@ export const runnersRouter = {
       orgId: actor.orgId,
       userId: actor.userId,
       deviceId: input.deviceId,
-      name: input.name || 'This machine',
+      name: input.name === undefined || input.name === '' ? 'This machine' : input.name,
       platform: input.platform ?? 'unknown',
     }),
   ),

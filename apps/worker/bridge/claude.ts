@@ -2,6 +2,21 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
 
 import {
+  booleanField,
+  decodeEach,
+  field,
+  isJsonArray,
+  isJsonObject,
+  isString,
+  nonEmpty,
+  numberField,
+  objectField,
+  parseJson,
+  stringField,
+  type JsonObject,
+  type JsonValue,
+} from './json.ts'
+import {
   clipToolOutput,
   type BridgeEmit,
   type BridgeReadInput,
@@ -47,15 +62,19 @@ function claudeEnv(): NodeJS.ProcessEnv {
   return { ...process.env, IS_SANDBOX: '1' }
 }
 
+interface TextPart {
+  readonly text?: string
+}
+
 interface ContentBlock {
   readonly type: string
   readonly text?: string
   readonly thinking?: string
   readonly id?: string
   readonly name?: string
-  readonly input?: Record<string, unknown>
+  readonly input?: JsonObject
   readonly tool_use_id?: string
-  readonly content?: unknown
+  readonly content?: string | TextPart[]
   readonly is_error?: boolean
 }
 
@@ -64,13 +83,13 @@ interface StreamLine {
   readonly subtype?: string
   readonly session_id?: string
   readonly model?: string
-  readonly parent_tool_use_id?: string | null
+  readonly parent_tool_use_id?: string
   readonly event?: {
     readonly type?: string
     readonly delta?: { readonly type?: string; readonly text?: string; readonly thinking?: string }
   }
   readonly message?: {
-    readonly content?: readonly ContentBlock[] | string
+    readonly content?: ContentBlock[] | string
     readonly usage?: {
       readonly input_tokens?: number
       readonly output_tokens?: number
@@ -81,6 +100,105 @@ interface StreamLine {
   readonly is_error?: boolean
   readonly result?: string
   readonly error?: string
+}
+
+function decodeTextPart(value: JsonValue): TextPart | undefined {
+  return isJsonObject(value) ? { text: stringField(value, 'text') } : undefined
+}
+
+function decodeBlockContent(value: JsonValue | undefined): string | TextPart[] | undefined {
+  if (isString(value)) {
+    return value
+  }
+
+  return isJsonArray(value) ? decodeEach(value, decodeTextPart) : undefined
+}
+
+function decodeBlock(value: JsonValue): ContentBlock | undefined {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  return {
+    type: stringField(value, 'type') ?? '',
+    text: stringField(value, 'text'),
+    thinking: stringField(value, 'thinking'),
+    id: stringField(value, 'id'),
+    name: stringField(value, 'name'),
+    input: objectField(value, 'input'),
+    tool_use_id: stringField(value, 'tool_use_id'),
+    content: decodeBlockContent(field(value, 'content')),
+    is_error: booleanField(value, 'is_error'),
+  }
+}
+
+function decodeMessageContent(value: JsonValue | undefined): ContentBlock[] | string | undefined {
+  if (isString(value)) {
+    return value
+  }
+
+  return isJsonArray(value) ? decodeEach(value, decodeBlock) : undefined
+}
+
+function decodeMessage(value: JsonValue | undefined): StreamLine['message'] {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  const usage = objectField(value, 'usage')
+
+  return {
+    content: decodeMessageContent(field(value, 'content')),
+    usage:
+      usage === undefined
+        ? undefined
+        : {
+            input_tokens: numberField(usage, 'input_tokens'),
+            output_tokens: numberField(usage, 'output_tokens'),
+            cache_creation_input_tokens: numberField(usage, 'cache_creation_input_tokens'),
+            cache_read_input_tokens: numberField(usage, 'cache_read_input_tokens'),
+          },
+  }
+}
+
+function decodeEvent(value: JsonValue | undefined): StreamLine['event'] {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  const delta = objectField(value, 'delta')
+
+  return {
+    type: stringField(value, 'type'),
+    delta:
+      delta === undefined
+        ? undefined
+        : {
+            type: stringField(delta, 'type'),
+            text: stringField(delta, 'text'),
+            thinking: stringField(delta, 'thinking'),
+          },
+  }
+}
+
+/** One line of Claude Code's stream, or undefined when the line is not an object. */
+function decodeStreamLine(value: JsonValue | undefined): StreamLine | undefined {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  return {
+    type: stringField(value, 'type') ?? '',
+    subtype: stringField(value, 'subtype'),
+    session_id: stringField(value, 'session_id'),
+    model: stringField(value, 'model'),
+    parent_tool_use_id: stringField(value, 'parent_tool_use_id'),
+    event: decodeEvent(field(value, 'event')),
+    message: decodeMessage(field(value, 'message')),
+    is_error: booleanField(value, 'is_error'),
+    result: stringField(value, 'result'),
+    error: stringField(value, 'error'),
+  }
 }
 
 function toolKind(name: string): BridgeToolKind {
@@ -99,7 +217,7 @@ function toolKind(name: string): BridgeToolKind {
   return name.startsWith('mcp__') ? 'mcp' : 'other'
 }
 
-function toolTitle(name: string, input: Record<string, unknown> = {}): string {
+function toolTitle(name: string, input: JsonObject = {}): string {
   const detail = [
     input.command,
     input.file_path,
@@ -107,7 +225,7 @@ function toolTitle(name: string, input: Record<string, unknown> = {}): string {
     input.query,
     input.url,
     input.description,
-  ].find((value): value is string => typeof value === 'string' && value.length > 0)
+  ].find((value): value is string => isString(value) && value.length > 0)
 
   if ((name === 'Bash' || name === 'WebSearch' || name === 'WebFetch') && detail) {
     return detail
@@ -116,18 +234,12 @@ function toolTitle(name: string, input: Record<string, unknown> = {}): string {
   return detail ? `${name} ${detail}` : name
 }
 
-function resultText(content: unknown): string {
-  if (typeof content === 'string') {
-    return content
+function resultText(content: string | TextPart[] | undefined): string {
+  if (Array.isArray(content)) {
+    return content.map((block) => block.text ?? '').join('')
   }
 
-  if (!Array.isArray(content)) {
-    return ''
-  }
-
-  return content
-    .map((block: ContentBlock) => (typeof block.text === 'string' ? block.text : ''))
-    .join('')
+  return content ?? ''
 }
 
 interface Attempt {
@@ -196,15 +308,13 @@ function runAttempt(
     })
 
     createInterface({ input: child.stdout }).on('line', (raw) => {
-      let line: StreamLine
+      const line = decodeStreamLine(parseJson(raw))
 
-      try {
-        line = JSON.parse(raw)
-      } catch {
+      if (line === undefined) {
         return
       }
 
-      const topLevel = !line.parent_tool_use_id
+      const topLevel = line.parent_tool_use_id === undefined || line.parent_tool_use_id === ''
 
       switch (line.type) {
         case 'system': {
@@ -214,7 +324,7 @@ function runAttempt(
             emit({
               type: 'thread',
               vendorThreadId: line.session_id,
-              ...(line.model ? { model: line.model } : {}),
+              model: nonEmpty(line.model),
             })
           }
 
@@ -242,7 +352,7 @@ function runAttempt(
         case 'assistant': {
           const content = line.message?.content
 
-          if (line.error && typeof content !== 'string') {
+          if (line.error && (content === undefined || Array.isArray(content))) {
             failure = resultText(content) || line.error
           }
 
@@ -300,8 +410,8 @@ function runAttempt(
                 type: 'tool_finished',
                 id: block.tool_use_id,
                 ...view,
-                status: block.is_error ? 'failed' : 'completed',
-                ...(output ? { output: clipToolOutput(output) } : {}),
+                status: block.is_error === true ? 'failed' : 'completed',
+                output: output === '' ? undefined : clipToolOutput(output),
               })
             }
           }
@@ -376,7 +486,7 @@ export async function runClaudeTurn(
     type: 'turn_done',
     status: attempt.status,
     text: attempt.text,
-    ...(attempt.error ? { error: attempt.error } : {}),
+    error: nonEmpty(attempt.error),
   })
 }
 
@@ -398,11 +508,9 @@ function runToEnd(bin: string, args: string[]): Promise<{ stdout: string; code: 
 export async function claudeSignedIn(options: ClaudeOptions = {}): Promise<boolean> {
   const status = await runToEnd(claudeBin(options), ['auth', 'status'])
 
-  try {
-    return (JSON.parse(status.stdout) as { loggedIn?: boolean }).loggedIn === true
-  } catch {
-    return false
-  }
+  const parsed = parseJson(status.stdout)
+
+  return isJsonObject(parsed) && booleanField(parsed, 'loggedIn') === true
 }
 
 const SIGN_IN_URL = /https:\/\/\S+/

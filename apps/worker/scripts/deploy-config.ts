@@ -20,6 +20,8 @@ import { existsSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { z } from 'zod'
+
 const worker = join(dirname(fileURLToPath(import.meta.url)), '..')
 const webDist = join(worker, '../web/dist')
 
@@ -28,18 +30,29 @@ if (!existsSync(join(webDist, 'index.html'))) {
   process.exit(1)
 }
 
-const base = (await import(join(worker, 'wrangler.jsonc'))).default as Record<string, unknown>
-const overrides = JSON.parse(process.env.SHUTTLE_DEPLOY_VARS ?? '{}') as Record<string, string>
+const wranglerModule: unknown = await import(join(worker, 'wrangler.jsonc'))
 
-const routes = JSON.parse(process.env.SHUTTLE_DEPLOY_ROUTES ?? '[]') as unknown[]
-const vars = { ...(base.vars as Record<string, string>), ...overrides }
+const wranglerSchema = z.object({
+  default: z.looseObject({
+    vars: z.record(z.string(), z.string()),
+    containers: z.array(z.unknown()).optional(),
+  }),
+})
+
+const base = wranglerSchema.parse(wranglerModule).default
+const deployVars: unknown = JSON.parse(process.env.SHUTTLE_DEPLOY_VARS ?? '{}')
+const deployRoutes: unknown = JSON.parse(process.env.SHUTTLE_DEPLOY_ROUTES ?? '[]')
+const overrides = z.record(z.string(), z.string()).parse(deployVars)
+const routes = z.array(z.unknown()).parse(deployRoutes)
+const vars = { ...base.vars, ...overrides }
 const usesContainers = ['container', 'cloudflare'].includes(vars.SHUTTLE_WORKSPACE_MODE ?? '')
 const { containers, ...rest } = base
+const withRoutes = { ...rest, routes, workers_dev: false, preview_urls: false }
+const routed = routes.length > 0 ? withRoutes : rest
+const contained = usesContainers && containers !== undefined ? { ...routed, containers } : routed
 
 const config = {
-  ...rest,
-  ...(usesContainers && containers ? { containers } : {}),
-  ...(routes.length > 0 ? { routes, workers_dev: false, preview_urls: false } : {}),
+  ...contained,
   vars,
   assets: {
     directory: '../web/dist',

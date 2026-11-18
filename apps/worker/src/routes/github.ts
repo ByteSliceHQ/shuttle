@@ -9,7 +9,7 @@ import {
   linkInstallations,
   listAccessibleInstallations,
 } from '../github/user-link'
-import { normalizeWebhook, verifyWebhookSignature } from '../github/webhooks'
+import { normalizeWebhook, parseWebhookBody, verifyWebhookSignature } from '../github/webhooks'
 import { loomsStub } from '../looms-stub'
 import { ingestWebhook, removeComment, setThreadResolution, upsertComment } from '../pulls/signals'
 import type { Actor } from '../tenancy/access'
@@ -74,15 +74,17 @@ async function handleWebhook(request: Request, env: ShuttleEnv): Promise<Respons
 
   const eventName = request.headers.get('X-GitHub-Event') ?? ''
   const deliveryId = request.headers.get('X-GitHub-Delivery') ?? crypto.randomUUID()
-  let payload: unknown
+  const body = parseWebhookBody(rawBody)
 
-  try {
-    payload = JSON.parse(rawBody) as unknown
-  } catch {
+  if (body.kind === 'invalid-json') {
     return Response.json({ error: 'invalid json' }, { status: 400 })
   }
 
-  const normalized = normalizeWebhook(eventName, deliveryId, payload)
+  if (body.kind === 'non-object-payload') {
+    return Response.json({ ok: true, ignored: 'non-object-payload' })
+  }
+
+  const normalized = normalizeWebhook(eventName, deliveryId, body.payload)
 
   if (normalized.kind === 'ignored') {
     return Response.json({ ok: true, ignored: normalized.reason })
@@ -227,7 +229,7 @@ const LINK_STATE_TTL_MS = 15 * 60 * 1000
 async function installUrl(env: ShuttleEnv, orgId: string): Promise<string | null> {
   const slug = env.GITHUB_APP_SLUG
 
-  if (!slug) {
+  if (slug === undefined || slug === '') {
     return null
   }
 
@@ -266,13 +268,13 @@ export async function startInstall(
   orgId: string,
   addAccount = false,
 ): Promise<Response> {
-  if (githubOAuthConfigured(env) && !(addAccount && env.GITHUB_APP_SLUG)) {
+  if (githubOAuthConfigured(env) && !(addAccount && (env.GITHUB_APP_SLUG ?? '') !== '')) {
     return Response.redirect(await authorizeUrl(env, orgId), 302)
   }
 
   const target = await installUrl(env, orgId)
 
-  return target
+  return target !== null
     ? Response.redirect(target, 302)
     : Response.json({ error: 'GITHUB_APP_SLUG is not configured' }, { status: 503 })
 }
@@ -297,7 +299,7 @@ async function finishLink(url: URL, env: ShuttleEnv): Promise<Response> {
   }
 
   // No code means the person declined on GitHub.
-  if (!code) {
+  if (code === null || code === '') {
     return Response.redirect(`${webUrl}/?github=error`, 302)
   }
 
@@ -352,7 +354,7 @@ export async function finishSetup(url: URL, env: ShuttleEnv): Promise<Response> 
   const installationId = Number(url.searchParams.get('installation_id'))
   const state = url.searchParams.get('state') ?? ''
   const verified = await verifyState(env, state)
-  const orgId = verified?.startsWith(INSTALL_STATE) ? verified.split(':')[1] : undefined
+  const orgId = verified?.startsWith(INSTALL_STATE) === true ? verified.split(':')[1] : undefined
 
   if (githubOAuthConfigured(env)) {
     return Response.redirect(

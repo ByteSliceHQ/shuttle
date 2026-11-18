@@ -42,7 +42,23 @@ function fakeLooms(failSignal: boolean) {
     },
   }
 
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- SAFETY: the test namespace answers getByName, the only method the handler calls on a run namespace.
   return { namespace: { getByName: () => stub } as unknown as ShuttleEnv['LOOMS_RUN'], signals }
+}
+
+/** What a call rejects with; fails the test when the call succeeds. */
+async function rejection(call: Promise<unknown>): Promise<Error> {
+  try {
+    await call
+  } catch (error) {
+    if (error instanceof Error) {
+      return error
+    }
+
+    throw error
+  }
+
+  throw new Error('expected the call to be rejected')
 }
 
 /**
@@ -112,9 +128,7 @@ describe('initial session attachments', () => {
   test('removes stored files when the session cannot be started', async () => {
     const { client, bucket } = setup({ failSignal: true })
 
-    await expect(
-      client.workspace.createSession({ folderId: 'f', goal: 'Look', files: [png()] }),
-    ).rejects.toThrow()
+    await rejection(client.workspace.createSession({ folderId: 'f', goal: 'Look', files: [png()] }))
 
     expect(bucket.keys()).toEqual([])
   })
@@ -122,17 +136,21 @@ describe('initial session attachments', () => {
   test('rejects empty files and too many files', async () => {
     const { client, bucket } = setup()
 
-    await expect(
-      client.workspace.createSession({ folderId: 'f', goal: 'Look', files: [new File([], 'e')] }),
-    ).rejects.toMatchObject({ status: 400 })
+    expect(
+      await rejection(
+        client.workspace.createSession({ folderId: 'f', goal: 'Look', files: [new File([], 'e')] }),
+      ),
+    ).toMatchObject({ status: 400 })
 
-    await expect(
-      client.workspace.createSession({
-        folderId: 'f',
-        goal: 'Look',
-        files: Array.from({ length: 11 }, (_, index) => png(`${index}.png`)),
-      }),
-    ).rejects.toMatchObject({ status: 400 })
+    expect(
+      await rejection(
+        client.workspace.createSession({
+          folderId: 'f',
+          goal: 'Look',
+          files: Array.from({ length: 11 }, (_, index) => png(`${index}.png`)),
+        }),
+      ),
+    ).toMatchObject({ status: 400 })
 
     expect(bucket.keys()).toEqual([])
   })
@@ -147,9 +165,11 @@ describe('initial session attachments', () => {
     for (const headers of foreign) {
       const { client, bucket } = setup({ headers })
 
-      await expect(
-        client.workspace.createSession({ folderId: 'f', goal: 'Look', files: [png()] }),
-      ).rejects.toMatchObject({ status: 403 })
+      expect(
+        await rejection(
+          client.workspace.createSession({ folderId: 'f', goal: 'Look', files: [png()] }),
+        ),
+      ).toMatchObject({ status: 403 })
 
       expect(bucket.keys()).toEqual([])
     }
@@ -158,9 +178,11 @@ describe('initial session attachments', () => {
   test('refuses a declared body over the limit before reading it', async () => {
     const { client } = setup({ headers: { 'content-length': String(50 * 1024 * 1024 + 1) } })
 
-    await expect(
-      client.workspace.createSession({ folderId: 'f', goal: 'Look', files: [png()] }),
-    ).rejects.toMatchObject({ status: 413 })
+    expect(
+      await rejection(
+        client.workspace.createSession({ folderId: 'f', goal: 'Look', files: [png()] }),
+      ),
+    ).toMatchObject({ status: 413 })
   })
 
   test('a session without files is still plain JSON, with no origin needed', async () => {

@@ -2,16 +2,16 @@ import { ExternalLink, Layers } from 'lucide-react'
 
 import { cn } from '../../lib/cn'
 import { CheckGlyph, RepoDot, repoShortName } from './pull-glyphs'
-import { laneForPull, type PullInboxSummary, type PullStack } from './pulls'
+import { laneForPull, type PullInboxSummary, type PullLaneId, type PullStack } from './pulls'
 
-const LANE_LABEL: Record<string, string> = {
+const LANE_LABEL = {
   needs_review: 'Needs review',
   reviewing: 'Reviewing',
   changes_requested: 'Changes requested',
   ready: 'Ready',
   drafts: 'Drafts',
   opened_by_shuttle: 'Opened by Shuttle',
-}
+} satisfies Record<PullLaneId, string>
 
 export function StackLadder({
   stack,
@@ -63,7 +63,7 @@ export function StackLadder({
               <li key={key} className="relative flex items-center gap-2 py-0.5 pl-3">
                 <span className="bg-border absolute top-1/2 left-[-7px] size-1.5 -translate-y-1/2 rounded-full" />
                 <span className="text-muted-foreground truncate text-[11px]">
-                  #{pull.number} · in {LANE_LABEL[laneForPull(pull)] ?? laneForPull(pull)}
+                  #{pull.number} · in {LANE_LABEL[laneForPull(pull)]}
                 </span>
               </li>
             )

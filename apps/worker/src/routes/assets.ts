@@ -35,7 +35,10 @@ export async function handleAssetRoutes(
   }
 
   const runId = decodeURIComponent(match[1] ?? '')
-  const assetId = match[2] ? decodeURIComponent(match[2]) : null
+  const rawAssetId = match[2]
+
+  const assetId =
+    rawAssetId !== undefined && rawAssetId !== '' ? decodeURIComponent(rawAssetId) : null
 
   if (!env.ASSETS) {
     return Response.json({ error: UNAVAILABLE }, { status: 503 })
@@ -98,11 +101,15 @@ async function uploadAsset(
   return Response.json({ asset }, { status: 201 })
 }
 
-async function readCapped(stream: ReadableStream<Uint8Array>, limit: number) {
+async function readCapped(stream: ReadableStream, limit: number) {
   const chunks: Uint8Array[] = []
   let total = 0
 
   for await (const chunk of stream) {
+    if (!(chunk instanceof Uint8Array)) {
+      throw new TypeError('request body chunk is not bytes')
+    }
+
     total += chunk.byteLength
 
     if (total > limit) {

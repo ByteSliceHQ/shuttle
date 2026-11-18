@@ -21,6 +21,8 @@ const TextInput = z.object({
   workers: z.array(z.string()).optional(),
 })
 
+const ThoughtPayload = z.object({ turn: z.number(), text: z.string() })
+
 async function waitFor(
   predicate: () => boolean | Promise<boolean>,
   timeoutMs = 2_000,
@@ -119,10 +121,9 @@ describe('thinking traces', () => {
       expect(thoughtIndex).toBeGreaterThanOrEqual(0)
       expect(messageIndex).toBeGreaterThan(thoughtIndex)
 
-      expect(events[thoughtIndex]?.payload).toMatchObject({
-        turn: expect.any(Number),
-        text: expect.stringContaining('Considering how to respond'),
-      })
+      const thought = ThoughtPayload.parse(events[thoughtIndex]?.payload)
+
+      expect(thought.text).toContain('Considering how to respond')
     } finally {
       await looms.stop()
     }

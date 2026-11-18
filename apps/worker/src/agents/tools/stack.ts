@@ -145,7 +145,7 @@ export function createStackLayerTool(
             published,
           )
 
-          if (blocker) {
+          if (blocker !== null) {
             return { error: blocker }
           }
 
@@ -159,13 +159,14 @@ export function createStackLayerTool(
         }
 
         case 'checkout': {
-          if (!input.layer) {
+          if (input.layer === undefined) {
             return { error: 'checkout requires layer' }
           }
 
-          const current = input.stack
-            ? null
-            : await sandbox.stackStatus(runId, repo.name, repo.defaultBranch)
+          const current =
+            input.stack !== undefined
+              ? null
+              : await sandbox.stackStatus(runId, repo.name, repo.defaultBranch)
 
           const address = {
             stack: input.stack ?? current?.currentStack ?? 1,
@@ -183,7 +184,7 @@ export function createStackLayerTool(
 
         default: {
           const exhaustive: never = action
-          return { error: `Unknown action: ${exhaustive}` }
+          return { error: `Unknown action: ${JSON.stringify(exhaustive)}` }
         }
       }
     },

@@ -13,6 +13,7 @@ import {
 import { Input } from '../../components/ui/input'
 import { PanelHeader, PanelTitle } from '../../components/ui/panel'
 import { cn, shortId } from '../../lib/cn'
+import { hasText } from '../../lib/text'
 import { eventFamilies, eventMeta, familyColor, type SessionEvent } from './event-catalog'
 import { EventInspector } from './event-inspector'
 import { EventRow } from './event-row'
@@ -65,11 +66,11 @@ export function EventStream({
   const visible = useMemo(
     () =>
       events.filter((event) => {
-        if (threadId && event.threadId !== threadId) {
+        if (hasText(threadId) && event.threadId !== threadId) {
           return false
         }
 
-        if (!showDeltas && event.ephemeral) {
+        if (!showDeltas && event.ephemeral === true) {
           return false
         }
 
@@ -79,7 +80,7 @@ export function EventStream({
           return false
         }
 
-        return !q || meta.searchText.includes(q)
+        return q === '' || meta.searchText.includes(q)
       }),
     [events, threadId, showDeltas, families, q],
   )
@@ -169,7 +170,7 @@ export function EventStream({
             <DropdownMenuLabel>Live</DropdownMenuLabel>
             <DropdownMenuCheckboxItem
               checked={showDeltas}
-              onCheckedChange={(checked) => setShowDeltas(checked === true)}
+              onCheckedChange={(checked) => setShowDeltas(checked)}
               onSelect={(event) => event.preventDefault()}
             >
               Ephemeral text deltas
@@ -193,7 +194,7 @@ export function EventStream({
           </Button>
         ) : null}
       </PanelHeader>
-      {threadId ? (
+      {hasText(threadId) ? (
         <div className="flex h-8 shrink-0 items-center gap-2 border-b px-3 text-[11px]">
           <span className="text-muted-foreground">Thread</span>
           <span className="bg-accent text-foreground inline-flex h-5 min-w-0 items-center gap-1 rounded-sm pr-0.5 pl-1.5">

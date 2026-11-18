@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Predicate, Schema } from 'effect'
 
 import { reflectModule } from './scope'
 
@@ -21,14 +21,14 @@ export const friction = reflectModule.projection({
       return { entries: [...state.entries, event.payload] }
     }
 
-    if (event.type === 'agent.steered' && event.payload.interrupt) {
+    if (event.type === 'agent.steered' && event.payload.interrupt === true) {
       const content = event.payload.message.content
       return {
         entries: [
           ...state.entries,
           {
             kind: 'correction',
-            summary: typeof content === 'string' ? content : 'interrupted steer',
+            summary: Predicate.isString(content) ? content : 'interrupted steer',
             runId: event.runId,
             seq: event.seq,
             threadId: event.threadId ?? undefined,
@@ -52,7 +52,11 @@ export const friction = reflectModule.projection({
       }
     }
 
-    if (event.type === 'agent.tool.result' && event.payload.error) {
+    if (
+      event.type === 'agent.tool.result' &&
+      event.payload.error !== null &&
+      event.payload.error !== ''
+    ) {
       return {
         entries: [
           ...state.entries,

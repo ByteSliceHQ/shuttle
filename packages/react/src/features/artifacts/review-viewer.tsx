@@ -18,6 +18,7 @@ import { EmptyState } from '../../components/ui/panel'
 import { ScrollArea } from '../../components/ui/scroll-area'
 import { Textarea } from '../../components/ui/textarea'
 import { cn, errorMessage } from '../../lib/cn'
+import { hasText } from '../../lib/text'
 import { compactRelativeTime, fullDateTime } from '../../lib/time'
 import { useNow } from '../../lib/use-now'
 import { useApi, useShuttle, useShuttleHost } from '../../shuttle'
@@ -51,6 +52,11 @@ interface EditableComment extends DraftReviewComment {
 }
 
 /** What sits on one line of one side of a file's diff. */
+interface Elsewhere {
+  drafts: EditableComment[]
+  threads: PullThread[]
+}
+
 interface LineNotes {
   readonly drafts: readonly EditableComment[]
   readonly threads: readonly PullThread[]
@@ -105,7 +111,7 @@ const VERDICT_LABEL: Record<Verdict, string> = {
 
 /** A comment's text as GitHub shows it, with a proposed replacement as a suggestion block. */
 function withSuggestion(body: string, suggestion: string | undefined): string {
-  return suggestion ? `${body}\n\n\`\`\`suggestion\n${suggestion}\n\`\`\`` : body
+  return hasText(suggestion) ? `${body}\n\n\`\`\`suggestion\n${suggestion}\n\`\`\`` : body
 }
 
 const plural = (count: number, one: string, many = `${one}s`) =>
@@ -172,7 +178,10 @@ export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: st
   const number = pull?.number
 
   const pullOnGithub = useMemo(
-    () => (folderId && fullName && number !== undefined ? { folderId, fullName, number } : null),
+    () =>
+      hasText(folderId) && hasText(fullName) && number !== undefined
+        ? { folderId, fullName, number }
+        : null,
     [folderId, fullName, number],
   )
 
@@ -189,9 +198,9 @@ export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: st
   // The sync is a request to GitHub made once per pull request this tab shows, not a read of
   // something the page keeps: what it finds arrives through the pull requests' event stream.
   useEffect(() => {
-    const key = pullOnGithub ? `${pullOnGithub.fullName}#${pullOnGithub.number}` : null
+    const key = pullOnGithub !== null ? `${pullOnGithub.fullName}#${pullOnGithub.number}` : null
 
-    if (pullOnGithub && key && synced.current !== key) {
+    if (pullOnGithub !== null && key !== null && synced.current !== key) {
       synced.current = key
       syncThreads(pullOnGithub)
     }
@@ -199,7 +208,7 @@ export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: st
 
   const actions = useMemo<ReviewActions | null>(
     () =>
-      folderId && fullName && number !== undefined
+      hasText(folderId) && hasText(fullName) && number !== undefined
         ? {
             comment: (target, body) =>
               postPullComment(host, folderId, fullName, number, target, body),
@@ -210,7 +219,7 @@ export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: st
     [host, folderId, fullName, number],
   )
 
-  const files = useMemo(() => (diffText ? reviewFiles(diffText) : []), [diffText])
+  const files = useMemo(() => (hasText(diffText) ? reviewFiles(diffText) : []), [diffText])
 
   // Everything said, sorted into the file it is about, and within it onto a line when the diff
   // still shows that line. The rest is listed above the file's diff, or under no file at all.
@@ -222,7 +231,7 @@ export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: st
       { lines: Map<string, LineNotes>; loose: { drafts: EditableComment[]; threads: PullThread[] } }
     >()
 
-    const elsewhere: { drafts: EditableComment[]; threads: PullThread[] } = {
+    const elsewhere: Elsewhere = {
       drafts: [],
       threads: [],
     }
@@ -302,7 +311,7 @@ export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: st
         actionId: 'submit',
         outcome: 'approve',
         payload: {
-          summary: summary.trim() || 'Shuttle review',
+          summary: summary.trim() !== '' ? summary.trim() : 'Shuttle review',
           verdict,
           comments: drafts
             .filter((draft) => draft.enabled)
@@ -310,7 +319,10 @@ export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: st
               path: draft.path,
               line: draft.line,
               side: draft.side,
-              body: withSuggestion(draft.editedBody.trim() || draft.body, draft.suggestion),
+              body: withSuggestion(
+                draft.editedBody.trim() !== '' ? draft.editedBody.trim() : draft.body,
+                draft.suggestion,
+              ),
             })),
         },
       }),
@@ -360,7 +372,7 @@ export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: st
               .filter(Boolean)
               .join(' · ')}
           </span>
-          {folderId && pull ? (
+          {hasText(folderId) && pull ? (
             <button
               type="button"
               onClick={() => pullOnGithub && syncThreads(pullOnGithub)}
@@ -369,7 +381,7 @@ export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: st
               aria-label="Refresh threads from GitHub"
               className={cn(
                 'hover:text-foreground focus-visible:ring-ring/50 shrink-0 rounded-sm p-0.5 outline-none focus-visible:ring-2',
-                syncError && 'text-status-failed',
+                hasText(syncError) && 'text-status-failed',
               )}
             >
               <RefreshCw className={cn('size-3', syncing && 'animate-spin')} />
@@ -377,7 +389,7 @@ export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: st
           ) : null}
         </div>
 
-        {syncError ? (
+        {hasText(syncError) ? (
           <p
             role="alert"
             className="text-status-failed shrink-0 border-b px-3 py-1.5 text-[11.5px]"
@@ -394,14 +406,14 @@ export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: st
               placeholder="Summary of the review"
               aria-label="Summary of the review"
               className="min-h-14 resize-none text-[12.5px]"
-              disabled={pending || !approvalId}
+              disabled={pending || !hasText(approvalId)}
             />
             <div className="flex flex-wrap items-center gap-2">
               {(['comment', 'approve', 'request_changes'] as const).map((option) => (
                 <button
                   key={option}
                   type="button"
-                  disabled={pending || !approvalId}
+                  disabled={pending || !hasText(approvalId)}
                   aria-pressed={verdict === option}
                   onClick={() => setVerdict(option)}
                   className={cn(
@@ -415,8 +427,10 @@ export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: st
                 </button>
               ))}
               <div className="ml-auto flex items-center gap-2">
-                {error ? <span className="text-status-failed text-[11px]">{error}</span> : null}
-                {approvalId ? (
+                {hasText(error) ? (
+                  <span className="text-status-failed text-[11px]">{error}</span>
+                ) : null}
+                {hasText(approvalId) ? (
                   <Button
                     type="button"
                     variant="brand"
@@ -464,7 +478,7 @@ export function ReviewViewer({ runId, folderId }: { runId: string; folderId?: st
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="flex flex-col gap-5 py-3">
-            {diffError && !nothingYet ? (
+            {hasText(diffError) && !nothingYet ? (
               <p className="text-status-failed px-3 text-xs">
                 The pull request’s changes could not be loaded. {diffError}
               </p>
@@ -525,7 +539,7 @@ function FileReview({
   const annotations = useMemo(() => {
     const lines = new Map(notes?.lines)
 
-    if (composing && !lines.has(composing)) {
+    if (composing !== null && !lines.has(composing)) {
       lines.set(composing, { drafts: [], threads: [] })
     }
 
@@ -631,14 +645,15 @@ function FileReview({
                     onCancel={() => setRange(null)}
                     onSend={async (body) => {
                       await actions.comment(
-                        {
-                          path: file.path,
-                          line: range.line,
-                          side: range.side,
-                          ...(range.startLine === range.line
-                            ? {}
-                            : { startLine: range.startLine, startSide: range.startSide }),
-                        },
+                        range.startLine === range.line
+                          ? { path: file.path, line: range.line, side: range.side }
+                          : {
+                              path: file.path,
+                              line: range.line,
+                              side: range.side,
+                              startLine: range.startLine,
+                              startSide: range.startSide,
+                            },
                         body,
                       )
 
@@ -722,7 +737,7 @@ function ThreadCard({ thread, showPath }: { thread: PullThread; showPath?: boole
             +{plural(thread.comments.length - 1, 'reply', 'replies')}
           </span>
         ) : null}
-        {showPath || first.outdated ? (
+        {showPath === true || first.outdated ? (
           <span className="min-w-0 truncate font-mono">
             {first.path}
             {first.line === null ? '' : `:${first.line}`}
@@ -747,7 +762,7 @@ function ThreadCard({ thread, showPath }: { thread: PullThread; showPath?: boole
         <ul className="flex flex-col border-t">
           {thread.comments.map((comment) => (
             <li key={comment.commentId} className="flex gap-2 px-2 py-1.5 not-first:border-t">
-              {comment.author.avatarUrl ? (
+              {hasText(comment.author.avatarUrl) ? (
                 <img
                   src={comment.author.avatarUrl}
                   alt=""
@@ -821,7 +836,7 @@ function ThreadCard({ thread, showPath }: { thread: PullThread; showPath?: boole
               </Button>
             </div>
           )}
-          {resolveError ? (
+          {hasText(resolveError) ? (
             <p role="alert" className="text-status-failed text-[11px] wrap-anywhere">
               {resolveError}
             </p>
@@ -859,7 +874,7 @@ function Composer({
   const needsGithub = post.error instanceof GithubNotConnectedError
 
   function submit() {
-    if (body.trim() && !pending) {
+    if (body.trim() !== '' && !pending) {
       post.mutate(body.trim())
     }
   }
@@ -873,7 +888,7 @@ function Composer({
           if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
             event.preventDefault()
             submit()
-          } else if (event.key === 'Escape' && !body.trim()) {
+          } else if (event.key === 'Escape' && body.trim() === '') {
             onCancel()
           }
         }}
@@ -883,7 +898,7 @@ function Composer({
         disabled={pending}
         className="bg-background min-h-14 resize-none text-[12px]"
       />
-      {error ? (
+      {hasText(error) ? (
         <p role="alert" className="text-status-failed text-[11px] wrap-anywhere">
           {error}
         </p>
@@ -905,7 +920,7 @@ function Composer({
             type="button"
             variant="brand"
             size="sm"
-            disabled={pending || !body.trim()}
+            disabled={pending || body.trim() === ''}
             onClick={submit}
           >
             {pending ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
@@ -947,7 +962,7 @@ function DraftCard({
           Draft
         </label>
         <span className="text-muted-foreground">{draft.severity}</span>
-        {showPath ? (
+        {showPath === true ? (
           <span className="text-muted-foreground min-w-0 truncate font-mono">
             {draft.path}:{draft.line}
           </span>
@@ -963,7 +978,7 @@ function DraftCard({
         aria-label={`Draft comment on ${draft.path} line ${draft.line}`}
         className="min-h-14 resize-none text-[12px]"
       />
-      {draft.suggestion ? (
+      {hasText(draft.suggestion) ? (
         <div className="mt-1.5">
           <p className="text-muted-foreground mb-1 text-[10px] font-medium">Suggested change</p>
           <pre className="bg-status-completed/10 overflow-x-auto rounded-sm px-2 py-1.5 font-mono text-[11px] leading-[18px] whitespace-pre">

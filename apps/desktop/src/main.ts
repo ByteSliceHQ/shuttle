@@ -5,13 +5,14 @@ import { join, resolve } from 'node:path'
 
 import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, session, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
+import { z } from 'zod'
 
 import {
   appPath,
   CHANNELS,
   deepLinkPath,
+  desktopNoticeSchema,
   type DesktopInfo,
-  type DesktopNotice,
   type RunnerStatus,
 } from './channels'
 import { readPackagedConfig } from './config'
@@ -19,6 +20,7 @@ import { forgetMachineToken, machineToken } from './machine'
 import { RunnerSupervisor } from './runner'
 import { showSplash } from './splash'
 import { Store } from './store'
+import { nonEmpty } from './text'
 import { startUpdates } from './updates'
 
 /**
@@ -85,7 +87,7 @@ let openWith: string | null = null
 function goTo(path: string): void {
   const [window] = BrowserWindow.getAllWindows()
 
-  if (!window) {
+  if (window === undefined) {
     openWith = path
     return
   }
@@ -100,9 +102,9 @@ function goTo(path: string): void {
 }
 
 function openDeepLink(link: string | undefined): void {
-  const path = link ? deepLinkPath(link) : null
+  const path = link === undefined ? null : deepLinkPath(link)
 
-  if (path) {
+  if (path !== null) {
     goTo(path)
   }
 }
@@ -110,10 +112,14 @@ function openDeepLink(link: string | undefined): void {
 function createWindow(store: Store): BrowserWindow {
   const saved = store.get('window')
 
+  const position =
+    saved?.x !== undefined && saved.y !== undefined ? { x: saved.x, y: saved.y } : undefined
+
   const window = new BrowserWindow({
     width: saved?.width ?? 1440,
     height: saved?.height ?? 900,
-    ...(saved?.x !== undefined && saved.y !== undefined ? { x: saved.x, y: saved.y } : {}),
+    x: position?.x,
+    y: position?.y,
     minWidth: 720,
     minHeight: 480,
     title: 'Shuttle',
@@ -126,7 +132,7 @@ function createWindow(store: Store): BrowserWindow {
     },
   })
 
-  if (saved?.maximized) {
+  if (saved?.maximized === true) {
     window.maximize()
   }
 
@@ -171,7 +177,7 @@ if (!app.requestSingleInstanceLock()) {
 
     const store = new Store(join(app.getPath('userData'), 'state.json'))
 
-    if (!store.get('deviceId')) {
+    if ((store.get('deviceId') ?? '') === '') {
       store.set('deviceId', `${process.platform}-${randomBytes(8).toString('hex')}`)
     }
 
@@ -181,7 +187,7 @@ if (!app.requestSingleInstanceLock()) {
       platform: process.platform,
     }
 
-    const sandboxContext = REPO_ROOT ? join(REPO_ROOT, 'apps/worker') : null
+    const sandboxContext = REPO_ROOT === null ? null : join(REPO_ROOT, 'apps/worker')
 
     const runner = new RunnerSupervisor({
       resourcesPath: process.resourcesPath,
@@ -189,18 +195,23 @@ if (!app.requestSingleInstanceLock()) {
       settings: async () => {
         const token = await machineToken(store, APP_URL, await signInCookie(), info)
 
-        return token
-          ? {
-              url: APP_URL,
-              token,
-              deviceName: info.deviceName,
-              ...(SANDBOX_IMAGE ? { image: SANDBOX_IMAGE } : {}),
-              // Run from the repository, the sandbox image is built from it when it is missing.
-              ...(sandboxContext && existsSync(join(sandboxContext, 'Dockerfile'))
-                ? { buildContext: sandboxContext }
-                : {}),
-            }
-          : null
+        if (token === null || token === '') {
+          return null
+        }
+
+        // Run from the repository, the sandbox image is built from it when it is missing.
+        const buildContext =
+          sandboxContext !== null && existsSync(join(sandboxContext, 'Dockerfile'))
+            ? sandboxContext
+            : undefined
+
+        return {
+          url: APP_URL,
+          token,
+          deviceName: info.deviceName,
+          image: nonEmpty(SANDBOX_IMAGE),
+          buildContext,
+        }
       },
       changed: (status) => {
         for (const window of BrowserWindow.getAllWindows()) {
@@ -251,9 +262,10 @@ if (!app.requestSingleInstanceLock()) {
             label: 'Sandbox',
             submenu: [
               {
-                label: status.message
-                  ? `${STATUS_LABELS[status.status]} (${status.message.slice(0, 60)})`
-                  : STATUS_LABELS[status.status],
+                label:
+                  status.message !== undefined && status.message !== ''
+                    ? `${STATUS_LABELS[status.status]} (${status.message.slice(0, 60)})`
+                    : STATUS_LABELS[status.status],
                 enabled: false,
               },
               ...(status.backend
@@ -300,27 +312,25 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle(CHANNELS.runnerStatus, () => runner.status())
     ipcMain.handle(CHANNELS.startsLocally, () => startsLocally())
 
-    ipcMain.on(CHANNELS.setBadge, (_event, count: unknown) => {
-      app.setBadgeCount(
-        typeof count === 'number' && count > 0 ? Math.min(Math.round(count), 99) : 0,
-      )
+    ipcMain.on(CHANNELS.setBadge, (_event, payload) => {
+      const count = z.number().safeParse(payload)
+
+      app.setBadgeCount(count.success && count.data > 0 ? Math.min(Math.round(count.data), 99) : 0)
     })
 
-    ipcMain.on(CHANNELS.notify, (_event, notice: Partial<DesktopNotice> | null) => {
-      if (
-        !Notification.isSupported() ||
-        typeof notice?.title !== 'string' ||
-        typeof notice.body !== 'string'
-      ) {
+    ipcMain.on(CHANNELS.notify, (_event, payload) => {
+      const notice = desktopNoticeSchema.safeParse(payload)
+
+      if (!Notification.isSupported() || !notice.success) {
         return
       }
 
       const shown = new Notification({
-        title: notice.title.slice(0, 120),
-        body: notice.body.slice(0, 300),
+        title: notice.data.title.slice(0, 120),
+        body: notice.data.body.slice(0, 300),
       })
 
-      const path = appPath(notice.path)
+      const path = appPath(notice.data.path)
 
       shown.on('click', () => goTo(path ?? '/'))
       shown.show()
@@ -383,7 +393,7 @@ if (!app.requestSingleInstanceLock()) {
     const [window] = BrowserWindow.getAllWindows()
     const link = argv.find((argument) => argument.startsWith('shuttle://'))
 
-    if (link) {
+    if (link !== undefined) {
       openDeepLink(link)
       return
     }

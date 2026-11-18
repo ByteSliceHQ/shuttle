@@ -43,7 +43,7 @@ const emptyCheckpoint: ActivityCheckpoint = {
 }
 
 function eventTimestamp(event: EventEnvelope): number {
-  return typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
+  return Number.isFinite(event.ts) ? event.ts : Date.now()
 }
 
 /**
@@ -140,8 +140,12 @@ export function createWorkspaceActivityProjector(
         checkpoint = {
           cursor: event.seq,
           state: nextState,
-          lastTransitionAt: transitioned ? ts : checkpoint.lastTransitionAt || ts,
-          lastTransitionSeq: transitioned ? event.seq : checkpoint.lastTransitionSeq || event.seq,
+          lastTransitionAt:
+            transitioned || checkpoint.lastTransitionAt === 0 ? ts : checkpoint.lastTransitionAt,
+          lastTransitionSeq:
+            transitioned || checkpoint.lastTransitionSeq === 0
+              ? event.seq
+              : checkpoint.lastTransitionSeq,
           reported: checkpoint.reported,
         }
 
@@ -163,16 +167,23 @@ export function createWorkspaceActivityProjector(
         return
       }
 
-      const reportAt = activityChanged ? checkpoint.lastTransitionAt || latestTs : latestTs
+      const reportAt =
+        activityChanged && checkpoint.lastTransitionAt !== 0
+          ? checkpoint.lastTransitionAt
+          : latestTs
 
-      const reportSeq = activityChanged
-        ? checkpoint.lastTransitionSeq || checkpoint.cursor
-        : checkpoint.cursor
+      const reportSeq =
+        activityChanged && checkpoint.lastTransitionSeq !== 0
+          ? checkpoint.lastTransitionSeq
+          : checkpoint.cursor
 
       // Read each time: the session may have been shared or made public since the last report.
       const access = storage ? await readSessionAccess(storage) : null
 
-      const listings = orgId ? listingRunIds(env, orgId, access) : [workspaceRunId(env, null)]
+      const listings =
+        orgId !== null && orgId !== ''
+          ? listingRunIds(env, orgId, access)
+          : [workspaceRunId(env, null)]
 
       const built = reportActivity({
         runId,

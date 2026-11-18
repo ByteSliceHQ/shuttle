@@ -1,3 +1,5 @@
+import type { z } from 'zod'
+
 import {
   RUNNER_CONNECT_PATH,
   RUNNER_PING,
@@ -5,9 +7,7 @@ import {
   RUNNER_PROTOCOL,
   RUNNER_REMOVED,
   RUNNER_REPLACED,
-  type RunnerHello,
   type RunnerInbound,
-  type RunnerOutbound,
   type RunnerRequest,
   type RunnerResults,
 } from '@shuttle/runner-protocol'
@@ -17,7 +17,19 @@ import { ContainerWorkspace } from '../container-workspace'
 import type { HostOutput, SandboxHost } from '../host'
 import { orgOfSandbox } from '../names'
 import { previewUnavailableResponse } from '../preview-proxy'
+import { terminalInput } from '../terminal-input'
+import { nonEmpty } from '../text'
 import type { Workspace } from '../workspace'
+import {
+  base64,
+  fromBase64,
+  helloFrame,
+  outboundFrame,
+  resultSchemas,
+  socketAttachment,
+  type HelloFrame,
+  type ResponseFrame,
+} from './local-frames'
 import type { SandboxMachine, SandboxMachineInfo, SandboxProvider } from './types'
 
 /**
@@ -47,20 +59,23 @@ const EXEC_TIMEOUT_MS = 700_000
 const CALL_TIMEOUT_MS = 60_000
 
 interface Pending {
-  readonly resolve: (result: unknown) => void
+  /** Hands over the runner's answer; the request that is waiting reads it. */
+  readonly answer: (frame: ResponseFrame) => void
   readonly reject: (cause: Error) => void
   readonly started?: (pid: number) => void
   readonly timer: ReturnType<typeof setTimeout>
 }
 
-function base64(bytes: ArrayBuffer | Uint8Array): string {
-  return Buffer.from(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)).toString('base64')
-}
-
-function fromBase64(text: string): ArrayBuffer {
-  const buffer = Buffer.from(text, 'base64')
-
-  return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+/** The part of a Durable Object's state that a local sandbox uses. */
+export interface LocalContext {
+  setWebSocketAutoResponse: DurableObjectState['setWebSocketAutoResponse']
+  getWebSockets: DurableObjectState['getWebSockets']
+  acceptWebSocket: DurableObjectState['acceptWebSocket']
+  /** Where the runner's hello is kept, so it is known again after the object hibernates. */
+  readonly hello: {
+    readonly read: () => Promise<HelloFrame | null>
+    readonly write: (frame: HelloFrame) => Promise<void>
+  }
 }
 
 class LocalMachine implements SandboxMachine {
@@ -72,7 +87,7 @@ class LocalMachine implements SandboxMachine {
   private containerWs: ContainerWorkspace | null = null
 
   constructor(
-    private readonly ctx: DurableObjectState,
+    private readonly ctx: LocalContext,
     private readonly env: ShuttleEnv,
     private readonly name: string,
   ) {
@@ -88,7 +103,8 @@ class LocalMachine implements SandboxMachine {
     let newestAt = -1
 
     for (const socket of this.ctx.getWebSockets(RUNNER_TAG)) {
-      const at = (socket.deserializeAttachment() as { at?: number } | null)?.at ?? 0
+      const attachment = socketAttachment.safeParse(socket.deserializeAttachment())
+      const at = attachment.success ? attachment.data.at : 0
 
       if (socket.readyState === WebSocket.OPEN && at > newestAt) {
         newest = socket
@@ -108,7 +124,7 @@ class LocalMachine implements SandboxMachine {
   private send(frame: RunnerInbound): void {
     const runner = this.runner()
 
-    if (!runner) {
+    if (runner === null) {
       throw this.offline()
     }
 
@@ -119,6 +135,9 @@ class LocalMachine implements SandboxMachine {
     request: Extract<RunnerRequest, { op: Op }>,
     options: { readonly timeoutMs?: number; readonly started?: (pid: number) => void } = {},
   ): Promise<RunnerResults[Op]> {
+    const schema: z.ZodType<RunnerResults[Op]> = resultSchemas[request.op]
+    const wire: RunnerRequest = request
+
     return new Promise((resolve, reject) => {
       const id = crypto.randomUUID()
 
@@ -128,14 +147,29 @@ class LocalMachine implements SandboxMachine {
       }, options.timeoutMs ?? CALL_TIMEOUT_MS)
 
       this.pending.set(id, {
-        resolve: resolve as (result: unknown) => void,
+        answer: (frame) => {
+          if (!frame.ok) {
+            // Callers tell a missing file from other failures by this prefix.
+            reject(new Error(frame.code === 'ENOENT' ? `ENOENT: ${frame.error}` : frame.error))
+
+            return
+          }
+
+          const result = schema.safeParse(frame.result)
+
+          if (result.success) {
+            resolve(result.data)
+          } else {
+            reject(new Error(`The local sandbox answered ${request.op} in an unexpected shape`))
+          }
+        },
         reject,
         timer,
-        ...(options.started ? { started: options.started } : {}),
+        started: options.started,
       })
 
       try {
-        this.send({ type: 'req', id, ...request } as RunnerInbound)
+        this.send({ type: 'req', id, ...wire })
       } catch (cause) {
         clearTimeout(timer)
         this.pending.delete(id)
@@ -151,9 +185,10 @@ class LocalMachine implements SandboxMachine {
 
     return {
       exec: async (argv, options) => {
-        const stdin = options?.stdin
-          ? base64(await new Response(options.stdin).arrayBuffer())
-          : undefined
+        const stdin =
+          options?.stdin === undefined
+            ? undefined
+            : base64(await new Response(options.stdin).arrayBuffer())
 
         const { promise: started, resolve: announce } = Promise.withResolvers<number | undefined>()
 
@@ -161,9 +196,9 @@ class LocalMachine implements SandboxMachine {
           {
             op: 'exec',
             argv,
-            ...(options?.cwd ? { cwd: options.cwd } : {}),
-            ...(options?.env ? { env: options.env } : {}),
-            ...(stdin ? { stdin } : {}),
+            cwd: nonEmpty(options?.cwd),
+            env: options?.env,
+            stdin: nonEmpty(stdin),
           },
           { timeoutMs: EXEC_TIMEOUT_MS, started: announce },
         ).then((result) => ({
@@ -181,7 +216,7 @@ class LocalMachine implements SandboxMachine {
 
         const pid = await started
 
-        return { ...(pid === undefined ? {} : { pid }), output: () => output }
+        return { pid, output: () => output }
       },
       readFile: async (path) =>
         new TextDecoder().decode(fromBase64((await this.call({ op: 'readBytes', path })).data)),
@@ -214,24 +249,22 @@ class LocalMachine implements SandboxMachine {
   }
 
   async describe(): Promise<SandboxMachineInfo> {
-    const hello = await this.ctx.storage.get<RunnerHello>(HELLO_KEY)
+    const hello = (await this.ctx.hello.read()) ?? undefined
 
     return {
       online: this.runner() !== null,
-      ...(hello
-        ? {
-            device: {
-              id: hello.device.id,
-              name: hello.device.name,
-              platform: hello.device.platform,
-            },
-            backend: {
+      device:
+        hello === undefined
+          ? undefined
+          : { id: hello.device.id, name: hello.device.name, platform: hello.device.platform },
+      backend:
+        hello === undefined
+          ? undefined
+          : {
               id: hello.backend.id,
               label: hello.backend.label,
               isolation: hello.backend.isolation,
             },
-          }
-        : {}),
     }
   }
 
@@ -240,7 +273,7 @@ class LocalMachine implements SandboxMachine {
       return Response.json({ error: 'Expected WebSocket upgrade' }, { status: 426 })
     }
 
-    if (!this.runner()) {
+    if (this.runner() === null) {
       return Response.json({ error: this.offline().message }, { status: 503 })
     }
 
@@ -272,34 +305,31 @@ class LocalMachine implements SandboxMachine {
     }
 
     server.addEventListener('message', (event) => {
-      const { data } = event
+      const input = terminalInput(event)
+
+      if (input === null) {
+        return
+      }
 
       try {
-        if (typeof data === 'string') {
-          if (data.startsWith('{')) {
-            try {
-              const message = JSON.parse(data) as { type?: unknown; cols?: unknown; rows?: unknown }
+        switch (input.kind) {
+          case 'resize':
+            this.send({ type: 'term.resize', term, cols: input.cols, rows: input.rows })
 
-              if (
-                message.type === 'resize' &&
-                typeof message.cols === 'number' &&
-                typeof message.rows === 'number'
-              ) {
-                this.send({ type: 'term.resize', term, cols: message.cols, rows: message.rows })
+            return
+          case 'text':
+            this.send({
+              type: 'term.input',
+              term,
+              data: base64(new TextEncoder().encode(input.text)),
+            })
 
-                return
-              }
-            } catch {
-              // Not a control message: it is typed input.
-            }
-          }
+            return
+          case 'bytes':
+            this.send({ type: 'term.input', term, data: base64(input.bytes) })
 
-          this.send({ type: 'term.input', term, data: base64(new TextEncoder().encode(data)) })
-
-          return
+            return
         }
-
-        this.send({ type: 'term.input', term, data: base64(data as ArrayBuffer) })
       } catch {
         server.close(1011, 'local sandbox disconnected')
       }
@@ -313,7 +343,7 @@ class LocalMachine implements SandboxMachine {
       term,
       cols: size('cols', 80),
       rows: size('rows', 24),
-      ...(cwd ? { cwd } : {}),
+      cwd: nonEmpty(cwd),
     })
 
     return new Response(null, { status: 101, webSocket: client })
@@ -329,7 +359,7 @@ class LocalMachine implements SandboxMachine {
     }
 
     const url = new URL(request.url)
-    const body = request.body ? base64(await request.arrayBuffer()) : undefined
+    const body = request.body === null ? undefined : base64(await request.arrayBuffer())
 
     try {
       const answer = await this.call({
@@ -338,7 +368,7 @@ class LocalMachine implements SandboxMachine {
         method: request.method,
         path: `${url.pathname}${url.search}`,
         headers: [...request.headers].filter(([name]) => name.toLowerCase() !== 'host'),
-        ...(body ? { body } : {}),
+        body: nonEmpty(body),
       })
 
       const headers = new Headers()
@@ -395,17 +425,23 @@ class LocalMachine implements SandboxMachine {
   }
 
   async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
-    if (typeof message !== 'string') {
+    if (message instanceof ArrayBuffer) {
       return
     }
 
-    let frame: RunnerOutbound
+    let parsed: ReturnType<typeof outboundFrame.safeParse>
 
     try {
-      frame = JSON.parse(message) as RunnerOutbound
+      parsed = outboundFrame.safeParse(JSON.parse(message))
     } catch {
       return
     }
+
+    if (!parsed.success) {
+      return
+    }
+
+    const frame = parsed.data
 
     switch (frame.type) {
       case 'hello':
@@ -415,7 +451,7 @@ class LocalMachine implements SandboxMachine {
           return
         }
 
-        await this.ctx.storage.put(HELLO_KEY, frame)
+        await this.ctx.hello.write(frame)
 
         return
       case 'started':
@@ -432,15 +468,7 @@ class LocalMachine implements SandboxMachine {
 
         clearTimeout(waiting.timer)
         this.pending.delete(frame.id)
-
-        if (frame.ok) {
-          waiting.resolve(frame.result)
-        } else {
-          // Callers tell a missing file from other failures by this prefix.
-          waiting.reject(
-            new Error(frame.code === 'ENOENT' ? `ENOENT: ${frame.error}` : frame.error),
-          )
-        }
+        waiting.answer(frame)
 
         return
       }
@@ -496,8 +524,30 @@ class LocalMachine implements SandboxMachine {
   }
 }
 
+/** A sandbox on a person's own machine, for a Durable Object (or a test double of one). */
+export function openLocalMachine(ctx: LocalContext, env: ShuttleEnv, name: string): SandboxMachine {
+  return new LocalMachine(ctx, env, name)
+}
+
 export const localProvider: SandboxProvider = {
   id: 'local',
   location: 'local',
-  open: ({ ctx, env, name }) => new LocalMachine(ctx, env, name),
+  open: ({ ctx, env, name }) =>
+    openLocalMachine(
+      {
+        setWebSocketAutoResponse: (pair) => ctx.setWebSocketAutoResponse(pair),
+        getWebSockets: (tag) => ctx.getWebSockets(tag),
+        acceptWebSocket: (socket, tags) => ctx.acceptWebSocket(socket, tags),
+        hello: {
+          read: async () => {
+            const stored = helloFrame.safeParse(await ctx.storage.get(HELLO_KEY))
+
+            return stored.success ? stored.data : null
+          },
+          write: (frame) => ctx.storage.put(HELLO_KEY, frame),
+        },
+      },
+      env,
+      name,
+    ),
 }

@@ -239,11 +239,16 @@ function TreeRow({
   const label = identity?.label ?? role.label
 
   // A thread that has already ended has nothing left to stop.
+  const canStopIn = stopIn !== undefined && stopIn !== ''
+
   const stoppable =
-    stopIn && node.status !== 'completed' && node.status !== 'failed' && node.status !== 'cancelled'
+    canStopIn &&
+    node.status !== 'completed' &&
+    node.status !== 'failed' &&
+    node.status !== 'cancelled'
 
   const stop = () => {
-    if (stopIn && !stopping) {
+    if (canStopIn && !stopping) {
       stopThread.mutate({ id: stopIn, threadId: node.threadId })
     }
   }
@@ -296,8 +301,8 @@ function TreeRow({
             className={cn(
               'text-muted-foreground ml-auto shrink-0 font-mono text-[10px] tabular-nums',
               // The stop button takes the count's place while the row is hovered or focused.
-              stoppable && 'group-focus-within/row:invisible group-hover/row:invisible',
-              stopping && 'invisible',
+              stoppable ? 'group-focus-within/row:invisible group-hover/row:invisible' : undefined,
+              stopping ? 'invisible' : undefined,
             )}
           >
             {count}
@@ -315,7 +320,9 @@ function TreeRow({
           }
           className={cn(
             'hover:bg-destructive/15 hover:text-destructive focus-visible:ring-ring/50 absolute right-1.5 flex size-5 items-center justify-center rounded-sm outline-none focus-visible:ring-2',
-            stopError ? 'text-destructive' : 'text-muted-foreground',
+            stopError !== undefined && stopError !== ''
+              ? 'text-destructive'
+              : 'text-muted-foreground',
             stopping
               ? 'opacity-100'
               : 'opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100',

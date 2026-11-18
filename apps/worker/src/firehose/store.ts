@@ -1,6 +1,9 @@
-import type { EventEnvelope } from '@swirls/looms/core'
+import { Schema } from 'effect'
+import { z } from 'zod'
 
-import type { RunKind } from './run-kind'
+import { EventEnvelopeSchema, fromWireEvent, type EventEnvelope } from '@swirls/looms/core'
+
+import { RUN_KINDS, type RunKind } from './run-kind'
 
 /** Max retained rows in the ring buffer. */
 export const MAX_EVENTS = 50_000
@@ -66,35 +69,55 @@ export function ensureFirehoseSchema(sql: FirehoseSql): void {
   sql.exec(SCHEMA)
 }
 
-function asNumber(value: SqlStorageValue | undefined): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : Number(value)
-}
+const FirehoseRowSchema = z.object({
+  cursor: z.number(),
+  run_id: z.string(),
+  run_kind: z.enum(RUN_KINDS),
+  seq: z.number(),
+  ts: z.number(),
+  type: z.string(),
+  thread_id: z.string().nullable(),
+  envelope: z.string(),
+})
 
-function asString(value: SqlStorageValue | undefined): string {
-  return typeof value === 'string' ? value : String(value ?? '')
-}
+const MaxCursorRowSchema = z.object({ max_cursor: z.number() })
+const CountRowSchema = z.object({ n: z.number() })
 
-function asNullableString(value: SqlStorageValue | undefined): string | null {
-  if (value === null || value === undefined) {
-    return null
+const decodeEnvelope = Schema.decodeUnknownSync(EventEnvelopeSchema)
+
+/**
+ * A stored row as a frame's source, or undefined when it can no longer be read (written by a
+ * version whose envelope differs). One such row is left out so it does not hide the rest.
+ */
+function parseRow(raw: FirehoseSqlRow): FirehoseRow | undefined {
+  const row = FirehoseRowSchema.safeParse(raw)
+
+  if (!row.success) {
+    return undefined
   }
 
-  return typeof value === 'string' ? value : String(value)
+  try {
+    return {
+      cursor: row.data.cursor,
+      runId: row.data.run_id,
+      runKind: row.data.run_kind,
+      seq: row.data.seq,
+      ts: row.data.ts,
+      type: row.data.type,
+      threadId: row.data.thread_id,
+      event: fromWireEvent(decodeEnvelope(JSON.parse(row.data.envelope))),
+    }
+  } catch {
+    return undefined
+  }
 }
 
-function parseRow(raw: Record<string, SqlStorageValue>): FirehoseRow {
-  const envelope = JSON.parse(asString(raw.envelope)) as EventEnvelope
+function parseRows(raws: readonly FirehoseSqlRow[]): FirehoseRow[] {
+  return raws.flatMap((raw) => {
+    const row = parseRow(raw)
 
-  return {
-    cursor: asNumber(raw.cursor),
-    runId: asString(raw.run_id),
-    runKind: asString(raw.run_kind) as RunKind,
-    seq: asNumber(raw.seq),
-    ts: asNumber(raw.ts),
-    type: asString(raw.type),
-    threadId: asNullableString(raw.thread_id),
-    event: envelope,
-  }
+    return row === undefined ? [] : [row]
+  })
 }
 
 function rowToFrame(row: FirehoseRow): FirehoseFrame {
@@ -186,16 +209,16 @@ export function ingest(
     ...sql.exec('SELECT COALESCE(MAX(cursor), 0) AS max_cursor FROM firehose_events'),
   ]
 
-  const maxBefore = asNumber((before as Record<string, SqlStorageValue> | undefined)?.max_cursor)
+  const maxBefore = MaxCursorRowSchema.safeParse(before).data?.max_cursor ?? 0
   const minTs = now - MAX_AGE_MS
   const fresh: FirehoseFrame[] = []
 
   for (const event of events) {
-    if (event.ephemeral) {
+    if (event.ephemeral === true) {
       continue
     }
 
-    const ts = typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : now
+    const ts = Number.isFinite(event.ts) ? event.ts : now
 
     if (ts < minTs) {
       continue
@@ -231,16 +254,22 @@ export function ingest(
       continue
     }
 
-    fresh.push(rowToFrame(parseRow(row as Record<string, SqlStorageValue>)))
+    const parsed = parseRow(row)
+
+    if (parsed !== undefined) {
+      fresh.push(rowToFrame(parsed))
+    }
   }
 
   return fresh
 }
 
-function buildFilterClause(filter: FirehoseFilter): {
+interface FilterClause {
   readonly clause: string
   readonly bindings: SqlStorageValue[]
-} {
+}
+
+function buildFilterClause(filter: FirehoseFilter): FilterClause {
   const parts: string[] = []
   const bindings: SqlStorageValue[] = []
 
@@ -261,11 +290,13 @@ function buildFilterClause(filter: FirehoseFilter): {
 }
 
 function applyFamilyFilter(rows: FirehoseRow[], filter: FirehoseFilter): FirehoseRow[] {
-  if (!filter.families || filter.families.length === 0) {
+  const { families } = filter
+
+  if (families === undefined || families.length === 0) {
     return rows
   }
 
-  return rows.filter((row) => filter.families!.includes(familyOfType(row.type)))
+  return rows.filter((row) => families.includes(familyOfType(row.type)))
 }
 
 /** Read forward from a cursor (exclusive). */
@@ -281,7 +312,7 @@ export function readAfter(
   // Over-fetch when family filter is present so in-memory filtering still fills the page.
   const fetchLimit = filter.families && filter.families.length > 0 ? safeLimit * 4 : safeLimit
 
-  const rows = [
+  const rows = parseRows([
     ...sql.exec(
       `SELECT cursor, run_id, run_kind, seq, ts, type, thread_id, envelope
        FROM firehose_events
@@ -292,7 +323,7 @@ export function readAfter(
       ...bindings,
       fetchLimit,
     ),
-  ].map((row) => parseRow(row as Record<string, SqlStorageValue>))
+  ])
 
   return applyFamilyFilter(rows, filter).slice(0, safeLimit).map(rowToFrame)
 }
@@ -308,7 +339,7 @@ export function readBefore(
   const { clause, bindings } = buildFilterClause(filter)
   const fetchLimit = filter.families && filter.families.length > 0 ? safeLimit * 4 : safeLimit
 
-  const rows = [
+  const rows = parseRows([
     ...sql.exec(
       `SELECT cursor, run_id, run_kind, seq, ts, type, thread_id, envelope
        FROM firehose_events
@@ -319,7 +350,7 @@ export function readBefore(
       ...bindings,
       fetchLimit,
     ),
-  ].map((row) => parseRow(row as Record<string, SqlStorageValue>))
+  ])
 
   return applyFamilyFilter(rows, filter).slice(0, safeLimit).toReversed().map(rowToFrame)
 }
@@ -335,10 +366,10 @@ export function pruneFirehose(
   let deleted = 0
 
   const ageResult = sql.exec(`DELETE FROM firehose_events WHERE ts < ?`, minTs)
-  deleted += typeof ageResult.rowsWritten === 'number' ? ageResult.rowsWritten : 0
+  deleted += ageResult.rowsWritten
 
   const [countRow] = [...sql.exec(`SELECT COUNT(*) AS n FROM firehose_events`)]
-  const count = asNumber((countRow as Record<string, SqlStorageValue> | undefined)?.n)
+  const count = CountRowSchema.safeParse(countRow).data?.n ?? 0
 
   if (count <= maxEvents) {
     return deleted
@@ -354,16 +385,16 @@ export function pruneFirehose(
     excess,
   )
 
-  deleted += typeof excessResult.rowsWritten === 'number' ? excessResult.rowsWritten : 0
+  deleted += excessResult.rowsWritten
   return deleted
 }
 
 export function latestCursor(sql: FirehoseSql): number {
   const [row] = [...sql.exec(`SELECT COALESCE(MAX(cursor), 0) AS max_cursor FROM firehose_events`)]
-  return asNumber((row as Record<string, SqlStorageValue> | undefined)?.max_cursor)
+  return MaxCursorRowSchema.safeParse(row).data?.max_cursor ?? 0
 }
 
 export function eventCount(sql: FirehoseSql): number {
   const [row] = [...sql.exec(`SELECT COUNT(*) AS n FROM firehose_events`)]
-  return asNumber((row as Record<string, SqlStorageValue> | undefined)?.n)
+  return CountRowSchema.safeParse(row).data?.n ?? 0
 }

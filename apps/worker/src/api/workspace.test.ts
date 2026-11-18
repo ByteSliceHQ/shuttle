@@ -2,12 +2,17 @@ import { describe, expect, test } from 'bun:test'
 
 import { z } from 'zod'
 
-import { FolderSyncReport, WorkspaceSnapshotResponse, WorkspaceTree } from '@shuttle/api'
-import type { EventEnvelope, EventInput } from '@swirls/looms/core'
+import {
+  FolderSyncReport,
+  WorkspaceSnapshotResponse,
+  WorkspaceTree,
+  type SessionTabsState,
+} from '@shuttle/api'
+import type { EventEnvelope, EventInput, JsonValue } from '@swirls/looms/core'
 
 import type { ShuttleEnv } from '../env'
 import type { FolderSyncReport as SyncReport } from '../pulls/folder-sync'
-import type { Actor } from '../tenancy/access'
+import type { Actor, SessionAccess } from '../tenancy/access'
 import { fakeEnv } from '../testing/fake-env'
 import { sessionTabs, workspaceTree } from '../workspace/module'
 import { handleApi } from './handler'
@@ -29,16 +34,28 @@ const REPO = {
   private: false,
 }
 
-function event(type: string, payload: object, ts: number, idempotencyKey?: string): EventEnvelope {
-  return {
+function event(
+  type: string,
+  payload: JsonValue,
+  ts: number,
+  idempotencyKey?: string,
+): EventEnvelope {
+  const envelope: EventEnvelope = {
     type,
     payload,
     runId: 'o-org1-shuttle-workspace',
     seq: 1,
     id: `e-${ts}`,
     ts,
-    ...(idempotencyKey ? { idempotencyKey } : {}),
-  } as EventEnvelope
+    threadId: null,
+    origin: { type: 'system' },
+  }
+
+  if (idempotencyKey !== undefined && idempotencyKey !== '') {
+    envelope.idempotencyKey = idempotencyKey
+  }
+
+  return envelope
 }
 
 /** A workspace with a folder, a linked repo, a session that has worked and settled, and tabs. */
@@ -99,27 +116,40 @@ const EVENTS = [
 ]
 
 const tree = EVENTS.reduce(
+  // SAFETY: the fixture events above are written to the payload shapes `workspaceTree` folds, and
+  // the expectations below would fail if one did not match.
   (state, item) => workspaceTree.reduce(state, item as never),
   workspaceTree.initialState,
 )
 
 const tabs = EVENTS.reduce(
+  // SAFETY: as above, the fixture events carry the payload shapes `sessionTabs` folds.
   (state, item) => sessionTabs.reduce(state, item as never),
   sessionTabs.initialState,
 )
 
 /** A workspace run that answers with the projections given and records what it is signalled. */
-function fakeRuns(projections: Record<string, unknown>) {
+function fakeRuns(projections: {
+  readonly workspaceTree?: WorkspaceTree
+  readonly sessionTabs?: SessionTabsState
+}) {
   const signals: { runId: string; events: readonly EventInput[] }[] = []
-  const access: Record<string, unknown> = {}
+  const access: Record<string, SessionAccess> = {}
 
   const stub = (runId: string) => ({
     fetch: async (request: Request) => {
       const name = new URL(request.url).pathname.split('/').at(-1) ?? ''
 
-      return name in projections
-        ? Response.json({ value: projections[name] })
-        : new Response('not found', { status: 404 })
+      const value =
+        name === 'workspaceTree'
+          ? projections.workspaceTree
+          : name === 'sessionTabs'
+            ? projections.sessionTabs
+            : undefined
+
+      return value === undefined
+        ? new Response('not found', { status: 404 })
+        : Response.json({ value })
     },
     getStreamTail: async () => 7,
     getRun: async () => ({ startIdentity: 'started' }),
@@ -129,7 +159,7 @@ function fakeRuns(projections: Record<string, unknown>) {
 
       return {}
     },
-    setAccess: async (value: unknown) => {
+    setAccess: async (value: SessionAccess) => {
       access[runId] = value
 
       return value
@@ -138,7 +168,8 @@ function fakeRuns(projections: Record<string, unknown>) {
   })
 
   const env = fakeEnv({
-    LOOMS_RUN: { getByName: stub } as unknown as ShuttleEnv['LOOMS_RUN'],
+    // SAFETY: the routes under test only call `getByName` on the binding, and the fake answers it.
+    LOOMS_RUN: { getByName: stub } as never,
   })
 
   return { env, signals, access }
@@ -156,7 +187,7 @@ async function started(response: Response | null): Promise<{ runId: string }> {
   return z.object({ runId: z.string() }).parse(await response?.json())
 }
 
-function send(env: ShuttleEnv, method: string, path: string, body: unknown) {
+function send(env: ShuttleEnv, method: string, path: string, body: JsonValue) {
   return call(env, path, {
     method,
     headers: { 'content-type': 'application/json' },
@@ -269,7 +300,8 @@ describe('workspace routes', () => {
 
     expect(response?.status).toBe(200)
 
-    const snapshot = { tail: 7, tree: JSON.parse(JSON.stringify(tree)), tabs }
+    const plainTree: unknown = JSON.parse(JSON.stringify(tree))
+    const snapshot = { tail: 7, tree: plainTree, tabs }
 
     expect(await response?.json()).toEqual({
       ...snapshot,

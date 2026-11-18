@@ -137,7 +137,7 @@ describe('withStackPublished', () => {
     })
 
     expect(Object.keys(next.stacks).toSorted()).toEqual(['glue', 'glue#2'])
-    expect(next.stacks['glue']).toBe(baseState.stacks['glue']!)
+    expect(next.stacks['glue']).toBe(baseState.stacks['glue'])
     expect(next.stacks[stackKey('glue', 2)]).toEqual({ layers: [standaloneLayer], native: null })
   })
 

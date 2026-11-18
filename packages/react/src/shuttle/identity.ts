@@ -2,6 +2,8 @@ import { queryOptions } from '@tanstack/react-query'
 
 import type { Tenant } from '@shuttle/api'
 
+import { hasText } from '../lib/text'
+
 export interface ShuttlePerson {
   readonly userId: string
   readonly name: string
@@ -16,13 +18,13 @@ export interface ShuttleIdentity {
   /** The signed-in person, their organization, and the organization's runs. */
   readonly tenant: Tenant
   /** Everyone in the organization, for names, bylines and sharing. */
-  listPeople(): Promise<readonly ShuttlePerson[]>
+  readonly listPeople: () => Promise<readonly ShuttlePerson[]>
   /**
    * Sends the person off to connect their own GitHub account, for what is done in their name
    * (a review comment). A host that connects accounts some other way leaves it out, and the
    * components then only say that the account is not connected.
    */
-  connectGithub?(): void
+  readonly connectGithub?: () => void
 }
 
 /**
@@ -49,5 +51,5 @@ export function possessive(
 
   const name = people.get(userId)
 
-  return name ? `${name}'s` : "a teammate's"
+  return hasText(name) ? `${name}'s` : "a teammate's"
 }

@@ -20,6 +20,14 @@ function labels(result: ReadonlyMap<string, AgentIdentity>): Record<string, stri
 
 const whose = (userId: string) => (userId === 'me' ? 'your' : "Alice's")
 
+const blurb = (billedTo?: string) =>
+  withVendorAgents(
+    identities,
+    { conductor: { label: 'Claude Code', billedTo } },
+    'claude-code',
+    whose,
+  ).get('conductor')?.role.blurb
+
 describe('withVendorAgents', () => {
   test('names the working thread after the session agent before its first step', () => {
     expect(labels(withVendorAgents(identities, {}, 'claude-code'))).toEqual({
@@ -46,14 +54,6 @@ describe('withVendorAgents', () => {
   })
 
   test('says whose subscription a turn ran on', () => {
-    const blurb = (billedTo?: string) =>
-      withVendorAgents(
-        identities,
-        { conductor: { label: 'Claude Code', ...(billedTo ? { billedTo } : {}) } },
-        'claude-code',
-        whose,
-      ).get('conductor')?.role.blurb
-
     expect(blurb('me')).toBe('Claude Code on your subscription.')
     expect(blurb('alice')).toBe("Claude Code on Alice's subscription.")
     // A turn from before sign-ins were recorded per person.

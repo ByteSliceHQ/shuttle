@@ -1,11 +1,13 @@
 import { ORPCError } from '@orpc/server'
+import { z } from 'zod'
 
-import type {
-  FolderSyncReport,
-  LinkedRepo,
+import {
   SessionTabsState,
-  WorkspaceSnapshot,
+  WorkspaceFolder,
   WorkspaceTree,
+  type FolderSyncReport,
+  type LinkedRepo,
+  type WorkspaceSnapshot,
 } from '@shuttle/api'
 import { DEVICE_ID } from '@shuttle/runner-protocol'
 
@@ -40,6 +42,28 @@ import { api, badRequest, notFound } from './base'
 
 const workspace = api.workspace
 
+/** A Looms projection's answer: the projected value, absent while nothing has been projected. */
+function projectionOf<Value extends z.ZodType>(value: Value) {
+  return z.object({ value: value.nullish() })
+}
+
+const FoldersProjection = projectionOf(
+  z.object({
+    folders: z
+      .record(z.string(), WorkspaceFolder.pick({ repos: true, autoReview: true }))
+      .optional(),
+  }),
+)
+
+const PlaybookProjection = projectionOf(
+  z.object({
+    version: z.number().optional(),
+    lessons: z
+      .array(z.object({ id: z.string(), text: z.string(), scope: z.string().optional() }))
+      .optional(),
+  }),
+)
+
 async function readWorkspace(
   env: ShuttleEnv,
   runId: string,
@@ -63,14 +87,14 @@ async function readWorkspace(
 
   // Both are checked against the contract on the way out.
   const treeBody = treeResponse.ok
-    ? ((await treeResponse.json()) as { value?: WorkspaceTree })
+    ? projectionOf(WorkspaceTree).parse(await treeResponse.json())
     : null
 
   const tabsBody = tabsResponse.ok
-    ? ((await tabsResponse.json()) as { value?: SessionTabsState })
+    ? projectionOf(SessionTabsState).parse(await tabsResponse.json())
     : null
 
-  ctx?.waitUntil(reconcileActiveWorkspaceSessions(env, runId, treeBody?.value))
+  ctx?.waitUntil(reconcileActiveWorkspaceSessions(env, runId, treeBody?.value ?? undefined))
 
   return {
     runId,
@@ -89,7 +113,7 @@ async function reconcileActiveWorkspaceSessions(
     const stub = loomsStub(env.LOOMS_RUN, workspaceId)
     let tree = initialTree
 
-    if (!tree) {
+    if (tree === undefined) {
       const response = await stub.fetch(
         new Request(`https://shuttle.internal/runs/${workspaceId}/projections/workspaceTree`, {
           method: 'GET',
@@ -100,21 +124,24 @@ async function reconcileActiveWorkspaceSessions(
         return
       }
 
-      const body = (await response.json()) as { value?: WorkspaceTree }
-      tree = body.value
+      // This runs beside the response, so a tree that does not match the contract is skipped
+      // here rather than failing anything.
+      const body = projectionOf(WorkspaceTree).safeParse(await response.json())
+
+      if (!body.success) {
+        return
+      }
+
+      tree = body.data.value ?? undefined
     }
 
-    // Read defensively: this runs beside the response, before the tree is checked.
     const activeSessions = Object.values(tree?.sessions ?? {}).flatMap((session) =>
-      typeof session.runId === 'string' &&
-      session.status === 'running' &&
-      session.activity === 'working'
+      session.status === 'running' && session.activity === 'working'
         ? [
             {
               runId: session.runId,
-              activitySeq:
-                typeof session.activitySeq === 'number' ? session.activitySeq : undefined,
-              updatedAt: typeof session.updatedAt === 'number' ? session.updatedAt : 0,
+              activitySeq: session.activitySeq,
+              updatedAt: session.updatedAt,
             },
           ]
         : [],
@@ -210,7 +237,7 @@ async function pullAsPerson(
 
   const userToken = await githubTokenOf(getAuth(env), request.headers)
 
-  if (!userToken) {
+  if (userToken === null || userToken === '') {
     // Clients tell this apart from other conflicts by the reason, which is the message.
     throw new ORPCError('CONFLICT', {
       message: GITHUB_NOT_CONNECTED,
@@ -280,28 +307,9 @@ async function readWorkspaceFolders(
     return { folders: {} }
   }
 
-  const body = (await response.json()) as {
-    value?: {
-      folders?: Record<
-        string,
-        {
-          repos?: LinkedRepo[]
-          autoReview?: AutoReviewMode
-        }
-      >
-    }
-  }
+  const body = FoldersProjection.parse(await response.json())
 
-  const folders: Record<string, { repos: readonly LinkedRepo[]; autoReview?: AutoReviewMode }> = {}
-
-  for (const [folderId, folder] of Object.entries(body.value?.folders ?? {})) {
-    folders[folderId] = {
-      repos: folder.repos ?? [],
-      autoReview: folder.autoReview,
-    }
-  }
-
-  return { folders }
+  return { folders: body.value?.folders ?? {} }
 }
 
 async function resolveRepo(
@@ -350,12 +358,7 @@ async function loadPlaybook(
     return { runId, version: 0, lessons: [] }
   }
 
-  const body = (await response.json()) as {
-    value?: {
-      version?: number
-      lessons?: { id: string; text: string; scope?: string }[]
-    }
-  }
+  const body = PlaybookProjection.parse(await response.json())
 
   return {
     runId,
@@ -410,7 +413,7 @@ export const workspaceRouter = {
     await loomsStub(env.LOOMS_RUN, runId).setAccess(privateTo(actor))
 
     // Also before it exists, so its first turn already runs where it was asked to.
-    if (deviceId) {
+    if (deviceId !== null && deviceId !== '') {
       await loomsStub(env.LOOMS_RUN, runId).placeSandbox({
         kind: 'local',
         userId: actor.userId,
@@ -420,7 +423,9 @@ export const workspaceRouter = {
 
     const files = input.files ?? []
 
-    if (files.length > 0 && !env.ASSETS) {
+    const bucket = env.ASSETS
+
+    if (files.length > 0 && bucket === undefined) {
       throw new ORPCError('SERVICE_UNAVAILABLE', { message: 'File storage is not set up.' })
     }
 
@@ -428,27 +433,30 @@ export const workspaceRouter = {
 
     try {
       // Uploaded together; each File is already in memory, so R2 reads it without another copy.
-      const attachments = await Promise.all(
-        files.map(async (file) => {
-          const asset = await putAsset(env.ASSETS!, runId, {
-            name: file.name,
-            mediaType: uploadMediaType(file.type, file.name),
-            body: file,
-            source: 'upload',
-            createdBy: actor.userId,
-          })
+      const attachments =
+        bucket === undefined
+          ? []
+          : await Promise.all(
+              files.map(async (file) => {
+                const asset = await putAsset(bucket, runId, {
+                  name: file.name,
+                  mediaType: uploadMediaType(file.type, file.name),
+                  body: file,
+                  source: 'upload',
+                  createdBy: actor.userId,
+                })
 
-          stored.push(asset)
-          return asset
-        }),
-      )
+                stored.push(asset)
+                return asset
+              }),
+            )
 
       await stub.signal([
         requestSession({
           runId,
           folderId,
           goal,
-          ...(attachments.length > 0 ? { attachments } : {}),
+          attachments: attachments.length > 0 ? attachments : undefined,
           lessons: playbook.lessons,
           playbookVersion: playbook.version,
           playbookRunId: playbook.runId,
@@ -459,8 +467,7 @@ export const workspaceRouter = {
       ])
     } catch (cause) {
       // No session exists to reach these files through, so none may be left behind.
-      if (env.ASSETS) {
-        const bucket = env.ASSETS
+      if (bucket !== undefined) {
         await Promise.allSettled(stored.map((asset) => deleteAsset(bucket, runId, asset.id)))
       }
 
@@ -559,7 +566,7 @@ export const workspaceRouter = {
         const { repo, target, pullsStub } = await pullAsPerson(env, actor.orgId, request, input)
         const text = input.body.trim()
 
-        if (!text) {
+        if (text === '') {
           throw badRequest('a comment needs something in it')
         }
 
@@ -582,9 +589,10 @@ export const workspaceRouter = {
               path,
               line,
               side: input.side ?? 'RIGHT',
-              ...(startLine !== undefined && startLine !== line
-                ? { start: { line: startLine, side: input.startSide ?? 'RIGHT' } }
-                : {}),
+              start:
+                startLine !== undefined && startLine !== line
+                  ? { line: startLine, side: input.startSide ?? 'RIGHT' }
+                  : undefined,
               body: text,
             })
           }

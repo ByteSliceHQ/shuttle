@@ -2,13 +2,14 @@ import { ArrowRight } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import { cn } from '../../lib/cn'
+import { hasText } from '../../lib/text'
 import { Link } from '../../shuttle'
 import { useWorkspaceSessions } from '../workspace/workspace-context'
 import type { LinkedSession } from './pulls'
 
 export function useSessionTitle(runId: string | undefined): string | undefined {
   const sessions = useWorkspaceSessions()
-  return runId ? sessions[runId]?.title : undefined
+  return hasText(runId) ? sessions[runId]?.title : undefined
 }
 
 /** Opens the session focused on the agent thread that acted on the PR. */
@@ -37,7 +38,7 @@ export function LinkedSessionRow({ session }: { session: LinkedSession }) {
   const known = useWorkspaceSessions()[session.runId]
 
   // Skip stale/corrupt links (e.g. a thread id recorded as the run id).
-  if (!known && !title) {
+  if (!known && !hasText(title)) {
     return null
   }
 

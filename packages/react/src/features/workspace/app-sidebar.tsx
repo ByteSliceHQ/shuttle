@@ -22,6 +22,7 @@ import { Kbd } from '../../components/ui/panel'
 import { ScrollArea } from '../../components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip'
 import { cn } from '../../lib/cn'
+import { hasText } from '../../lib/text'
 import { useMediaQuery } from '../../lib/use-media-query'
 import { useNow } from '../../lib/use-now'
 import {
@@ -122,10 +123,10 @@ function AppSidebar({ status, account }: SidebarSlots) {
   const workspace = useWorkspace()
   const seenSnapshot = useSeenSessions()
   const activeRunId = location?.page === 'session' ? location.sessionId : null
-  const activeSession = activeRunId ? workspace.tree.sessions[activeRunId] : undefined
+  const activeSession = hasText(activeRunId) ? workspace.tree.sessions[activeRunId] : undefined
 
   useEffect(() => {
-    if (!activeRunId) {
+    if (!hasText(activeRunId)) {
       return
     }
 
@@ -170,7 +171,7 @@ function AppSidebar({ status, account }: SidebarSlots) {
 
     if (mod && event.shiftKey && key === 'o') {
       event.preventDefault()
-      void navigate({ page: 'home' })
+      navigate({ page: 'home' })
     }
 
     if (key === 'escape' && drawerOpen && !event.defaultPrevented) {
@@ -252,7 +253,10 @@ function SidebarRail({
 
   const rollup = useMemo(() => {
     const tones = Object.values(workspace.tree.sessions)
-      .filter((session) => !session.archived && !workspace.tree.folders[session.folderId]?.archived)
+      .filter(
+        (session) =>
+          !session.archived && workspace.tree.folders[session.folderId]?.archived !== true,
+      )
       .map((session) =>
         resolveSessionIndicator({
           activity: session.activity,
@@ -480,7 +484,7 @@ function FolderTree({
     [tree.sessions, orgPrefix],
   )
 
-  const linkFolder = linkFolderId ? tree.folders[linkFolderId] : undefined
+  const linkFolder = hasText(linkFolderId) ? tree.folders[linkFolderId] : undefined
 
   function toggleArchived() {
     const next = !showArchived
@@ -501,7 +505,7 @@ function FolderTree({
     onSuccess(folderId) {
       setFolderOpen(folderId, true)
       rememberLastFolder(folderId)
-      void navigate({ page: 'folder', folderId })
+      navigate({ page: 'folder', folderId })
     },
   })
 
@@ -688,7 +692,7 @@ function GithubAvatar({ installation }: { installation: GithubInstallation }) {
   const { login, avatarUrl } = installation.account
   const [failed, setFailed] = useState(false)
 
-  if (!avatarUrl || failed) {
+  if (avatarUrl === '' || failed) {
     return (
       <span
         aria-label={login}

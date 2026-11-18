@@ -44,7 +44,9 @@ type PullSignalSink = Pick<LoomsRunStub, 'signal'>
 const SIGNAL_BATCH = 25
 
 export function missingPullPermissions(permissions: Readonly<Record<string, string>>): string[] {
-  return PULL_INBOX_PERMISSIONS.filter(({ key }) => !permissions[key]).map(({ label }) => label)
+  return PULL_INBOX_PERMISSIONS.filter(({ key }) => (permissions[key] ?? '') === '').map(
+    ({ label }) => label,
+  )
 }
 
 export function classifySyncError(cause: unknown): Pick<RepoSyncReport, 'status' | 'message'> {

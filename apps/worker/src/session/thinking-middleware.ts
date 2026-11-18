@@ -11,6 +11,7 @@ import {
   clearThinkingObserver,
   type VendorStep,
 } from '../llm'
+import type { JsonObjectBuilder } from './json-object'
 
 /**
  * Wraps `agent.callLLM`: streams thinking deltas as ephemeral events while the model runs, then
@@ -65,17 +66,13 @@ export const thinkingMiddleware = onEffect(callLlmEffect, (input, ctx, next) => 
       const events = insertBeforeMessage(produced, steps)
       const text = thinking.trim()
 
-      if (!text) {
+      if (text === '') {
         return events
       }
 
       const thought: EventInput = {
         type: 'shuttle.turn.thought',
-        payload: {
-          turn,
-          text,
-          ...(durationMs !== undefined ? { durationMs } : {}),
-        },
+        payload: durationMs === undefined ? { turn, text } : { turn, text, durationMs },
         threadId: ctx.threadId,
       }
 
@@ -108,15 +105,19 @@ function insertBeforeMessage<T extends { readonly type: string }>(
 export function vendorStepEvent(step: VendorStep, turn: number, threadId: string): EventInput {
   switch (step.type) {
     case 'started': {
+      const started: JsonObjectBuilder = { turn, harness: step.harness, label: step.label }
+
+      if (step.model !== undefined && step.model !== '') {
+        started.model = step.model
+      }
+
+      if (step.billedTo !== undefined && step.billedTo !== '') {
+        started.billedTo = step.billedTo
+      }
+
       return {
         type: 'shuttle.vendor.turn_started',
-        payload: {
-          turn,
-          harness: step.harness,
-          label: step.label,
-          ...(step.model ? { model: step.model } : {}),
-          ...(step.billedTo ? { billedTo: step.billedTo } : {}),
-        },
+        payload: started,
         threadId,
       }
     }
@@ -128,11 +129,10 @@ export function vendorStepEvent(step: VendorStep, turn: number, threadId: string
     case 'thought': {
       return {
         type: 'shuttle.turn.thought',
-        payload: {
-          turn,
-          text: step.text,
-          ...(step.durationMs !== undefined ? { durationMs: step.durationMs } : {}),
-        },
+        payload:
+          step.durationMs === undefined
+            ? { turn, text: step.text }
+            : { turn, text: step.text, durationMs: step.durationMs },
         threadId,
       }
     }
@@ -148,12 +148,10 @@ export function vendorStepEvent(step: VendorStep, turn: number, threadId: string
     case 'tool_finished': {
       return {
         type: 'shuttle.vendor.tool_finished',
-        payload: {
-          turn,
-          toolCallId: step.toolCallId,
-          result: step.result,
-          ...(step.error ? { error: step.error } : {}),
-        },
+        payload:
+          step.error !== undefined && step.error !== ''
+            ? { turn, toolCallId: step.toolCallId, result: step.result, error: step.error }
+            : { turn, toolCallId: step.toolCallId, result: step.result },
         threadId,
       }
     }

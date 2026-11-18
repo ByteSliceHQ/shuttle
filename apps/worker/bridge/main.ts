@@ -5,13 +5,16 @@ import { join } from 'node:path'
 import { runClaudeLogin, runClaudeTurn } from './claude.ts'
 import { listCodexModels, runCodexLogin, runCodexTurn } from './codex.ts'
 import { listCursorModels, runCursorLogin, runCursorTurn, SHUTTLE_RUN_DIR_ENV } from './cursor.ts'
-import { collectHomeFiles, seedHomeFiles } from './home.ts'
+import { collectHomeFiles, decodeHomeFiles, seedHomeFiles } from './home.ts'
+import { parseJson } from './json.ts'
 import { serveMcp, shuttleMcpCommand, takeProposals } from './mcp.ts'
 import {
   BRIDGE_EVENTS_FILE,
   BRIDGE_INPUT_FILE,
   BRIDGE_PID_FILE,
   BRIDGE_REQUEST_FILE,
+  decodeLoginRequest,
+  decodeTurnRequest,
   isTerminalBridgeEvent,
   type BridgeEmit,
   type BridgeEventBody,
@@ -40,8 +43,13 @@ function argument(name: string): string | undefined {
   return index >= 0 ? process.argv[index + 1] : undefined
 }
 
+export interface EventWriter {
+  readonly emit: BridgeEmit
+  readonly ended: () => boolean
+}
+
 /** Appends events synchronously so a reader sees every line whole, and none after the last. */
-export function createEventWriter(dir: string): { emit: BridgeEmit; ended: () => boolean } {
+export function createEventWriter(dir: string): EventWriter {
   const path = join(dir, BRIDGE_EVENTS_FILE)
   let seq = 0
   let ended = false
@@ -83,14 +91,16 @@ export function createInputReader(dir: string, signal: AbortSignal): BridgeReadI
     })
 }
 
+export interface ProposalReporter {
+  readonly emit: BridgeEmit
+  readonly stop: () => void
+}
+
 /**
  * Reports the pull requests the agent proposes with Shuttle's MCP server as events, while the
  * turn runs and once more just before it ends, so none is lost to the timing of the last poll.
  */
-export function withProposals(
-  dir: string,
-  emit: BridgeEmit,
-): { emit: BridgeEmit; stop: () => void } {
+export function withProposals(dir: string, emit: BridgeEmit): ProposalReporter {
   const flush = () => {
     for (const proposal of takeProposals(dir)) {
       emit({ type: 'pr_proposed', ...proposal })
@@ -181,7 +191,7 @@ async function main(): Promise<void> {
   const dir = argument('dir')
 
   if (mode === 'seed') {
-    seedHomeFiles(homedir(), JSON.parse(readFileSync(0, 'utf8')))
+    seedHomeFiles(homedir(), decodeHomeFiles(parseJson(readFileSync(0, 'utf8'))))
     return
   }
 
@@ -237,16 +247,25 @@ async function main(): Promise<void> {
       : { type: 'login_done', success: false, error: message }
 
   try {
-    const request = JSON.parse(readFileSync(join(dir, BRIDGE_REQUEST_FILE), 'utf8'))
+    const request = parseJson(readFileSync(join(dir, BRIDGE_REQUEST_FILE), 'utf8'))
 
-    await (mode === 'turn'
-      ? runTurn(request as BridgeTurnRequest, dir, emit, controller.signal)
-      : runLogin(
-          request as BridgeLoginRequest,
-          emit,
-          controller.signal,
-          createInputReader(dir, controller.signal),
-        ))
+    if (mode === 'turn') {
+      const turn = decodeTurnRequest(request)
+
+      if (turn === undefined) {
+        throw new Error(`${BRIDGE_REQUEST_FILE} is not a turn request`)
+      }
+
+      await runTurn(turn, dir, emit, controller.signal)
+    } else {
+      const login = decodeLoginRequest(request)
+
+      if (login === undefined) {
+        throw new Error(`${BRIDGE_REQUEST_FILE} is not a sign-in request`)
+      }
+
+      await runLogin(login, emit, controller.signal, createInputReader(dir, controller.signal))
+    }
   } catch (cause) {
     emit(failure(cause instanceof Error ? cause.message : String(cause)))
   }

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 
 import { createStackGitFixture, type StackGitFixture } from './stack-git-fixture'
+import { failureOf } from './test-failure'
 
 describe('StackWorkspaceOps against a real git worktree', () => {
   let fixture: StackGitFixture | null = null
@@ -100,12 +101,14 @@ describe('StackWorkspaceOps against a real git worktree', () => {
   test('layer changesets reject parents that only exist on GitHub', async () => {
     const { ops, runId, repoName } = setup()
 
-    await expect(
-      ops.layerChangeset(runId, repoName, {
-        parentRef: 'deadbeef'.repeat(5),
-        layerRef: 'shuttle/session_1/glue',
-      }),
-    ).rejects.toThrow('Failed to resolve parent')
+    expect(
+      await failureOf(
+        ops.layerChangeset(runId, repoName, {
+          parentRef: 'deadbeef'.repeat(5),
+          layerRef: 'shuttle/session_1/glue',
+        }),
+      ),
+    ).toContain('Failed to resolve parent')
   })
 
   test('editing a lower layer restacks only its own stack and keeps HEAD in place', async () => {
@@ -155,9 +158,9 @@ describe('StackWorkspaceOps against a real git worktree', () => {
     const { ops, runId, repoName, write, git } = setup()
     write('a.txt', 'a\n')
 
-    await expect(
-      ops.checkoutLayer(runId, repoName, { stack: 3, layer: 1 }, 'main'),
-    ).rejects.toThrow('Stack 3 layer 1 does not exist')
+    expect(
+      await failureOf(ops.checkoutLayer(runId, repoName, { stack: 3, layer: 1 }, 'main')),
+    ).toContain('Stack 3 layer 1 does not exist')
 
     expect(git('git status --porcelain')).toBe('?? a.txt')
   })

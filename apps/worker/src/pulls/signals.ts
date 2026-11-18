@@ -84,34 +84,37 @@ export const ingestWebhook = pullsModule.signal({
   ]),
   build: (input) => {
     switch (input.kind) {
-      case 'pull.upserted':
+      case 'pull.upserted': {
+        const upserted = {
+          installationId: input.installationId,
+          fullName: input.fullName,
+          number: input.number,
+          action: input.action,
+          title: input.title,
+          body: input.body,
+          url: input.url,
+          draft: input.draft,
+          author: { login: input.authorLogin, avatarUrl: input.authorAvatarUrl },
+          headRef: input.headRef,
+          headSha: input.headSha,
+          baseRef: input.baseRef,
+          baseSha: input.baseSha,
+          additions: input.additions,
+          deletions: input.deletions,
+          reviewDecision: input.reviewDecision ?? 'none',
+          checkRollup: input.checkRollup ?? 'neutral',
+          updatedAt: input.updatedAt,
+          isFork: input.isFork,
+          state: 'open' as const,
+        }
+
         return pullsModule.input(
           'pull.upserted',
-          {
-            installationId: input.installationId,
-            fullName: input.fullName,
-            number: input.number,
-            action: input.action,
-            title: input.title,
-            body: input.body,
-            url: input.url,
-            draft: input.draft,
-            author: { login: input.authorLogin, avatarUrl: input.authorAvatarUrl },
-            headRef: input.headRef,
-            headSha: input.headSha,
-            baseRef: input.baseRef,
-            baseSha: input.baseSha,
-            additions: input.additions,
-            deletions: input.deletions,
-            reviewDecision: input.reviewDecision ?? 'none',
-            checkRollup: input.checkRollup ?? 'neutral',
-            updatedAt: input.updatedAt,
-            isFork: input.isFork,
-            state: 'open' as const,
-            ...(input.stack !== undefined ? { stack: input.stack } : {}),
-          },
+          input.stack === undefined ? upserted : { ...upserted, stack: input.stack },
           { idempotencyKey: `pulls-delivery:${input.deliveryId}` },
         )
+      }
+
       case 'pull.closed':
         return pullsModule.input(
           'pull.closed',
@@ -251,17 +254,26 @@ export const recordPublished = pullsModule.signal({
     ),
     pullsModule.input(
       'pull.linked',
-      {
-        fullName: input.fullName,
-        number: input.number,
-        runId: input.runId,
-        role: 'author' as const,
-        ...(input.threadId ? { threadId: input.threadId } : {}),
-      },
+      linkedPayload(
+        { fullName: input.fullName, number: input.number, runId: input.runId, role: 'author' },
+        input.threadId,
+      ),
       { idempotencyKey: `pulls-link:${input.runId}:${input.fullName}#${input.number}:author` },
     ),
   ],
 })
+
+interface LinkedBase {
+  readonly fullName: string
+  readonly number: number
+  readonly runId: string
+  readonly role: 'author' | 'reviewer'
+}
+
+/** The payload of a link, with the thread it was made from when there is one. */
+function linkedPayload(base: LinkedBase, threadId: string | undefined) {
+  return threadId === undefined || threadId === '' ? base : { ...base, threadId }
+}
 
 /** The event that links a session to a pull request as its reviewer. */
 export function reviewerLinked(input: {
@@ -272,13 +284,10 @@ export function reviewerLinked(input: {
 }) {
   return pullsModule.input(
     'pull.linked',
-    {
-      fullName: input.fullName,
-      number: input.number,
-      runId: input.runId,
-      role: 'reviewer' as const,
-      ...(input.threadId ? { threadId: input.threadId } : {}),
-    },
+    linkedPayload(
+      { fullName: input.fullName, number: input.number, runId: input.runId, role: 'reviewer' },
+      input.threadId,
+    ),
     { idempotencyKey: `pulls-link:${input.runId}:${input.fullName}#${input.number}:reviewer` },
   )
 }

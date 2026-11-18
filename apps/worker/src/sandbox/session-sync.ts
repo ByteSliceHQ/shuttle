@@ -1,4 +1,5 @@
 import { shellQuote } from './exec-argv'
+import { orElse } from './text'
 import { repoCheckoutPath, worktreeRepoPath, type ExecOptions, type ExecResult } from './workspace'
 import { baseCommitScript, GIT_IGNORING, IGNORE_SETUP } from './workspace-summary'
 
@@ -75,7 +76,7 @@ async function run(host: SyncHost, script: string, cwd: string, what: string): P
 
   if (result.exitCode !== 0) {
     throw new Error(
-      `Could not ${what}: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`}`,
+      `Could not ${what}: ${orElse(result.stderr.trim(), orElse(result.stdout.trim(), `exit ${result.exitCode}`))}`,
     )
   }
 
@@ -107,7 +108,7 @@ export function parseSnapshot(repoName: string, output: string): SessionSnapshot
       case 'BRANCH': {
         const [sha = '', name = ''] = rest.split(' ')
 
-        if (sha && name) {
+        if (sha !== '' && name !== '') {
           branches.push({ name, sha })
         }
 
@@ -129,7 +130,7 @@ export function parseSnapshot(repoName: string, output: string): SessionSnapshot
     }
   }
 
-  if (!fields.head || !fields.headSha || !fields.snapshotSha) {
+  if (fields.head === '' || fields.headSha === '' || fields.snapshotSha === '') {
     throw new Error(`Could not snapshot ${repoName}: the worktree reported no branch or commit`)
   }
 

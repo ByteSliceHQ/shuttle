@@ -243,7 +243,7 @@ function SessionRoot({
     const key = `shuttle:review-tab-opened:${runId}`
 
     try {
-      if (window.localStorage.getItem(key)) {
+      if (window.localStorage.getItem(key) !== null) {
         return
       }
 
@@ -264,10 +264,10 @@ function SessionRoot({
   // The conversation shows one timeline at a time: the session's top level, or one agent's.
   // The session's own thread is the top level.
   const openThreadId =
-    wantedThread && wantedThread !== tree.root?.threadId ? wantedThread : undefined
+    wantedThread !== undefined && wantedThread !== tree.root?.threadId ? wantedThread : undefined
 
   const path = useMemo(
-    () => (openThreadId ? threadPath(openThreadId, threadParents(tree.root)) : []),
+    () => (openThreadId !== undefined ? threadPath(openThreadId, threadParents(tree.root)) : []),
     [openThreadId, tree.root],
   )
 
@@ -278,7 +278,7 @@ function SessionRoot({
   }, [openThread, path])
 
   useEffect(() => {
-    if (!openThreadId) {
+    if (openThreadId === undefined) {
       return
     }
 
@@ -324,7 +324,10 @@ function SessionRoot({
   const goal = firstMessage?.kind === 'user' ? firstMessage.text : undefined
   const workspaceTree = useOptionalWorkspace()?.tree
   const listed = workspaceTree?.sessions[runId]
-  const folder = listed?.folderId ? workspaceTree?.folders[listed.folderId] : undefined
+
+  const folder =
+    listed?.folderId === undefined ? undefined : workspaceTree?.folders[listed.folderId]
+
   const title = listed?.title ?? goal ?? 'Coding session'
 
   // A finished run says how it ended; a live one says what it is doing now.
@@ -336,7 +339,7 @@ function SessionRoot({
         : 'working'
 
   useEffect(() => {
-    if (goal) {
+    if (goal !== undefined && goal !== '') {
       rememberSession({ runId, goal })
     }
   }, [runId, goal])
@@ -348,7 +351,7 @@ function SessionRoot({
   }, [runId, summary.startedAt, summary.status, activity.activity, reportLiveSession])
 
   const labelFor = useCallback(
-    (threadId: string | null) => (threadId ? identities.get(threadId)?.label : undefined),
+    (threadId: string | null) => (threadId !== null ? identities.get(threadId)?.label : undefined),
     [identities],
   )
 

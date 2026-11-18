@@ -33,7 +33,9 @@ export async function handleRunnerTokenRoutes(
   }
 
   const token = bearerToken(request)
-  const device = token && env.AUTH_DB ? await deviceOfToken(env.AUTH_DB, token) : null
+
+  const device =
+    token !== null && token !== '' && env.AUTH_DB ? await deviceOfToken(env.AUTH_DB, token) : null
 
   if (!device) {
     return Response.json(

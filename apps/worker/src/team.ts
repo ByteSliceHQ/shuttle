@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 import type { VendorHarnessId } from './harness'
 
 /**
@@ -35,27 +37,39 @@ export const TEAM_STORAGE_KEY = 'shuttle:team'
 /** How a task is framed for the agent that receives it. */
 export type DelegateMode = 'build' | 'review' | 'plan'
 
-function isPreset(value: unknown): value is PresetId {
-  return typeof value === 'string' && (PRESETS as readonly string[]).includes(value)
+/** A team as a caller may state it: any part may be missing, and a preset is only a name. */
+export interface TeamInput {
+  readonly workers?: boolean
+  readonly codex?: boolean
+  readonly claudeCode?: boolean
+  readonly cursor?: boolean
+  readonly preset?: string
 }
 
 /**
- * A valid team from untrusted input, or null. A team always has someone to do the work, and a
- * preset only stands when both agents it names are on the team.
+ * Reads a team leniently: a part that is missing or not a boolean counts as off, except `workers`,
+ * which counts as on. A team always has someone to do the work, and a preset only stands when
+ * both agents it names are on the team.
  */
-export function parseTeam(value: unknown): Team | null {
-  if (typeof value !== 'object' || value === null) {
-    return null
-  }
+const TeamSchema = z
+  .object({
+    workers: z.boolean().catch(true),
+    codex: z.boolean().catch(false),
+    claudeCode: z.boolean().catch(false),
+    cursor: z.boolean().catch(false),
+    preset: z.enum(PRESETS).catch('none'),
+  })
+  .transform(({ workers, codex, claudeCode, cursor, preset }): Team => ({
+    workers: workers || (!codex && !claudeCode && !cursor),
+    codex,
+    claudeCode,
+    cursor,
+    preset: codex && claudeCode ? preset : 'none',
+  }))
 
-  const fields = value as Record<string, unknown>
-  const codex = fields.codex === true
-  const claudeCode = fields.claudeCode === true
-  const cursor = fields.cursor === true
-  const workers = fields.workers !== false || (!codex && !claudeCode && !cursor)
-  const preset = isPreset(fields.preset) && codex && claudeCode ? fields.preset : 'none'
-
-  return { workers, codex, claudeCode, cursor, preset }
+/** A valid team from a stated one, or null. */
+export function parseTeam(value: TeamInput | null): Team | null {
+  return TeamSchema.safeParse(value).data ?? null
 }
 
 export function onTeam(team: Team, harness: VendorHarnessId): boolean {
@@ -70,13 +84,16 @@ type TeamStorage = Pick<DurableObjectStorage, 'get' | 'put'>
 
 /** The team set on this run, or null when none has been chosen for it yet. */
 export async function readPinnedTeam(storage: TeamStorage): Promise<Team | null> {
-  return parseTeam(await storage.get(TEAM_STORAGE_KEY))
+  return TeamSchema.safeParse(await storage.get(TEAM_STORAGE_KEY)).data ?? null
 }
 
-export async function writeStoredTeam(storage: TeamStorage, value: unknown): Promise<Team> {
+export async function writeStoredTeam(
+  storage: TeamStorage,
+  value: TeamInput | null,
+): Promise<Team> {
   const team = parseTeam(value)
 
-  if (!team) {
+  if (team === null) {
     throw new Error('invalid team')
   }
 
@@ -84,8 +101,13 @@ export async function writeStoredTeam(storage: TeamStorage, value: unknown): Pro
   return team
 }
 
+export interface PresetRoles {
+  readonly codex?: string
+  readonly claudeCode?: string
+}
+
 /** What a preset asks of each agent. The conductor reads these on its delegate tools. */
-export function presetRoles(preset: PresetId): { codex?: string; claudeCode?: string } {
+export function presetRoles(preset: PresetId): PresetRoles {
   switch (preset) {
     case 'codex-builds-claude-reviews': {
       return {
@@ -112,7 +134,7 @@ export function presetRoles(preset: PresetId): { codex?: string; claudeCode?: st
       }
     }
 
-    default: {
+    case 'none': {
       return {}
     }
   }

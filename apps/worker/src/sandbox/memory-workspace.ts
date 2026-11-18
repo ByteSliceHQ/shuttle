@@ -246,7 +246,7 @@ export class MemoryWorkspace implements Workspace {
 
     const baseSha = this.baseShas.get(repoName)
 
-    if (!baseSha) {
+    if (baseSha === undefined || baseSha === '') {
       throw new Error(`No baseSha recorded for repo ${repoName}`)
     }
 
@@ -388,7 +388,9 @@ export class MemoryWorkspace implements Workspace {
   async grep(pattern: string, path?: string, cwd?: string): Promise<string> {
     this.throwIfAborted()
     await this.hydrate()
-    const root = path ? resolvePath(path, cwd) : (cwd ?? '/workspace')
+
+    const root = path !== undefined && path !== '' ? resolvePath(path, cwd) : (cwd ?? '/workspace')
+
     const regex = new RegExp(pattern)
     const lines: string[] = []
     const seen = new Set<string>()
@@ -451,13 +453,13 @@ export class MemoryWorkspace implements Workspace {
         const rest = filePath.slice(target.length).replace(/^\//, '')
         const name = rest.split('/')[0]
 
-        if (name) {
+        if (name !== undefined && name !== '') {
           names.add(name)
         }
       }
 
       return {
-        stdout: [...names].toSorted().join('\n') + (names.size ? '\n' : ''),
+        stdout: [...names].toSorted().join('\n') + (names.size > 0 ? '\n' : ''),
         stderr: '',
         exitCode: 0,
       }
@@ -570,7 +572,7 @@ export class MemoryWorkspace implements Workspace {
       return
     }
 
-    const seed: Record<string, string> = {
+    const seed = {
       [`${root}/README.md`]: '# Shuttle workspace\n\nRepo: local demo\n',
       [`${root}/package.json`]:
         JSON.stringify({ name: 'shuttle-demo-repo', version: '0.0.1', type: 'module' }, null, 2) +
@@ -599,7 +601,7 @@ export class MemoryWorkspace implements Workspace {
     for (const entry of entries) {
       const relative = stripTarRoot(entry.path)
 
-      if (!relative || relative.endsWith('/')) {
+      if (relative === '' || relative.endsWith('/')) {
         continue
       }
 
@@ -618,7 +620,7 @@ export class MemoryWorkspace implements Workspace {
 
     const base = this.basePathFor(path)
 
-    if (base && this.files.has(base)) {
+    if (base !== null && this.files.has(base)) {
       const value = this.files.get(base)
       return value === null ? undefined : value
     }
@@ -641,7 +643,7 @@ export class MemoryWorkspace implements Workspace {
     // `/workspace/.wt/<runId>/<repo>/...` → `/workspace/repos/<repo>/...`
     const match = path.match(/^\/workspace\/\.wt\/[^/]+\/(.+)$/)
 
-    if (!match?.[1]) {
+    if (match?.[1] === undefined) {
       return null
     }
 
@@ -665,7 +667,7 @@ export class MemoryWorkspace implements Workspace {
         for (const key of this.files.keys()) {
           const worktreeMatch = key.match(/^(\/workspace\/\.wt\/[^/]+\/[^/]+)\//)
 
-          if (worktreeMatch?.[1]) {
+          if (worktreeMatch?.[1] !== undefined) {
             paths.add(`${worktreeMatch[1]}/${relative}`)
           }
         }

@@ -1,7 +1,8 @@
-import type { AnyEventEnvelope, JsonValue } from '@swirls/looms/core'
+import { asJson, type AnyEventEnvelope, type JsonValue } from '@swirls/looms/core'
 
 import { compactJson } from '../../lib/cn'
 import { jsonFields, jsonNumber, jsonText } from '../../lib/json'
+import { hasText } from '../../lib/text'
 
 export type SessionEvent = AnyEventEnvelope
 
@@ -34,8 +35,19 @@ function familyFor(type: string): EventFamily {
   return families.find((entry) => type.startsWith(entry.prefix)) ?? fallbackFamily
 }
 
+/** A payload value written out for a sentence: text as it is, anything else as compact JSON. */
+function valueText(value: JsonValue | undefined): string {
+  if (value === undefined) {
+    return 'undefined'
+  }
+
+  return jsonText(value) ?? compactJson(value)
+}
+
 function messageContent(payload: JsonValue): string | undefined {
-  return jsonText(jsonFields(jsonFields(payload).message).content) || undefined
+  const content = jsonText(jsonFields(jsonFields(payload).message).content)
+
+  return hasText(content) ? content : undefined
 }
 
 function definitionLabel(payload: JsonValue): string {
@@ -44,11 +56,13 @@ function definitionLabel(payload: JsonValue): string {
 }
 
 function summarizeAgent(event: SessionEvent): EventSummary | undefined {
-  const payload = jsonFields(event.payload)
+  // The wire payload is JSON; reading it as a value is the one place it is typed.
+  const body = asJson(event.payload)
+  const payload = jsonFields(body)
 
   switch (event.type) {
     case 'agent.message.received':
-      return { title: 'message received', detail: messageContent(event.payload) }
+      return { title: 'message received', detail: messageContent(body) }
     case 'agent.turn.started':
       return { title: 'turn started', detail: `turn ${jsonNumber(payload.turn) ?? ''}` }
     case 'agent.turn.text_delta':
@@ -57,7 +71,7 @@ function summarizeAgent(event: SessionEvent): EventSummary | undefined {
     case 'agent.message': {
       const message = jsonFields(payload.message)
       const calls = Array.isArray(message.toolCalls) ? message.toolCalls.length : 0
-      const text = messageContent(event.payload)
+      const text = messageContent(body)
       return {
         title: 'agent message',
         detail: text ?? (calls > 0 ? `${calls} tool call${calls === 1 ? '' : 's'}` : undefined),
@@ -75,7 +89,7 @@ function summarizeAgent(event: SessionEvent): EventSummary | undefined {
     case 'agent.tool.result': {
       const error = jsonText(payload.error)
       return {
-        title: `${error ? 'tool error' : 'tool result'} ${jsonText(payload.name) ?? ''}`,
+        title: `${hasText(error) ? 'tool error' : 'tool result'} ${jsonText(payload.name) ?? ''}`,
         detail: error ?? compactJson(payload.result ?? null),
       }
     }
@@ -83,7 +97,7 @@ function summarizeAgent(event: SessionEvent): EventSummary | undefined {
     case 'agent.steered':
       return {
         title: payload.interrupt === true ? 'steered (interrupt)' : 'steered',
-        detail: messageContent(event.payload),
+        detail: messageContent(body),
       }
     case 'agent.turn.stopped':
       return { title: 'turn stopped' }
@@ -102,30 +116,32 @@ function summarizeAgent(event: SessionEvent): EventSummary | undefined {
     }
 
     case 'agent.spawn.requested':
-      return { title: 'spawn', detail: definitionLabel(event.payload) }
+      return { title: 'spawn', detail: definitionLabel(body) }
     default:
       return undefined
   }
 }
 
 function summarizeRuntime(event: SessionEvent): EventSummary | undefined {
-  const payload = jsonFields(event.payload)
+  // The wire payload is JSON; reading it as a value is the one place it is typed.
+  const body = asJson(event.payload)
+  const payload = jsonFields(body)
 
   switch (event.type) {
     case 'runtime.run.started':
-      return { title: 'run started', detail: definitionLabel(event.payload) }
+      return { title: 'run started', detail: definitionLabel(body) }
     case 'runtime.run.completed':
       return {
-        title: jsonText(payload.error) ? 'run failed' : 'run completed',
+        title: hasText(jsonText(payload.error)) ? 'run failed' : 'run completed',
         detail: jsonText(payload.error) ?? compactJson(payload.output ?? null),
       }
     case 'runtime.run.launched':
       return {
         title: 'run launched',
-        detail: `${definitionLabel(event.payload)} · ${jsonText(payload.runId) ?? ''}`,
+        detail: `${definitionLabel(body)} · ${jsonText(payload.runId) ?? ''}`,
       }
     case 'runtime.thread.started':
-      return { title: 'thread started', detail: definitionLabel(event.payload) }
+      return { title: 'thread started', detail: definitionLabel(body) }
     case 'runtime.thread.completed':
       return { title: 'thread completed', detail: compactJson(payload.output ?? null) }
     case 'runtime.thread.failed':
@@ -145,14 +161,14 @@ function summarizeRuntime(event: SessionEvent): EventSummary | undefined {
     case 'runtime.effect.failed':
       return { title: 'effect failed', detail: jsonText(payload.error) }
     case 'runtime.signal.received':
-      return { title: 'signal', detail: compactJson(event.payload) }
+      return { title: 'signal', detail: compactJson(body) }
     default:
       return undefined
   }
 }
 
 function summarizeShuttle(event: SessionEvent): EventSummary | undefined {
-  const payload = jsonFields(event.payload)
+  const payload = jsonFields(asJson(event.payload))
 
   switch (event.type) {
     case 'shuttle.user.said':
@@ -194,7 +210,7 @@ function summarizeShuttle(event: SessionEvent): EventSummary | undefined {
     case 'shuttle.sandbox.moved':
       return {
         title: 'sandbox moved',
-        detail: `${String(payload.from)} → ${String(payload.to)}${payload.fromSave === true ? ' (from last save)' : ''}`,
+        detail: `${valueText(payload.from)} → ${valueText(payload.to)}${payload.fromSave === true ? ' (from last save)' : ''}`,
       }
 
     case 'shuttle.team.changed':
@@ -215,7 +231,7 @@ function summarizeShuttle(event: SessionEvent): EventSummary | undefined {
 
       return {
         title: `${jsonText(payload.label) ?? 'agent'} turn started`,
-        detail: model ? `turn ${jsonNumber(payload.turn) ?? ''} · ${model}` : undefined,
+        detail: hasText(model) ? `turn ${jsonNumber(payload.turn) ?? ''} · ${model}` : undefined,
       }
     }
 
@@ -236,7 +252,7 @@ function summarizeShuttle(event: SessionEvent): EventSummary | undefined {
       const error = jsonText(payload.error)
 
       return {
-        title: error ? 'tool failed' : 'tool finished',
+        title: hasText(error) ? 'tool failed' : 'tool finished',
         detail: error ?? jsonText(payload.result),
       }
     }
@@ -256,7 +272,7 @@ function summarizeShuttle(event: SessionEvent): EventSummary | undefined {
 }
 
 function summarizeApproval(event: SessionEvent): EventSummary | undefined {
-  const payload = jsonFields(event.payload)
+  const payload = jsonFields(asJson(event.payload))
 
   switch (event.type) {
     case 'approval.requested':
@@ -280,7 +296,7 @@ export function summarizeEvent(event: SessionEvent): EventSummary {
     summarizeApproval(event) ??
     summarizeRuntime(event) ?? {
       title: event.type.replace(/^[a-z]+\./, ''),
-      detail: compactJson(event.payload),
+      detail: compactJson(asJson(event.payload)),
     }
   )
 }

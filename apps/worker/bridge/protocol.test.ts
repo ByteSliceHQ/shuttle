@@ -14,6 +14,19 @@ describe('parseBridgeEvents', () => {
     expect(parsed.consumed).toBe(encode(first).length)
   })
 
+  test('passes over an event of a kind it does not know and still reads the rest', () => {
+    const known = '{"type":"text_delta","delta":"a","seq":2,"at":2}\n'
+    const chunk = encode(`{"type":"from_a_newer_bridge","seq":1,"at":1}\n${known}`)
+    const parsed = parseBridgeEvents(chunk)
+
+    expect(parsed.events).toEqual([{ type: 'text_delta', delta: 'a', seq: 2, at: 2 }])
+    expect(parsed.consumed).toBe(chunk.length)
+  })
+
+  test('refuses a line that is not JSON', () => {
+    expect(() => parseBridgeEvents(encode('not json\n'))).toThrow('not JSON')
+  })
+
   test('consumes nothing until a line is complete', () => {
     expect(parseBridgeEvents(encode('{"type":"mess'))).toEqual({ events: [], consumed: 0 })
     expect(parseBridgeEvents(new Uint8Array())).toEqual({ events: [], consumed: 0 })

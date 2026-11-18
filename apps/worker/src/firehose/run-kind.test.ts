@@ -23,22 +23,24 @@ describe('runKindFor', () => {
   })
 })
 
+function nameOf(kind: RunKind): string {
+  switch (kind) {
+    case 'session':
+    case 'workspace':
+    case 'playbook':
+    case 'pulls':
+      return kind
+
+    default: {
+      const exhaustive: never = kind
+
+      return assertNeverRunKind(exhaustive)
+    }
+  }
+}
+
 describe('assertNeverRunKind', () => {
   test('is reachable only for exhaustive default branches', () => {
-    const kind = 'session' as RunKind
-
-    switch (kind) {
-      case 'session':
-      case 'workspace':
-      case 'playbook':
-      case 'pulls':
-        expect(kind).toBe('session')
-        break
-
-      default: {
-        const exhaustive: never = kind
-        assertNeverRunKind(exhaustive)
-      }
-    }
+    expect(nameOf('session')).toBe('session')
   })
 })

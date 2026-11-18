@@ -1,6 +1,8 @@
+import { z } from 'zod'
+
 import type { ShuttleEnv } from '../env'
 import type { LinkedRepo } from '../workspace/scope'
-import { getInstallationToken, githubFetch } from './client'
+import { getInstallationToken, githubFetch, ShaBodySchema } from './client'
 
 export type ChangesetFileStatus = 'added' | 'modified' | 'deleted'
 
@@ -52,9 +54,9 @@ async function createBlob(
     throw new Error(`Failed to create blob: ${response.status}`)
   }
 
-  const body = (await response.json()) as { sha?: string }
+  const body = ShaBodySchema.parse(await response.json())
 
-  if (!body.sha) {
+  if (body.sha === undefined || body.sha === '') {
     throw new Error('Blob response missing sha')
   }
 
@@ -84,14 +86,16 @@ async function createCommit(
     throw new Error(`Failed to create commit: ${response.status}`)
   }
 
-  const body = (await response.json()) as { sha?: string }
+  const body = ShaBodySchema.parse(await response.json())
 
-  if (!body.sha) {
+  if (body.sha === undefined || body.sha === '') {
     throw new Error('Commit response missing sha')
   }
 
   return body.sha
 }
+
+const CommitBodySchema = z.object({ tree: z.object({ sha: z.string().optional() }).optional() })
 
 async function getCommitTreeSha(
   env: ShuttleEnv,
@@ -109,9 +113,9 @@ async function getCommitTreeSha(
     throw new Error(`Failed to load commit ${commitSha}: ${response.status}`)
   }
 
-  const body = (await response.json()) as { tree?: { sha?: string } }
+  const body = CommitBodySchema.parse(await response.json())
 
-  if (!body.tree?.sha) {
+  if (body.tree?.sha === undefined || body.tree.sha === '') {
     throw new Error(`Commit ${commitSha} missing tree sha`)
   }
 
@@ -235,9 +239,9 @@ export async function commitChangeset(
     throw new Error(`Failed to create tree: ${response.status}`)
   }
 
-  const treeBody = (await response.json()) as { sha?: string }
+  const treeBody = ShaBodySchema.parse(await response.json())
 
-  if (!treeBody.sha) {
+  if (treeBody.sha === undefined || treeBody.sha === '') {
     throw new Error('Tree response missing sha')
   }
 

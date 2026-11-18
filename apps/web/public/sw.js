@@ -70,7 +70,7 @@ async function page() {
       if (changed) {
         for (const client of await self.clients.matchAll({ type: 'window' })) {
           // A service worker's client takes no target origin: it is always this origin.
-          // oxlint-disable-next-line unicorn/require-post-message-target-origin
+          // oxlint-disable-next-line unicorn/require-post-message-target-origin -- a service worker client has no target origin; postMessage on it is always same-origin
           client.postMessage({ type: 'shuttle:shell-updated' })
         }
       }

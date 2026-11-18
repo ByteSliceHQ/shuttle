@@ -34,11 +34,19 @@ const PRESET_LABELS: Record<TeamPreset, string> = {
 
 /** What the picker shows for a Shuttle session, naming the vendor agents on its team. */
 function teamLabel(team: Team | undefined): string {
-  const members = [
-    team?.codex ? 'Codex' : null,
-    team?.claudeCode ? 'Claude' : null,
-    team?.cursor ? 'Cursor' : null,
-  ].filter(Boolean)
+  const members: string[] = []
+
+  if (team?.codex === true) {
+    members.push('Codex')
+  }
+
+  if (team?.claudeCode === true) {
+    members.push('Claude')
+  }
+
+  if (team?.cursor === true) {
+    members.push('Cursor')
+  }
 
   return members.length > 0 ? `${SHUTTLE_LABEL} + ${members.join(' + ')}` : SHUTTLE_LABEL
 }
@@ -60,15 +68,17 @@ function teamKey(harness: Connection['harness']): 'codex' | 'claudeCode' | 'curs
   }
 }
 
+interface AgentStatus {
+  readonly text: string
+  readonly warn: boolean
+}
+
 /**
  * How an agent stands where the session runs, for the picker. An agent signed in only at the
  * other place can still be picked: the message box then offers to sign in where it runs.
  */
-function agentStatus(
-  connection: Connection,
-  place: SignInPlace | null | undefined,
-): { text: string; warn: boolean } {
-  const there = place ? signedInAt(connection, place) : null
+function agentStatus(connection: Connection, place: SignInPlace | null | undefined): AgentStatus {
+  const there = place !== null && place !== undefined ? signedInAt(connection, place) : null
 
   if (there === true || (there === null && connection.connected)) {
     return { text: 'Your subscription', warn: false }
@@ -243,17 +253,19 @@ export function HarnessSwitcher({
   )
 }
 
-/**
- * The agent and team new sessions start with, for forms that create a session. `save` must
- * finish before the session is launched: a session takes the defaults on its first turn.
- */
-export function useDefaultHarness(): {
+interface DefaultHarness {
   harness: HarnessId
   setHarness: (harness: HarnessId) => void
   team: Team
   setTeam: (team: Team) => void
-  save: () => Promise<unknown>
-} {
+  save: () => Promise<void>
+}
+
+/**
+ * The agent and team new sessions start with, for forms that create a session. `save` must
+ * finish before the session is launched: a session takes the defaults on its first turn.
+ */
+export function useDefaultHarness(): DefaultHarness {
   const host = useShuttleHost()
   const { data: state } = useQuery(connectionsQuery(host))
   // What the person picked on this form. Until they pick, the form shows the saved defaults.
@@ -270,6 +282,10 @@ export function useDefaultHarness(): {
     setHarness: (next) => setChosen({ harness: next, team }),
     team,
     setTeam: (next) => setChosen({ harness, team: next }),
-    save: () => (chosen ? saveDefaults(chosen) : Promise.resolve()),
+    save: async () => {
+      if (chosen !== null) {
+        await saveDefaults(chosen)
+      }
+    },
   }
 }

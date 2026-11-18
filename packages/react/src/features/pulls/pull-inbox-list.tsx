@@ -12,6 +12,7 @@ import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { FolderSyncReport, RepoSyncReport } from '@shuttle/api'
 
 import { cn } from '../../lib/cn'
+import { hasText } from '../../lib/text'
 import { compactRelativeTime, fullDateTime } from '../../lib/time'
 import { useNow } from '../../lib/use-now'
 import { useWorkspaceSessions } from '../workspace/workspace-context'
@@ -59,13 +60,16 @@ export function summarizeAccess(report: FolderSyncReport | null): AccessSummary 
   }
 
   const missing = [...new Set(report.installations.flatMap((entry) => entry.missingPermissions))]
-  const install = report.installations.find((entry) => entry.missingPermissions.length > 0)
+
+  const settingsUrl = report.installations.find(
+    (entry) => entry.missingPermissions.length > 0,
+  )?.settingsUrl
 
   return {
     blocked: blocked.map((repo) => repo.fullName),
     failed,
     missing,
-    settingsUrl: install?.settingsUrl || null,
+    settingsUrl: hasText(settingsUrl) ? settingsUrl : null,
   }
 }
 
@@ -109,9 +113,9 @@ function toggled<T>(set: ReadonlySet<T>, value: T): ReadonlySet<T> {
 
 /** `j`/`k` walk rows, Enter opens one, `o` opens it on GitHub, `/` filters. */
 function onListKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-  const target = event.target as HTMLElement
+  const target = event.target instanceof HTMLElement ? event.target : null
 
-  if (target.tagName === 'INPUT') {
+  if (target?.tagName === 'INPUT') {
     if (event.key === 'Escape' || event.key === 'ArrowDown') {
       event.preventDefault()
       event.currentTarget.querySelector<HTMLElement>('[data-pull-row]')?.focus()
@@ -121,7 +125,7 @@ function onListKeyDown(event: KeyboardEvent<HTMLDivElement>) {
   }
 
   const rows = [...event.currentTarget.querySelectorAll<HTMLElement>('[data-pull-row]')]
-  const index = rows.indexOf(target)
+  const index = target === null ? -1 : rows.indexOf(target)
 
   switch (event.key) {
     case 'j':
@@ -136,9 +140,9 @@ function onListKeyDown(event: KeyboardEvent<HTMLDivElement>) {
       break
 
     case 'o': {
-      const url = target.dataset.url
+      const url = target?.dataset.url
 
-      if (url) {
+      if (hasText(url)) {
         window.open(url, '_blank', 'noopener,noreferrer')
       }
 
@@ -161,7 +165,7 @@ export function PullInboxList({ data }: { data: PullInboxData }) {
   const [collapsedLanes, setCollapsedLanes] = useState<ReadonlySet<PullLaneId>>(new Set())
   const [expandedLanes, setExpandedLanes] = useState<ReadonlySet<PullLaneId>>(new Set())
   const [openKey, setOpenKey] = useState<string | null>(null)
-  const activeRepo = scope && data.repos.includes(scope) ? scope : null
+  const activeRepo = hasText(scope) && data.repos.includes(scope) ? scope : null
   const query = filter.trim().toLowerCase()
   const access = summarizeAccess(data.report)
 
@@ -181,12 +185,13 @@ export function PullInboxList({ data }: { data: PullInboxData }) {
   }, [data.pulls])
 
   const scoped = useMemo(
-    () => (activeRepo ? data.pulls.filter((pull) => pull.fullName === activeRepo) : data.pulls),
+    () =>
+      activeRepo !== null ? data.pulls.filter((pull) => pull.fullName === activeRepo) : data.pulls,
     [data.pulls, activeRepo],
   )
 
   const visible = useMemo(
-    () => (query ? scoped.filter((pull) => matchesFilter(pull, query)) : scoped),
+    () => (query !== '' ? scoped.filter((pull) => matchesFilter(pull, query)) : scoped),
     [scoped, query],
   )
 
@@ -216,13 +221,13 @@ export function PullInboxList({ data }: { data: PullInboxData }) {
       return openStack.layers.filter((pull) => pull !== openPull)
     }
 
-    return openRunId
+    return hasText(openRunId)
       ? data.pulls.filter((pull) => pull !== openPull && authorRunId(pull) === openRunId)
       : []
   }, [data.pulls, openPull, openRunId, openStack])
 
   const showFilter = scoped.length > FILTER_THRESHOLD || filter !== ''
-  const activeReport = activeRepo ? reports.get(activeRepo) : undefined
+  const activeReport = activeRepo !== null ? reports.get(activeRepo) : undefined
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" onKeyDown={onListKeyDown}>
@@ -245,14 +250,16 @@ export function PullInboxList({ data }: { data: PullInboxData }) {
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
             placeholder={
-              activeRepo
+              activeRepo !== null
                 ? `Filter ${repoShortName(activeRepo)}`
                 : `Filter ${data.pulls.length.toLocaleString()} pull requests`
             }
             aria-label="Filter pull requests"
             className="placeholder:text-muted-foreground/70 text-foreground min-w-0 flex-1 bg-transparent text-[12.5px] outline-none [&::-webkit-search-cancel-button]:hidden"
           />
-          {filter ? null : <kbd className="text-muted-foreground/70 font-mono text-[10px]">/</kbd>}
+          {filter !== '' ? null : (
+            <kbd className="text-muted-foreground/70 font-mono text-[10px]">/</kbd>
+          )}
         </label>
       ) : null}
 
@@ -270,7 +277,7 @@ export function PullInboxList({ data }: { data: PullInboxData }) {
           </InboxEmpty>
         ) : scoped.length === 0 ? (
           <InboxEmpty title="No open pull requests">
-            {activeRepo
+            {activeRepo !== null
               ? `${repoShortName(activeRepo)} has nothing open right now.`
               : 'PRs on linked repos land here as soon as GitHub reports them.'}
           </InboxEmpty>
@@ -318,7 +325,7 @@ export function PullInboxList({ data }: { data: PullInboxData }) {
                               <PullRow
                                 pull={entry.pull}
                                 now={now}
-                                showRepo={!activeRepo}
+                                showRepo={activeRepo === null}
                                 onOpen={setOpenKey}
                               />
                             </li>
@@ -331,7 +338,7 @@ export function PullInboxList({ data }: { data: PullInboxData }) {
                                 pulls={entry.pulls}
                                 total={entry.total}
                                 now={now}
-                                showRepo={!activeRepo}
+                                showRepo={activeRepo === null}
                                 onOpen={setOpenKey}
                               />
                             </li>
@@ -435,7 +442,7 @@ function RepoScope({
       {repos.map((fullName) => {
         const report = reports.get(fullName)
         const blocked = report !== undefined && report.status !== 'ok'
-        const capped = report && report.synced < report.open
+        const capped = report !== undefined && report.synced < report.open
 
         return (
           <ScopeTab
@@ -536,7 +543,7 @@ function AccessNotice({ access }: { access: AccessSummary }) {
       <div className="min-w-0 flex-1">
         <p className="text-[12px] leading-snug font-medium wrap-anywhere">{title}</p>
         <p className="text-muted-foreground mt-1 text-[11.5px] leading-relaxed">{body}</p>
-        {access.settingsUrl ? (
+        {hasText(access.settingsUrl) ? (
           <a
             href={access.settingsUrl}
             target="_blank"
@@ -569,8 +576,9 @@ function PullRow({
   const sessions = useWorkspaceSessions()
 
   const author =
-    pull.linkedSessions.find((session) => session.role === 'author' && sessions[session.runId]) ??
-    pull.linkedSessions.find((session) => session.role === 'author')
+    pull.linkedSessions.find(
+      (session) => session.role === 'author' && sessions[session.runId] !== undefined,
+    ) ?? pull.linkedSessions.find((session) => session.role === 'author')
 
   const authorSessionTitle = useSessionTitle(author?.runId)
 
@@ -608,10 +616,12 @@ function PullRow({
         {inChangeset ? null : author ? (
           <span
             className="flex min-w-0 items-center gap-1"
-            title={authorSessionTitle ? `Opened in ${authorSessionTitle}` : 'Opened by Shuttle'}
+            title={
+              hasText(authorSessionTitle) ? `Opened in ${authorSessionTitle}` : 'Opened by Shuttle'
+            }
           >
             <Bot aria-label="Opened by Shuttle" className="text-brand size-3 shrink-0" />
-            {authorSessionTitle ? (
+            {hasText(authorSessionTitle) ? (
               <span className="min-w-0 truncate" dir="auto">
                 {authorSessionTitle}
               </span>

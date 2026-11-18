@@ -137,7 +137,7 @@ export function writeActiveTabId(runId: string, tabId: string | null) {
   try {
     const key = activeTabStorageKey(runId)
 
-    if (tabId) {
+    if (tabId !== null && tabId !== '') {
       sessionStorage.setItem(key, tabId)
     } else {
       sessionStorage.removeItem(key)
@@ -157,11 +157,16 @@ export function resolveActiveTabId(
     return null
   }
 
-  if (preferred && set.tabs[preferred]) {
+  if (
+    preferred !== null &&
+    preferred !== undefined &&
+    preferred !== '' &&
+    set.tabs[preferred] !== undefined
+  ) {
     return preferred
   }
 
-  if (closedTabId) {
+  if (closedTabId !== undefined && closedTabId !== '') {
     const index = set.order.indexOf(closedTabId)
 
     if (index >= 0) {
@@ -193,6 +198,12 @@ export function neighborAfterClose(
   return null
 }
 
+function fileTitle(target: string | undefined): string {
+  const name = target?.split('/').pop()
+
+  return name === undefined || name === '' ? 'File' : name
+}
+
 export function tabTitleForKind(kind: ArtifactTabKind, target?: string): string {
   switch (kind) {
     case 'events':
@@ -200,13 +211,13 @@ export function tabTitleForKind(kind: ArtifactTabKind, target?: string): string 
     case 'files':
       return 'Workspace'
     case 'file':
-      return target?.split('/').pop() || 'File'
+      return fileTitle(target)
     case 'changes':
       return 'Changes'
     case 'terminal':
       return 'Terminal'
     case 'browser':
-      return target ? browserTitle(target) : 'Browser'
+      return target !== undefined && target !== '' ? browserTitle(target) : 'Browser'
     case 'review':
       return 'Review'
     case 'media':
@@ -226,9 +237,11 @@ function browserTitle(target: string): string {
   try {
     const url = new URL(target)
 
-    return url.host || 'Browser'
+    return url.host === '' ? 'Browser' : url.host
   } catch {
-    return target.slice(0, 24) || 'Browser'
+    const head = target.slice(0, 24)
+
+    return head === '' ? 'Browser' : head
   }
 }
 

@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 import {
   RUNNER_CONNECT_PATH,
   RUNNER_PING,
@@ -8,9 +10,11 @@ import {
   type RunnerInbound,
   type RunnerOutbound,
   type RunnerRequest,
+  type RunnerResults,
 } from '@shuttle/runner-protocol'
 
 import { MissingFileError, type LocalBackend, type LocalTerminal } from './backend'
+import { nonEmpty } from './text'
 
 /**
  * The runner's connection to Shuttle: one WebSocket to this machine's sandbox Durable Object,
@@ -24,6 +28,51 @@ const RETRY_MAX_MS = 15_000
 
 /** How long to stand back after being replaced, so two runners do not take turns forever. */
 const REPLACED_RETRY_MS = 60_000
+
+const requestFields = {
+  type: z.literal('req'),
+  id: z.string(),
+}
+
+/** The frames Shuttle sends. One this runner does not know fails to parse and is ignored. */
+const inboundSchema = z.union([
+  z.object({
+    ...requestFields,
+    op: z.literal('exec'),
+    argv: z.array(z.string()),
+    cwd: z.string().optional(),
+    env: z.record(z.string(), z.string()).optional(),
+    stdin: z.string().optional(),
+  }),
+  z.object({ ...requestFields, op: z.literal('readBytes'), path: z.string() }),
+  z.object({ ...requestFields, op: z.literal('writeBytes'), path: z.string(), data: z.string() }),
+  z.object({ ...requestFields, op: z.literal('mkdir'), path: z.string() }),
+  z.object({
+    ...requestFields,
+    op: z.literal('http'),
+    port: z.number(),
+    method: z.string(),
+    path: z.string(),
+    headers: z.array(z.tuple([z.string(), z.string()])),
+    body: z.string().optional(),
+  }),
+  z.object({
+    ...requestFields,
+    op: z.literal('term.open'),
+    term: z.string(),
+    cwd: z.string().optional(),
+    cols: z.number(),
+    rows: z.number(),
+  }),
+  z.object({ type: z.literal('term.input'), term: z.string(), data: z.string() }),
+  z.object({
+    type: z.literal('term.resize'),
+    term: z.string(),
+    cols: z.number(),
+    rows: z.number(),
+  }),
+  z.object({ type: z.literal('term.close'), term: z.string() }),
+])
 
 export type LinkStatus = 'connecting' | 'online' | 'offline'
 
@@ -52,14 +101,16 @@ async function answer(
   request: RunnerRequest,
   started: (pid: number) => void,
   terminal: (term: string, cwd: string | undefined, cols: number, rows: number) => Promise<void>,
-): Promise<unknown> {
+): Promise<RunnerResults[RunnerRequest['op']]> {
   switch (request.op) {
     case 'exec': {
+      const stdin = nonEmpty(request.stdin)
+
       const output = await backend.exec(request.argv, {
         started,
-        ...(request.cwd ? { cwd: request.cwd } : {}),
-        ...(request.env ? { env: request.env } : {}),
-        ...(request.stdin ? { stdin: fromBase64(request.stdin) } : {}),
+        cwd: nonEmpty(request.cwd),
+        env: request.env,
+        stdin: stdin === undefined ? undefined : fromBase64(stdin),
       })
 
       return {
@@ -94,7 +145,11 @@ async function answer(
   }
 }
 
-export function connect(options: LinkOptions): { close(): void } {
+export interface Link {
+  close(): void
+}
+
+export function connect(options: LinkOptions): Link {
   const { backend, device } = options
   const terminals = new Map<string, LocalTerminal>()
   let socket: WebSocket | null = null
@@ -124,7 +179,7 @@ export function connect(options: LinkOptions): { close(): void } {
       await backend.openTerminal({
         cols,
         rows,
-        ...(cwd ? { cwd } : {}),
+        cwd: nonEmpty(cwd),
         data: (bytes) => send({ type: 'term.data', term, data: base64(bytes) }),
         exit: () => {
           terminals.delete(term)
@@ -141,14 +196,15 @@ export function connect(options: LinkOptions): { close(): void } {
 
         answer(backend, frame, (pid) => send({ type: 'started', id, pid }), openTerminal).then(
           (result) => send({ type: 'res', id, ok: true, result }),
-          (cause: unknown) =>
-            send({
-              type: 'res',
-              id,
-              ok: false,
-              error: cause instanceof Error ? cause.message : String(cause),
-              ...(cause instanceof MissingFileError ? { code: cause.code } : {}),
-            }),
+          (cause: unknown) => {
+            const error = cause instanceof Error ? cause.message : String(cause)
+
+            if (cause instanceof MissingFileError) {
+              send({ type: 'res', id, ok: false, error, code: cause.code })
+            } else {
+              send({ type: 'res', id, ok: false, error })
+            }
+          },
         )
 
         return
@@ -181,7 +237,7 @@ export function connect(options: LinkOptions): { close(): void } {
     // Bun's WebSocket takes request headers, which is how the runner signs in.
     const next = new WebSocket(target.toString(), {
       headers: { authorization: `Bearer ${options.token}` },
-    } as unknown as string[])
+    })
 
     socket = next
 
@@ -193,12 +249,18 @@ export function connect(options: LinkOptions): { close(): void } {
     })
 
     next.addEventListener('message', (event) => {
-      if (typeof event.data !== 'string' || !event.data.startsWith('{')) {
+      const text = z.string().safeParse(event.data)
+
+      if (!text.success || !text.data.startsWith('{')) {
         return
       }
 
       try {
-        handle(JSON.parse(event.data) as RunnerInbound)
+        const frame = inboundSchema.safeParse(JSON.parse(text.data))
+
+        if (frame.success) {
+          handle(frame.data)
+        }
       } catch {
         // A frame this runner does not understand. A newer Shuttle may send them.
       }
@@ -233,7 +295,11 @@ export function connect(options: LinkOptions): { close(): void } {
         return
       }
 
-      options.status('offline', event.reason || `connection closed (${event.code})`)
+      options.status(
+        'offline',
+        event.reason === '' ? `connection closed (${event.code})` : event.reason,
+      )
+
       setTimeout(dial, retry)
       retry = Math.min(retry * 2, RETRY_MAX_MS)
     })

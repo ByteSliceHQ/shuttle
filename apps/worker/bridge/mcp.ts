@@ -10,11 +10,23 @@ import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 
 import {
+  booleanField,
+  field,
+  isJsonObject,
+  isNumber,
+  isString,
+  objectField,
+  parseJson,
+  stringField,
+  type JsonObject,
+  type JsonValue,
+} from './json.ts'
+import {
   BRIDGE_PROPOSALS_DIR,
   BRIDGE_REQUEST_FILE,
+  decodePullProposal,
   SHUTTLE_PROPOSE_PULL_REQUEST,
   type BridgePullProposal,
-  type BridgeTurnRequest,
 } from './protocol.ts'
 
 /**
@@ -71,11 +83,34 @@ export const PROPOSAL_RECEIVED = [
 
 type JsonRpcId = string | number | null
 
-interface JsonRpcMessage {
+export interface JsonRpcMessage {
   readonly jsonrpc?: string
   readonly id?: JsonRpcId
   readonly method?: string
-  readonly params?: Record<string, unknown>
+  readonly params?: JsonObject
+}
+
+/** What this server says back to a request. */
+export interface McpResponse {
+  readonly jsonrpc: '2.0'
+  readonly id: JsonRpcId
+  readonly result?: JsonValue
+  readonly error?: { readonly code: number; readonly message: string }
+}
+
+function decodeMessage(value: JsonValue): JsonRpcMessage | undefined {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  const id = field(value, 'id')
+
+  return {
+    jsonrpc: stringField(value, 'jsonrpc'),
+    id: isString(id) || isNumber(id) || id === null ? id : undefined,
+    method: stringField(value, 'method'),
+    params: objectField(value, 'params'),
+  }
 }
 
 /** Writes one proposal into the run directory, whole: a reader never sees half a file. */
@@ -108,7 +143,11 @@ export function takeProposals(dir: string): BridgePullProposal[] {
       const path = join(proposals, name)
 
       try {
-        const proposal = JSON.parse(readFileSync(path, 'utf8')) as BridgePullProposal
+        const proposal = decodePullProposal(parseJson(readFileSync(path, 'utf8')))
+
+        if (proposal === undefined) {
+          return []
+        }
 
         renameSync(path, `${path}.taken`)
         return [proposal]
@@ -125,25 +164,28 @@ function mayPropose(dir: string): boolean {
   }
 
   try {
-    const request = JSON.parse(
-      readFileSync(join(dir, BRIDGE_REQUEST_FILE), 'utf8'),
-    ) as BridgeTurnRequest
+    const request = parseJson(readFileSync(join(dir, BRIDGE_REQUEST_FILE), 'utf8'))
+    const tools = isJsonObject(request) ? objectField(request, 'shuttleTools') : undefined
 
-    return request.shuttleTools?.proposePullRequest === true
+    return tools !== undefined && booleanField(tools, 'proposePullRequest') === true
   } catch {
     return false
   }
 }
 
-function text(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
+function text(value: JsonValue | undefined): string {
+  return isString(value) ? value.trim() : ''
 }
 
 /** Answers one MCP request. Returns null for a notification, which gets no reply. */
-export function handleMcpMessage(dir: string, message: JsonRpcMessage): unknown {
-  const reply = (result: unknown) => ({ jsonrpc: '2.0', id: message.id ?? null, result })
+export function handleMcpMessage(dir: string, message: JsonRpcMessage): McpResponse | null {
+  const reply = (result: JsonValue): McpResponse => ({
+    jsonrpc: '2.0',
+    id: message.id ?? null,
+    result,
+  })
 
-  const fail = (code: number, error: string) => ({
+  const fail = (code: number, error: string): McpResponse => ({
     jsonrpc: '2.0',
     id: message.id ?? null,
     error: { code, message: error },
@@ -175,8 +217,9 @@ export function handleMcpMessage(dir: string, message: JsonRpcMessage): unknown 
     }
 
     case 'tools/call': {
-      const name = text(message.params?.name)
-      const args = (message.params?.arguments ?? {}) as Record<string, unknown>
+      const params: JsonObject = message.params ?? {}
+      const name = text(params.name)
+      const args: JsonObject = objectField(params, 'arguments') ?? {}
 
       if (name !== PROPOSE_PULL_REQUEST || !mayPropose(dir)) {
         return reply({
@@ -206,11 +249,13 @@ export function handleMcpMessage(dir: string, message: JsonRpcMessage): unknown 
         title: title.slice(0, 300),
         body: text(args.body).slice(0, 20_000),
         draft: args.draft !== false,
-        ...(repo ? { repo } : {}),
+        repo: repo === '' ? undefined : repo,
       })
 
       return reply({ content: [{ type: 'text', text: PROPOSAL_RECEIVED }] })
     }
+
+    case undefined:
 
     default: {
       return fail(-32601, `Method not found: ${message.method ?? ''}`)
@@ -227,15 +272,19 @@ export async function serveMcp(dir: string): Promise<void> {
       continue
     }
 
-    let message: JsonRpcMessage
+    const parsed = parseJson(line)
 
-    try {
-      message = JSON.parse(line) as JsonRpcMessage
-    } catch {
+    if (parsed === undefined) {
       process.stdout.write(
         `${JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } })}\n`,
       )
 
+      continue
+    }
+
+    const message = decodeMessage(parsed)
+
+    if (message === undefined) {
       continue
     }
 
@@ -247,8 +296,13 @@ export async function serveMcp(dir: string): Promise<void> {
   }
 }
 
+export interface McpCommand {
+  readonly command: string
+  readonly args: string[]
+}
+
 /** How a vendor agent starts this server for the run in `dir`. */
-export function shuttleMcpCommand(dir: string): { command: string; args: string[] } {
+export function shuttleMcpCommand(dir: string): McpCommand {
   // The same runtime and flags as this bridge, such as Node's type stripping.
   return {
     command: process.execPath,

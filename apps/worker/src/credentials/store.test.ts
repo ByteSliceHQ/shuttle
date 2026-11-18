@@ -7,12 +7,14 @@ function memoryStorage(): CredentialStorage & { values: Map<string, unknown> } {
 
   return {
     values,
+    // SAFETY: the store only reads back what it wrote through `put`, which are `StoredCredential` records.
     get: async <T>(key: string) => values.get(key) as T | undefined,
     put: async (key, value) => {
       values.set(key, value)
     },
     delete: async (key) => values.delete(key),
     list: async <T>({ prefix }: { prefix: string }) =>
+      // SAFETY: as for `get`, every listed value was written by the store as the requested record type.
       new Map([...values].filter(([key]) => key.startsWith(prefix))) as Map<string, T>,
   }
 }

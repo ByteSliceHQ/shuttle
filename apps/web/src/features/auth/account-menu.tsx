@@ -37,6 +37,7 @@ export function AccountMenu() {
 
   const current = organizations.data?.find((organization) => organization.id === tenant.org.id)
   const canInvite = tenant.org.role !== 'member'
+  const accountName = tenant.user.name !== '' ? tenant.user.name : tenant.user.email
 
   async function switchTo(organizationId: string) {
     if (organizationId === tenant.org.id) {
@@ -67,11 +68,11 @@ export function AccountMenu() {
             aria-label="Account and organization"
           >
             <span className="bg-accent text-foreground flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-medium uppercase">
-              {Array.from(tenant.user.name || tenant.user.email)[0] ?? '?'}
+              {Array.from(accountName)[0] ?? '?'}
             </span>
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="text-foreground truncate text-[12.5px] leading-tight font-medium">
-                {tenant.user.name || tenant.user.email}
+                {accountName}
               </span>
               <span className="text-muted-foreground truncate text-[11px] leading-tight">
                 {current?.name ?? 'Organization'}
@@ -129,7 +130,7 @@ function slugFor(name: string): string {
     .slice(0, 32)
 
   // Slugs are unique across Shuttle; the suffix keeps two "Acme"s from colliding.
-  return `${base || 'org'}-${crypto.randomUUID().slice(0, 8)}`
+  return `${base !== '' ? base : 'org'}-${crypto.randomUUID().slice(0, 8)}`
 }
 
 function CreateOrganizationDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -176,7 +177,7 @@ function CreateOrganizationDialog({ open, onClose }: { open: boolean; onClose: (
             required
             autoFocus
           />
-          {error ? (
+          {error !== null && error !== '' ? (
             <p role="alert" className="text-destructive text-[12.5px]">
               {error}
             </p>
@@ -241,7 +242,7 @@ function InviteDialog({
   return (
     <Dialog open={open} onOpenChange={(next) => (next ? undefined : close())}>
       <DialogContent className="max-w-sm">
-        {link ? (
+        {link !== null ? (
           <div className="grid gap-4">
             <DialogHeader>
               <DialogTitle>Send them this link</DialogTitle>
@@ -284,7 +285,7 @@ function InviteDialog({
               required
               autoFocus
             />
-            {error ? (
+            {error !== null && error !== '' ? (
               <p role="alert" className="text-destructive text-[12.5px]">
                 {error}
               </p>

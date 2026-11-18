@@ -9,6 +9,7 @@ import {
   type LayerAddress,
   type StackSummary,
 } from './stack'
+import { orElse } from './text'
 import {
   worktreeRepoPath,
   type ChangesetFile,
@@ -59,7 +60,7 @@ export class StackWorkspaceOps {
     const result = await this.host.exec(command, { cwd, timeoutMs })
 
     if (result.exitCode !== 0) {
-      throw new Error(result.stderr.trim() || `${command} failed in ${cwd}`)
+      throw new Error(orElse(result.stderr.trim(), `${command} failed in ${cwd}`))
     }
 
     return result.stdout
@@ -68,7 +69,7 @@ export class StackWorkspaceOps {
   private async tryGit(cwd: string, command: string): Promise<string | null> {
     const result = await this.host.exec(command, { cwd, timeoutMs: GREP_TIMEOUT_MS })
     const value = result.stdout.trim()
-    return result.exitCode === 0 && value ? value : null
+    return result.exitCode === 0 && value !== '' ? value : null
   }
 
   async layerChangeset(
@@ -84,7 +85,7 @@ export class StackWorkspaceOps {
       `git rev-parse --verify ${shellQuote(`${parentRef}^{commit}`)}`,
     )
 
-    if (!baseSha) {
+    if (baseSha === null) {
       throw new Error(`Failed to resolve parent ${parentRef} in ${cwd}`)
     }
 
@@ -97,8 +98,12 @@ export class StackWorkspaceOps {
     const diffTokens = diff.split('\0').filter(Boolean)
 
     for (let index = 0; index + 1 < diffTokens.length; index += 2) {
-      const code = diffTokens[index]!
-      const path = diffTokens[index + 1]!
+      const code = diffTokens[index]
+      const path = diffTokens[index + 1]
+
+      if (code === undefined || path === undefined) {
+        continue
+      }
 
       if (code.startsWith('D')) {
         files.push({ path, status: 'deleted', content: null })
@@ -127,7 +132,7 @@ export class StackWorkspaceOps {
         const parsed = parseLayerBranch(runId, repoName, branch)
         return parsed ? [{ ...parsed, branch }] : []
       })
-      .toSorted((a, b) => a.stack - b.stack || a.layer - b.layer)
+      .toSorted((a, b) => (a.stack === b.stack ? a.layer - b.layer : a.stack - b.stack))
   }
 
   private async currentAddress(
@@ -163,7 +168,7 @@ export class StackWorkspaceOps {
 
     const sha = resolved?.split('\n')[0]
 
-    if (!sha) {
+    if (sha === undefined || sha === '') {
       throw new Error(`No session base commit recorded for ${repoName} stack ${stack}`)
     }
 
@@ -348,7 +353,7 @@ export class StackWorkspaceOps {
     )
 
     throw new Error(
-      `Restack conflict on stack ${address.stack} layer ${address.layer + 1}: ${unmerged.join(', ') || rebase.stderr.trim()}`,
+      `Restack conflict on stack ${address.stack} layer ${address.layer + 1}: ${orElse(unmerged.join(', '), rebase.stderr.trim())}`,
     )
   }
 
@@ -416,7 +421,7 @@ export class StackWorkspaceOps {
       `git rev-parse --verify ${shellQuote(`refs/heads/${branch}`)}`,
     )
 
-    if (!exists) {
+    if (exists === null) {
       throw new Error(`Stack ${address.stack} layer ${address.layer} does not exist in ${repoName}`)
     }
 

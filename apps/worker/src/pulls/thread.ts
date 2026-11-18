@@ -115,241 +115,235 @@ export function createPullsThread(): ThreadDefinition<PullsState> {
       }
     },
     step(state, event) {
-      switch (event.type) {
-        case 'pulls.pull.upserted': {
-          const key = pullKey(event.payload.fullName, event.payload.number)
-          const existing = state.pulls[key]
+      if (event.type === 'pulls.pull.upserted') {
+        const key = pullKey(event.payload.fullName, event.payload.number)
+        const existing = state.pulls[key]
 
-          if (existing && existing.updatedAt > event.payload.updatedAt) {
-            return state
-          }
-
-          // Ignore repos with no policy (not linked to any folder).
-          if (!state.policies[event.payload.fullName] && event.payload.action !== 'synced') {
-            // Still accept publish/sync upserts that arrive before policy, but skip auto-review.
-          }
-
-          const pull: PullRecord = {
-            installationId: event.payload.installationId,
-            fullName: event.payload.fullName,
-            number: event.payload.number,
-            title: event.payload.title,
-            body: event.payload.body,
-            url: event.payload.url,
-            state: event.payload.state,
-            draft: event.payload.draft,
-            author: event.payload.author,
-            headRef: event.payload.headRef,
-            headSha: event.payload.headSha,
-            baseRef: event.payload.baseRef,
-            baseSha: event.payload.baseSha,
-            additions: event.payload.additions,
-            deletions: event.payload.deletions,
-            reviewDecision: event.payload.reviewDecision,
-            checkRollup: event.payload.checkRollup,
-            updatedAt: event.payload.updatedAt,
-            isFork: event.payload.isFork,
-            stack: event.payload.stack ?? existing?.stack ?? null,
-            linkedSessions: existing?.linkedSessions ?? [],
-            reviewingRunId: existing?.reviewingRunId ?? null,
-            reviewedHeadShas: existing?.reviewedHeadShas ?? [],
-          }
-
-          let pendingAutoReviews = state.pendingAutoReviews
-          const autoActions = new Set(['opened', 'ready_for_review', 'synchronize'])
-
-          if (autoActions.has(event.payload.action)) {
-            const target = shouldAutoReview(pull, state.policies[pull.fullName])
-            const autoKey = `${key}@${pull.headSha}`
-
-            if (
-              target &&
-              !pendingAutoReviews.some((item) => item.key === autoKey) &&
-              !pull.reviewedHeadShas.includes(pull.headSha)
-            ) {
-              pendingAutoReviews = [
-                ...pendingAutoReviews,
-                {
-                  key: autoKey,
-                  fullName: pull.fullName,
-                  number: pull.number,
-                  headSha: pull.headSha,
-                  folderId: target.folderId,
-                  installationId: pull.installationId,
-                  baseSha: pull.baseSha,
-                  baseRef: pull.baseRef,
-                },
-              ]
-            }
-          }
-
-          return {
-            ...state,
-            pulls: { ...state.pulls, [key]: pull },
-            pendingAutoReviews,
-          }
+        if (existing && existing.updatedAt > event.payload.updatedAt) {
+          return state
         }
 
-        case 'pulls.pull.closed': {
-          const key = pullKey(event.payload.fullName, event.payload.number)
-          const existing = state.pulls[key]
-
-          if (!existing) {
-            return state
-          }
-
-          return {
-            ...state,
-            pulls: {
-              ...state.pulls,
-              [key]: {
-                ...existing,
-                state: 'closed',
-                updatedAt: Math.max(existing.updatedAt, event.payload.updatedAt),
-                reviewingRunId: null,
-              },
-            },
-            pendingAutoReviews: state.pendingAutoReviews.filter(
-              (item) => !(item.fullName === existing.fullName && item.number === existing.number),
-            ),
-          }
+        // Ignore repos with no policy (not linked to any folder).
+        if (!state.policies[event.payload.fullName] && event.payload.action !== 'synced') {
+          // Still accept publish/sync upserts that arrive before policy, but skip auto-review.
         }
 
-        case 'pulls.checks.updated': {
-          let changed = false
-          const pulls = { ...state.pulls }
-
-          for (const [key, pull] of Object.entries(state.pulls)) {
-            if (
-              pull.fullName !== event.payload.fullName ||
-              pull.headSha !== event.payload.headSha
-            ) {
-              continue
-            }
-
-            pulls[key] = {
-              ...pull,
-              checkRollup: event.payload.checkRollup,
-              updatedAt: Math.max(pull.updatedAt, event.payload.updatedAt),
-            }
-
-            changed = true
-          }
-
-          return changed ? { ...state, pulls } : state
+        const pull: PullRecord = {
+          installationId: event.payload.installationId,
+          fullName: event.payload.fullName,
+          number: event.payload.number,
+          title: event.payload.title,
+          body: event.payload.body,
+          url: event.payload.url,
+          state: event.payload.state,
+          draft: event.payload.draft,
+          author: event.payload.author,
+          headRef: event.payload.headRef,
+          headSha: event.payload.headSha,
+          baseRef: event.payload.baseRef,
+          baseSha: event.payload.baseSha,
+          additions: event.payload.additions,
+          deletions: event.payload.deletions,
+          reviewDecision: event.payload.reviewDecision,
+          checkRollup: event.payload.checkRollup,
+          updatedAt: event.payload.updatedAt,
+          isFork: event.payload.isFork,
+          stack: event.payload.stack ?? existing?.stack ?? null,
+          linkedSessions: existing?.linkedSessions ?? [],
+          reviewingRunId: existing?.reviewingRunId ?? null,
+          reviewedHeadShas: existing?.reviewedHeadShas ?? [],
         }
 
-        case 'pulls.review.submitted': {
-          const key = pullKey(event.payload.fullName, event.payload.number)
-          const existing = state.pulls[key]
+        let pendingAutoReviews = state.pendingAutoReviews
+        const autoActions = new Set(['opened', 'ready_for_review', 'synchronize'])
 
-          if (!existing) {
-            return state
-          }
-
-          let reviewDecision = existing.reviewDecision
-
-          switch (event.payload.verdict) {
-            case 'approved':
-              reviewDecision = 'approved'
-              break
-            case 'changes_requested':
-              reviewDecision = 'changes_requested'
-              break
-            case 'commented':
-              break
-
-            default: {
-              const exhaustive: never = event.payload.verdict
-              void exhaustive
-              break
-            }
-          }
-
-          return {
-            ...state,
-            pulls: {
-              ...state.pulls,
-              [key]: {
-                ...existing,
-                reviewDecision,
-                updatedAt: Math.max(existing.updatedAt, event.payload.updatedAt),
-              },
-            },
-          }
-        }
-
-        case 'pulls.pull.linked': {
-          const key = pullKey(event.payload.fullName, event.payload.number)
-          const existing = state.pulls[key]
-
-          if (!existing) {
-            return state
-          }
+        if (autoActions.has(event.payload.action)) {
+          const target = shouldAutoReview(pull, state.policies[pull.fullName])
+          const autoKey = `${key}@${pull.headSha}`
 
           if (
-            existing.linkedSessions.some(
-              (session) =>
-                session.runId === event.payload.runId && session.role === event.payload.role,
-            )
+            target &&
+            !pendingAutoReviews.some((item) => item.key === autoKey) &&
+            !pull.reviewedHeadShas.includes(pull.headSha)
           ) {
-            return state
-          }
-
-          return {
-            ...state,
-            pulls: {
-              ...state.pulls,
-              [key]: {
-                ...existing,
-                linkedSessions: [
-                  ...existing.linkedSessions,
-                  { runId: event.payload.runId, role: event.payload.role },
-                ],
+            pendingAutoReviews = [
+              ...pendingAutoReviews,
+              {
+                key: autoKey,
+                fullName: pull.fullName,
+                number: pull.number,
+                headSha: pull.headSha,
+                folderId: target.folderId,
+                installationId: pull.installationId,
+                baseSha: pull.baseSha,
+                baseRef: pull.baseRef,
               },
-            },
+            ]
           }
         }
 
-        case 'pulls.repo.policy.set': {
-          return {
-            ...state,
-            policies: {
-              ...state.policies,
-              [event.payload.fullName]: {
-                installationId: event.payload.installationId,
-                folders: event.payload.folders,
-              },
-            },
-          }
+        return {
+          ...state,
+          pulls: { ...state.pulls, [key]: pull },
+          pendingAutoReviews,
         }
-
-        case 'pulls.review.requested': {
-          const key = pullKey(event.payload.fullName, event.payload.number)
-          const existing = state.pulls[key]
-          const autoKey = `${key}@${event.payload.headSha}`
-
-          return {
-            ...state,
-            pulls: existing
-              ? {
-                  ...state.pulls,
-                  [key]: {
-                    ...existing,
-                    reviewingRunId: event.payload.runId,
-                    reviewedHeadShas: existing.reviewedHeadShas.includes(event.payload.headSha)
-                      ? existing.reviewedHeadShas
-                      : [...existing.reviewedHeadShas, event.payload.headSha],
-                  },
-                }
-              : state.pulls,
-            pendingAutoReviews: state.pendingAutoReviews.filter((item) => item.key !== autoKey),
-          }
-        }
-
-        default:
-          return state
       }
+
+      if (event.type === 'pulls.pull.closed') {
+        const key = pullKey(event.payload.fullName, event.payload.number)
+        const existing = state.pulls[key]
+
+        if (!existing) {
+          return state
+        }
+
+        return {
+          ...state,
+          pulls: {
+            ...state.pulls,
+            [key]: {
+              ...existing,
+              state: 'closed',
+              updatedAt: Math.max(existing.updatedAt, event.payload.updatedAt),
+              reviewingRunId: null,
+            },
+          },
+          pendingAutoReviews: state.pendingAutoReviews.filter(
+            (item) => !(item.fullName === existing.fullName && item.number === existing.number),
+          ),
+        }
+      }
+
+      if (event.type === 'pulls.checks.updated') {
+        let changed = false
+        const pulls = { ...state.pulls }
+
+        for (const [key, pull] of Object.entries(state.pulls)) {
+          if (pull.fullName !== event.payload.fullName || pull.headSha !== event.payload.headSha) {
+            continue
+          }
+
+          pulls[key] = {
+            ...pull,
+            checkRollup: event.payload.checkRollup,
+            updatedAt: Math.max(pull.updatedAt, event.payload.updatedAt),
+          }
+
+          changed = true
+        }
+
+        return changed ? { ...state, pulls } : state
+      }
+
+      if (event.type === 'pulls.review.submitted') {
+        const key = pullKey(event.payload.fullName, event.payload.number)
+        const existing = state.pulls[key]
+
+        if (!existing) {
+          return state
+        }
+
+        let reviewDecision = existing.reviewDecision
+
+        switch (event.payload.verdict) {
+          case 'approved':
+            reviewDecision = 'approved'
+            break
+          case 'changes_requested':
+            reviewDecision = 'changes_requested'
+            break
+          case 'commented':
+            break
+
+          default: {
+            const exhaustive: never = event.payload.verdict
+            void exhaustive
+            break
+          }
+        }
+
+        return {
+          ...state,
+          pulls: {
+            ...state.pulls,
+            [key]: {
+              ...existing,
+              reviewDecision,
+              updatedAt: Math.max(existing.updatedAt, event.payload.updatedAt),
+            },
+          },
+        }
+      }
+
+      if (event.type === 'pulls.pull.linked') {
+        const key = pullKey(event.payload.fullName, event.payload.number)
+        const existing = state.pulls[key]
+
+        if (!existing) {
+          return state
+        }
+
+        if (
+          existing.linkedSessions.some(
+            (session) =>
+              session.runId === event.payload.runId && session.role === event.payload.role,
+          )
+        ) {
+          return state
+        }
+
+        return {
+          ...state,
+          pulls: {
+            ...state.pulls,
+            [key]: {
+              ...existing,
+              linkedSessions: [
+                ...existing.linkedSessions,
+                { runId: event.payload.runId, role: event.payload.role },
+              ],
+            },
+          },
+        }
+      }
+
+      if (event.type === 'pulls.repo.policy.set') {
+        return {
+          ...state,
+          policies: {
+            ...state.policies,
+            [event.payload.fullName]: {
+              installationId: event.payload.installationId,
+              folders: event.payload.folders,
+            },
+          },
+        }
+      }
+
+      if (event.type === 'pulls.review.requested') {
+        const key = pullKey(event.payload.fullName, event.payload.number)
+        const existing = state.pulls[key]
+        const autoKey = `${key}@${event.payload.headSha}`
+
+        return {
+          ...state,
+          pulls: existing
+            ? {
+                ...state.pulls,
+                [key]: {
+                  ...existing,
+                  reviewingRunId: event.payload.runId,
+                  reviewedHeadShas: existing.reviewedHeadShas.includes(event.payload.headSha)
+                    ? existing.reviewedHeadShas
+                    : [...existing.reviewedHeadShas, event.payload.headSha],
+                },
+              }
+            : state.pulls,
+          pendingAutoReviews: state.pendingAutoReviews.filter((item) => item.key !== autoKey),
+        }
+      }
+
+      return state
     },
     effects(state, ctx) {
       const effects: RuntimeEffect[] = []

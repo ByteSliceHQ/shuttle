@@ -1,10 +1,10 @@
-import { Predicate } from 'effect'
-
 import {
+  cleanUndefined,
   createWaitId,
   emit,
   launch,
   wait,
+  isJsonString,
   type JsonValue,
   type RuntimeEffect,
   type ThreadDefinition,
@@ -13,6 +13,7 @@ import {
 import { jsonObject } from '../json'
 import type { AttachmentRef } from '../session/scope'
 import { orgOfRun } from '../tenancy/run-id'
+import { isEventOf } from './event-guard'
 import type { LinkedRepo, SessionActivity } from './scope'
 import { workspaceModule } from './scope'
 
@@ -85,16 +86,8 @@ export interface WorkspaceState {
   readonly mailboxEpoch: number
 }
 
-function asObject(value: unknown): { [key: string]: JsonValue } {
-  return jsonObject(value)
-}
-
-function asString(value: unknown): string | null {
-  return Predicate.isString(value) ? value : null
-}
-
-function asNumber(value: unknown): number | null {
-  return Predicate.isNumber(value) ? value : null
+function asString(value: JsonValue | undefined): string | null {
+  return isJsonString(value) ? value : null
 }
 
 function sandboxNameFor(folderId: string): string {
@@ -105,11 +98,11 @@ function activityEventSeq(
   payloadSeq: number | undefined,
   idempotencyKey: string | null | undefined,
 ): number | undefined {
-  if (typeof payloadSeq === 'number' && Number.isFinite(payloadSeq)) {
+  if (payloadSeq !== undefined && Number.isFinite(payloadSeq)) {
     return payloadSeq
   }
 
-  if (typeof idempotencyKey === 'string' && idempotencyKey.startsWith('activity:')) {
+  if (idempotencyKey?.startsWith('activity:') === true) {
     const tail = Number(idempotencyKey.slice(idempotencyKey.lastIndexOf(':') + 1))
 
     if (Number.isFinite(tail)) {
@@ -138,7 +131,7 @@ function isStaleActivityEvent(
 
 /** Thread state can be replayed — stamp from the event, not wall clock. */
 function eventTimestamp(event: { readonly ts?: number }): number {
-  return typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
+  return event.ts !== undefined && Number.isFinite(event.ts) ? event.ts : Date.now()
 }
 
 /** Reconcile corrections fix a stuck status; they are not new activity, so they never advance the clock. */
@@ -147,16 +140,37 @@ function activityEventAt(
   at: number,
   idempotencyKey: string | null | undefined,
 ): number {
-  return typeof idempotencyKey === 'string' && idempotencyKey.startsWith('reconcile:')
-    ? Math.min(at, session.updatedAt)
-    : at
+  return idempotencyKey?.startsWith('reconcile:') === true ? Math.min(at, session.updatedAt) : at
 }
+
+/** The events the workspace thread folds into its state; it ignores the rest. */
+const STEPPED_EVENTS = [
+  'workspace.folder.created',
+  'workspace.folder.renamed',
+  'workspace.folder.archived',
+  'workspace.folder.reordered',
+  'workspace.folder.auto_review.set',
+  'workspace.github.connected',
+  'workspace.github.disconnected',
+  'workspace.repo.linked',
+  'workspace.repo.unlinked',
+  'workspace.session.requested',
+  'workspace.session.launched',
+  'workspace.session.renamed',
+  'workspace.session.listed',
+  'workspace.session.unlisted',
+  'workspace.session.shared',
+  'workspace.session.archived',
+  'workspace.session.activity',
+  'runtime.child.settled',
+  'runtime.wait.satisfied',
+] as const
 
 export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
   return workspaceModule.thread<WorkspaceState>({
     kind: 'shuttle-workspace',
     initialState: (ctx) => {
-      const input = Predicate.isObject(ctx.input) ? ctx.input : {}
+      const input = jsonObject(ctx.input)
       return {
         title: asString(input.title) ?? 'Shuttle workspace',
         folderOrder: [],
@@ -167,6 +181,10 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
       }
     },
     step(state, event) {
+      if (!isEventOf(event, STEPPED_EVENTS)) {
+        return state
+      }
+
       switch (event.type) {
         case 'workspace.folder.created': {
           if (state.folders[event.payload.folderId]) {
@@ -343,7 +361,7 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
                 pull: event.payload.pull ?? null,
                 ownerId: event.payload.ownerId ?? null,
                 memberIds: [],
-                ...(event.payload.repos ? { repos: event.payload.repos } : {}),
+                repos: event.payload.repos,
               },
             },
             mailboxEpoch: state.mailboxEpoch + 1,
@@ -521,9 +539,8 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
                 ...session,
                 activity: event.payload.activity,
                 activityAt: Math.max(session.activityAt ?? 0, at),
-                ...(seq !== undefined
-                  ? { activitySeq: Math.max(session.activitySeq ?? 0, seq) }
-                  : {}),
+                activitySeq:
+                  seq === undefined ? session.activitySeq : Math.max(session.activitySeq ?? 0, seq),
                 updatedAt: Math.max(session.updatedAt, at),
               },
             },
@@ -532,11 +549,11 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
         }
 
         case 'runtime.child.settled': {
-          const payload = asObject(event.payload)
+          const payload = jsonObject(event.payload)
           const runId = asString(payload.runId)
           const status = asString(payload.status)
 
-          if (!runId) {
+          if (runId === null || runId === '') {
             return state
           }
 
@@ -569,9 +586,6 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
         case 'runtime.wait.satisfied': {
           return { ...state, mailboxEpoch: state.mailboxEpoch + 1 }
         }
-
-        default:
-          return state
       }
     },
     effects(state, ctx) {
@@ -590,12 +604,16 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
             runId: session.runId,
             kind: 'shuttle-session',
             definitionName: session.definitionName,
-            input: {
+            input: cleanUndefined({
               goal: session.goal,
-              ...(session.attachments?.length ? { attachments: session.attachments } : {}),
+              attachments:
+                session.attachments !== undefined && session.attachments.length > 0
+                  ? session.attachments
+                  : undefined,
               folderId: session.folderId,
               workspaceRunId: ctx.runId,
-              ...(session.ownerId ? { ownerId: session.ownerId } : {}),
+              ownerId:
+                session.ownerId === null || session.ownerId === '' ? undefined : session.ownerId,
               sandboxName: sandboxNameFor(session.folderId),
               repos: repos.map((repo) => ({
                 installationId: repo.installationId,
@@ -610,19 +628,17 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
               lessons: session.lessons.map((lesson) => ({
                 id: lesson.id,
                 text: lesson.text,
-                ...(lesson.scope ? { scope: lesson.scope } : {}),
+                scope: lesson.scope === '' ? undefined : lesson.scope,
               })),
-              ...(session.pull
+              pull: session.pull
                 ? {
-                    pull: {
-                      fullName: session.pull.fullName,
-                      number: session.pull.number,
-                      headSha: session.pull.headSha,
-                      baseSha: session.pull.baseSha,
-                    },
+                    fullName: session.pull.fullName,
+                    number: session.pull.number,
+                    headSha: session.pull.headSha,
+                    baseSha: session.pull.baseSha,
                   }
-                : {}),
-            },
+                : undefined,
+            }),
             close: 'wait',
             tag: `launch_${session.runId}`,
           }),
@@ -664,4 +680,4 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
   })
 }
 
-export { asNumber, sandboxNameFor }
+export { sandboxNameFor }

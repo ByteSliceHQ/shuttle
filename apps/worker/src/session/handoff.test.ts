@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
+import type { JsonValue } from '@swirls/looms/core'
+
 import type { ShuttleEnv } from '../env'
 import { localSandboxName, userSandboxName } from '../sandbox/names'
 import type { SessionSnapshot } from '../sandbox/session-sync'
@@ -15,6 +17,9 @@ import {
   prepareSessionSandbox,
   SANDBOX_HOME_KEY,
   saveSessionWork,
+  type PendingPlacement,
+  type SavedSnapshot,
+  type SessionMove,
 } from './handoff'
 import { SPONSOR_STORAGE_KEY } from './sponsor'
 
@@ -43,6 +48,35 @@ const snapshotOf = (sandbox: string): SessionSnapshot => ({
   config: [],
 })
 
+/** What the session's storage holds in these tests: strings, and records the code writes. */
+type StoredValue = JsonValue | PendingPlacement | SavedSnapshot | SessionMove
+
+/** A Durable Object storage that keeps what is put in it in `values`. */
+function memoryStorage(values: Map<string, StoredValue>): DurableObjectStorage {
+  const fake = {
+    get: async (key: string) => values.get(key),
+    put: async (key: string, value: StoredValue) => {
+      values.set(key, value)
+    },
+    delete: async (key: string) => values.delete(key),
+  }
+
+  // SAFETY: the code under test only calls `get`, `put` and `delete` with a single key, which
+  // `fake` answers as Durable Object storage does; no other method or overload is reached.
+  return fake as DurableObjectStorage
+}
+
+/** The message a promise rejects with, or an empty string when it resolves. */
+async function failureOf<T>(attempt: Promise<T>): Promise<string> {
+  try {
+    await attempt
+  } catch (error) {
+    return error instanceof Error ? error.message : ''
+  }
+
+  return ''
+}
+
 /** Sandboxes that record what they are asked to do. `empty` ones have no worktree to snapshot. */
 function world(
   mode: string | undefined,
@@ -53,65 +87,67 @@ function world(
 ) {
   const calls: string[] = []
 
-  const values = new Map<string, unknown>([
+  const values = new Map<string, StoredValue>([
     [ACCESS_STORAGE_KEY, { ownerId: 'alice', memberIds: ['bob'], visibility: 'private' }],
   ])
 
-  const storage = {
-    get: async (key: string) => values.get(key),
-    put: async (key: string, value: unknown) => {
-      values.set(key, value)
-    },
-    delete: async (key: string) => values.delete(key),
-  } as unknown as DurableObjectStorage
+  const storage = memoryStorage(values)
 
-  const env = fakeEnv({
-    ...(mode ? { SHUTTLE_WORKSPACE_MODE: mode } : {}),
-    SANDBOX: {
-      getByName: (name: string) => ({
-        ensureRepos: async () => {
-          calls.push(`${name} ensureRepos`)
-          return { root: '/workspace' }
-        },
-        ensureWorktree: async () => {
-          calls.push(`${name} ensureWorktree`)
-          return { root: '/workspace', repoDirs: [] }
-        },
-        checkoutRef: async (_runId: string, target: { name: string }, ref: { sha: string }) => {
-          calls.push(`${name} checkout ${target.name}@${ref.sha}`)
-          return { root: '/workspace' }
-        },
-        snapshotSession: async (_runId: string, target: { name: string }) => {
-          if (offline.includes(name)) {
-            throw new Error('sandbox-offline: the machine is not connected')
-          }
+  const sandboxes = {
+    getByName: (name: string) => ({
+      ensureRepos: async () => {
+        calls.push(`${name} ensureRepos`)
+        return { root: '/workspace' }
+      },
+      ensureWorktree: async () => {
+        calls.push(`${name} ensureWorktree`)
+        return { root: '/workspace', repoDirs: [] }
+      },
+      checkoutRef: async (_runId: string, target: { name: string }, ref: { sha: string }) => {
+        calls.push(`${name} checkout ${target.name}@${ref.sha}`)
+        return { root: '/workspace' }
+      },
+      snapshotSession: async (_runId: string, target: { name: string }) => {
+        if (offline.includes(name)) {
+          throw new Error('sandbox-offline: the machine is not connected')
+        }
 
-          calls.push(
-            target.name === 'glue' ? `${name} snapshot` : `${name} snapshot ${target.name}`,
-          )
+        calls.push(target.name === 'glue' ? `${name} snapshot` : `${name} snapshot ${target.name}`)
 
-          return { snapshot: empty.includes(name) ? null : snapshotOf(name) }
-        },
-        restoreSession: async (_runId: string, _repo: unknown, snapshot: SessionSnapshot) => {
-          calls.push(`${name} restore ${snapshot.snapshotSha}`)
-          return { ok: true }
-        },
-      }),
-    } as unknown as ShuttleEnv['SANDBOX'],
-  })
+        return { snapshot: empty.includes(name) ? null : snapshotOf(name) }
+      },
+      restoreSession: async (_runId: string, _repo: typeof repo, snapshot: SessionSnapshot) => {
+        calls.push(`${name} restore ${snapshot.snapshotSha}`)
+        return { ok: true }
+      },
+    }),
+  }
+
+  // SAFETY: the code under test only calls `getByName(name)` and the sandbox methods defined
+  // above, so the fake namespace needs nothing else of the real one.
+  const namespace: ShuttleEnv['SANDBOX'] = sandboxes as never
+
+  const env = fakeEnv(
+    mode === undefined || mode === ''
+      ? { SANDBOX: namespace }
+      : { SHUTTLE_WORKSPACE_MODE: mode, SANDBOX: namespace },
+  )
 
   const work = async (runId: string, sponsor?: string, pull?: typeof PULL) => {
-    if (sponsor) {
+    if (sponsor !== undefined && sponsor !== '') {
       values.set(SPONSOR_STORAGE_KEY, sponsor)
     }
 
     calls.length = 0
 
-    await prepareSessionSandbox(env, storage, runId, {
-      sandboxName: 'folder:f1',
-      repos,
-      ...(pull ? { pull } : {}),
-    })
+    await prepareSessionSandbox(
+      env,
+      storage,
+      runId,
+      pull === undefined
+        ? { sandboxName: 'folder:f1', repos }
+        : { sandboxName: 'folder:f1', repos, pull },
+    )
 
     return [...calls]
   }
@@ -145,13 +181,17 @@ describe('prepareSessionSandbox', () => {
   test('a review session with no head commit or no linked repository fails loudly', async () => {
     const { work } = world('daytona')
 
-    await expect(
-      work(scopedRunId(ORG, 'session_no_head'), undefined, { ...PULL, headSha: '' }),
-    ).rejects.toThrow('without the pull request')
+    expect(
+      await failureOf(
+        work(scopedRunId(ORG, 'session_no_head'), undefined, { ...PULL, headSha: '' }),
+      ),
+    ).toContain('without the pull request')
 
-    await expect(
-      work(scopedRunId(ORG, 'session_no_repo'), undefined, { ...PULL, fullName: 'acme/other' }),
-    ).rejects.toThrow('not linked')
+    expect(
+      await failureOf(
+        work(scopedRunId(ORG, 'session_no_repo'), undefined, { ...PULL, fullName: 'acme/other' }),
+      ),
+    ).toContain('not linked')
   })
 
   test("a session starts in its owner's sandbox and stays put while they work", async () => {
@@ -356,38 +396,43 @@ describe("a session placed on a person's own machine", () => {
 
     values.set(SANDBOX_HOME_KEY, LAPTOP)
 
-    expect(work(run, 'alice')).rejects.toThrow('sandbox-offline')
+    expect(await failureOf(work(run, 'alice'))).toContain('sandbox-offline')
     expect(home()).toBe(LAPTOP)
   })
 })
 
-describe('saveSessionWork', () => {
-  function saver(mode: string | undefined, home: string | undefined, empty = false) {
-    const asked: string[] = []
-    const values = new Map<string, unknown>(home ? [[SANDBOX_HOME_KEY, home]] : [])
+function saver(mode: string | undefined, home: string | undefined, empty = false) {
+  const asked: string[] = []
 
-    const storage = {
-      get: async (key: string) => values.get(key),
-      put: async (key: string, value: unknown) => {
-        values.set(key, value)
+  const values = new Map<string, StoredValue>(
+    home !== undefined && home !== '' ? [[SANDBOX_HOME_KEY, home]] : [],
+  )
+
+  const storage = memoryStorage(values)
+
+  const sandboxes = {
+    getByName: (name: string) => ({
+      snapshotSession: async (_runId: string, target: { name: string }) => {
+        asked.push(`${name} ${target.name}`)
+        return { snapshot: empty ? null : snapshotOf(name) }
       },
-    } as unknown as DurableObjectStorage
-
-    const env = fakeEnv({
-      ...(mode ? { SHUTTLE_WORKSPACE_MODE: mode } : {}),
-      SANDBOX: {
-        getByName: (name: string) => ({
-          snapshotSession: async (_runId: string, target: { name: string }) => {
-            asked.push(`${name} ${target.name}`)
-            return { snapshot: empty ? null : snapshotOf(name) }
-          },
-        }),
-      } as unknown as ShuttleEnv['SANDBOX'],
-    })
-
-    return { env, storage, asked, record: () => values.get(LAST_SNAPSHOT_KEY) }
+    }),
   }
 
+  // SAFETY: `saveSessionWork` only calls `getByName(name).snapshotSession(...)`, which the fake
+  // above answers; no other method of the real namespace is reached.
+  const namespace: ShuttleEnv['SANDBOX'] = sandboxes as never
+
+  const env = fakeEnv(
+    mode === undefined || mode === ''
+      ? { SANDBOX: namespace }
+      : { SHUTTLE_WORKSPACE_MODE: mode, SANDBOX: namespace },
+  )
+
+  return { env, storage, asked, record: () => values.get(LAST_SNAPSHOT_KEY) }
+}
+
+describe('saveSessionWork', () => {
   const run = scopedRunId(ORG, 'session_save')
 
   test('saves from the sandbox the session is in and records what was saved', async () => {

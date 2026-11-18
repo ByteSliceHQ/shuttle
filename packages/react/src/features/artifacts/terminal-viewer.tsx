@@ -8,6 +8,7 @@ import type { SandboxPlace } from '@shuttle/api'
 import { Button } from '../../components/ui/button'
 import { EmptyState } from '../../components/ui/panel'
 import { cn } from '../../lib/cn'
+import { hasText } from '../../lib/text'
 import { possessive, useApi, useOrgPeople, useShuttleHost, useTenant } from '../../shuttle'
 import { sandboxTerminalUrl } from './sandbox'
 import { terminalFontFamily, terminalTheme } from './terminal-theme'
@@ -53,6 +54,12 @@ export function TerminalViewer({
     let disposed = false
     let socket: WebSocket | null = null
     let dispose = () => {}
+
+    const send = (data: string) => {
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(data)
+      }
+    }
 
     async function start(element: HTMLDivElement) {
       const [{ Terminal }, { FitAddon }, { WebglAddon }] = await Promise.all([
@@ -116,12 +123,6 @@ export function TerminalViewer({
       refit()
       term.focus()
 
-      const send = (data: string) => {
-        if (socket?.readyState === WebSocket.OPEN) {
-          socket.send(data)
-        }
-      }
-
       const connect = () => {
         setStatus('connecting')
         setError(null)
@@ -130,7 +131,7 @@ export function TerminalViewer({
           sandboxTerminalUrl(
             host,
             { runId, folderId },
-            { cwd: cwd || undefined, cols: term.cols, rows: term.rows },
+            { cwd: hasText(cwd) ? cwd : undefined, cols: term.cols, rows: term.rows },
           ),
         )
 
@@ -146,16 +147,22 @@ export function TerminalViewer({
         })
 
         opened.addEventListener('message', (event: MessageEvent) => {
-          if (typeof event.data !== 'string') {
-            term.write(new Uint8Array(event.data as ArrayBuffer))
+          if (event.data instanceof ArrayBuffer) {
+            term.write(new Uint8Array(event.data))
 
             return
           }
 
+          const text = z.string().safeParse(event.data)
+
+          if (!text.success) {
+            return
+          }
+
           // Text starting with a brace may be a notice from Shuttle rather than output.
-          if (event.data.startsWith('{')) {
+          if (text.data.startsWith('{')) {
             try {
-              const message = TerminalNotice.parse(JSON.parse(event.data))
+              const message = TerminalNotice.parse(JSON.parse(text.data))
 
               if (message.type === 'error') {
                 if (message.error === 'container-mode-required') {
@@ -171,7 +178,7 @@ export function TerminalViewer({
             }
           }
 
-          term.write(event.data)
+          term.write(text.data)
         })
 
         opened.addEventListener('close', (event: CloseEvent) => {
@@ -277,19 +284,19 @@ function TerminalBar({
   const me = useTenant().user.id
   const people = useOrgPeople()
 
-  const where = place?.personal ? 'Your sandbox' : 'Session sandbox'
+  const where = place?.personal === true ? 'Your sandbox' : 'Session sandbox'
 
   const elsewhere =
-    place?.personal && !place.here
-      ? place.holderId
+    place?.personal === true && !place.here
+      ? hasText(place.holderId)
         ? `This session's files are in ${possessive(place.holderId, me, people)} sandbox, not here.`
         : 'This session has not worked in a sandbox yet, so its files are not here.'
       : null
 
-  const state = error
+  const state = hasText(error)
     ? error
     : status === 'connecting'
-      ? place?.personal
+      ? place?.personal === true
         ? 'Waking your sandbox…'
         : 'Connecting…'
       : status === 'closed'
@@ -302,7 +309,7 @@ function TerminalBar({
         aria-hidden
         className={cn(
           'size-1.5 shrink-0 rounded-full',
-          error || status === 'closed'
+          hasText(error) || status === 'closed'
             ? 'bg-status-failed'
             : status === 'connected'
               ? 'bg-status-completed'
@@ -310,14 +317,14 @@ function TerminalBar({
         )}
       />
       <span className="text-foreground shrink-0 font-medium">{where}</span>
-      {elsewhere ? (
+      {hasText(elsewhere) ? (
         <span className="min-w-0 truncate" title={elsewhere}>
           {elsewhere}
         </span>
       ) : null}
       <span className="ml-auto flex shrink-0 items-center gap-1.5" role="status">
         {state}
-        {error || status === 'closed' ? (
+        {hasText(error) || status === 'closed' ? (
           <Button
             variant="ghost"
             size="sm"

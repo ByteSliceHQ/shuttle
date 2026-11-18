@@ -1,9 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 
+import { z } from 'zod'
+
 import { DeviceId } from '@shuttle/api'
 import { DEVICE_ID } from '@shuttle/runner-protocol'
+import type { JsonValue } from '@swirls/looms/core'
 
 import type { Actor } from '../tenancy/access'
+import { listDevices } from '../tenancy/devices'
+import { migratedD1 } from '../testing/fake-d1'
 import { fakeEnv } from '../testing/fake-env'
 import { handleApi } from './handler'
 
@@ -15,24 +20,6 @@ const actor: Actor = {
   email: 'ada@example.com',
 }
 
-/** A database that only records what was bound to the statements run on it. */
-function recordingDb(): { db: D1Database; bound: unknown[][] } {
-  const bound: unknown[][] = []
-
-  const db = {
-    prepare: () => ({
-      bind: (...values: unknown[]) => {
-        bound.push(values)
-
-        return { run: async () => ({ meta: { changes: 1 } }) }
-      },
-    }),
-  }
-
-  // Only `prepare` is reached by the routes under test.
-  return { db: db as unknown as D1Database, bound }
-}
-
 function call(path: string, init: RequestInit, env = fakeEnv()): Promise<Response | null> {
   return handleApi({
     env,
@@ -41,7 +28,7 @@ function call(path: string, init: RequestInit, env = fakeEnv()): Promise<Respons
   })
 }
 
-function register(body: unknown, env = fakeEnv()): Promise<Response | null> {
+function register(body: JsonValue, env = fakeEnv()): Promise<Response | null> {
   return call(
     '/runners',
     {
@@ -61,7 +48,7 @@ describe('a person’s machines', () => {
   })
 
   test('registering a machine answers with its token, as the desktop app sends it', async () => {
-    const { db, bound } = recordingDb()
+    const db = await migratedD1()
 
     const response = await register(
       { deviceId: 'device-123', name: '  Ada’s laptop ', platform: 'darwin' },
@@ -70,22 +57,27 @@ describe('a person’s machines', () => {
 
     expect(response?.status).toBe(200)
 
-    const body: { token?: unknown } = (await response?.json()) ?? {}
+    const body = z.object({ token: z.string() }).parse(await response?.json())
 
-    expect(String(body.token)).toStartWith('shr_')
-    expect(bound[0]?.slice(0, 5)).toEqual(['org1', 'user1', 'device-123', 'Ada’s laptop', 'darwin'])
+    expect(body.token).toStartWith('shr_')
+
+    expect(await listDevices(db, 'org1', 'user1')).toMatchObject([
+      { deviceId: 'device-123', name: 'Ada’s laptop', platform: 'darwin' },
+    ])
   })
 
   test('a machine registered without a name or platform still gets both', async () => {
-    const { db, bound } = recordingDb()
+    const db = await migratedD1()
 
     await register({ deviceId: 'device-123', name: '   ' }, fakeEnv({ AUTH_DB: db }))
 
-    expect(bound[0]?.slice(3, 5)).toEqual(['This machine', 'unknown'])
+    expect(await listDevices(db, 'org1', 'user1')).toMatchObject([
+      { name: 'This machine', platform: 'unknown' },
+    ])
   })
 
   test('a device id of the wrong shape is refused', async () => {
-    const { db } = recordingDb()
+    const db = await migratedD1()
     const env = fakeEnv({ AUTH_DB: db })
 
     for (const response of [

@@ -43,7 +43,7 @@ export function publishQuestion(existingPullLabel: string | null): {
   readonly title: string
   readonly actions: typeof PUBLISH_ACTIONS | typeof UPDATE_ACTIONS
 } {
-  return existingPullLabel
+  return existingPullLabel !== null && existingPullLabel !== ''
     ? { title: `Update ${existingPullLabel}?`, actions: UPDATE_ACTIONS }
     : { title: 'Publish pull requests?', actions: PUBLISH_ACTIONS }
 }
@@ -53,6 +53,11 @@ export function publishQuestion(existingPullLabel: string | null): {
  * approval gate with stack labels already filled in. Invoked from the proposing
  * agent tool so `approval.requested` lands on that thread.
  */
+/** True for a string that is neither missing nor empty. */
+function isPresent(value: string | undefined | null): value is string {
+  return value !== undefined && value !== null && value !== ''
+}
+
 export function createPreparePrPublishGateEffect(env: ShuttleEnv, storage?: DurableObjectStorage) {
   return shuttleModule.effect({
     type: 'shuttle.preparePrPublishGate',
@@ -62,7 +67,7 @@ export function createPreparePrPublishGateEffect(env: ShuttleEnv, storage?: Dura
       const binding = await readSandboxBinding(storage, ctx.runId)
       const stacks = await readSessionStacks(storage, ctx.runId)
 
-      const repoArg = input.repo || input.repos[0] || ''
+      const repoArg = isPresent(input.repo) ? input.repo : (input.repos[0] ?? '')
 
       const linked =
         binding?.repos.find((repo) => repo.name === repoArg || repo.fullName === repoArg) ??
@@ -76,7 +81,11 @@ export function createPreparePrPublishGateEffect(env: ShuttleEnv, storage?: Dura
 
       let repoName: string | null =
         linked?.name ??
-        (repoArg ? (repoArg.includes('/') ? (repoArg.split('/')[1] ?? repoArg) : repoArg) : null)
+        (repoArg !== ''
+          ? repoArg.includes('/')
+            ? (repoArg.split('/')[1] ?? repoArg)
+            : repoArg
+          : null)
 
       if (binding && linked) {
         const sandbox = sandboxStub(
@@ -91,7 +100,7 @@ export function createPreparePrPublishGateEffect(env: ShuttleEnv, storage?: Dura
         repoName = linked.name
 
         // Asked for from the PR button, with nothing written: the layer's commits say it best.
-        if (!title) {
+        if (title === '') {
           const current = status.layers.find((entry) => entry.layer === status.currentLayer)
 
           // Layer 1 sits on the commit the session started from; a higher one on the layer below.
@@ -101,23 +110,23 @@ export function createPreparePrPublishGateEffect(env: ShuttleEnv, storage?: Dura
                 current?.parentBranch)
               : current?.parentBranch
 
-          const written = base
+          const written = isPresent(base)
             ? await describeCommits(sandbox, worktreeRepoPath(ctx.runId, linked.name), base).catch(
                 () => null,
               )
             : null
 
           title = written?.title ?? ''
-          body = body.trim() ? body : (written?.body ?? '')
+          body = body.trim() !== '' ? body : (written?.body ?? '')
         }
       }
 
-      if (!title) {
+      if (title === '') {
         title = input.fallbackTitle?.trim() ?? ''
       }
 
       const { parentPull, restacks } =
-        stackId != null && layer != null && repoName
+        stackId !== null && layer !== null && isPresent(repoName)
           ? stackContextForLayer(
               stacks[stackKey(repoName, stackId)],
               layer,
@@ -129,30 +138,31 @@ export function createPreparePrPublishGateEffect(env: ShuttleEnv, storage?: Dura
 
       // The pull request this layer already has, which publishing will update instead of opening.
       const existingPull =
-        stackId != null && layer != null && repoName
+        stackId !== null && layer !== null && isPresent(repoName)
           ? (stacks[stackKey(repoName, stackId)]?.layers.find((entry) => entry.layer === layer)
               ?.pull ?? null)
           : null
 
-      const existingPullLabel = existingPull
-        ? `${linked?.fullName ?? repoName}#${existingPull.number}`
-        : ''
+      const existingPullLabel =
+        existingPull === null ? '' : `${linked?.fullName ?? repoName}#${existingPull.number}`
 
-      const question = publishQuestion(existingPullLabel || null)
+      const question = publishQuestion(existingPullLabel === '' ? null : existingPullLabel)
 
       const restackLabel =
         restacks.length > 0 ? restacks.map((number) => `#${number}`).join(', ') : ''
 
+      const shownTitle = title === '' ? 'Shuttle changes' : title
+
       return [
         shuttleModule.input('pr.proposed', {
           approvalId: input.approvalId,
-          title: title || 'Shuttle changes',
+          title: shownTitle,
           body,
           draft: input.draft,
           repos: [...input.repos],
-          ...(repoName ? { repo: repoName } : {}),
-          ...(stackId != null ? { stackId } : {}),
-          ...(layer != null ? { layer } : {}),
+          repo: isPresent(repoName) ? repoName : undefined,
+          stackId: stackId ?? undefined,
+          layer: layer ?? undefined,
           parentPull,
           restacks: [...restacks],
         }),
@@ -161,11 +171,11 @@ export function createPreparePrPublishGateEffect(env: ShuttleEnv, storage?: Dura
           payload: {
             approvalId: input.approvalId,
             title: question.title,
-            description: title || 'Shuttle changes',
+            description: shownTitle,
             schema: {
               type: 'object',
               properties: {
-                title: { type: 'string', default: title || 'Shuttle changes' },
+                title: { type: 'string', default: shownTitle },
                 body: { type: 'string', default: body },
                 draft: { type: 'boolean', default: input.draft },
                 repos: { type: 'array', items: { type: 'string' }, default: [...input.repos] },
@@ -217,13 +227,13 @@ export function commitsToPullText(log: string): { title: string; body: string } 
   const commits = log
     .split('\x1e')
     .map((entry) => entry.trim())
-    .filter(Boolean)
+    .filter((entry) => entry !== '')
     .map((entry) => {
       const [subject = '', body = ''] = entry.split('\x1f')
 
       return { subject: subject.trim(), body: body.trim() }
     })
-    .filter((commit) => commit.subject)
+    .filter((commit) => commit.subject !== '')
 
   const [first] = commits
 

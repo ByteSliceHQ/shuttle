@@ -2,7 +2,8 @@ import { queryOptions } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 import { z } from 'zod'
 
-import { isRecord } from '../../lib/json'
+import { isJsonObject } from '@swirls/looms/core'
+
 import type { SessionEvent } from './event-catalog'
 
 /**
@@ -18,7 +19,7 @@ const GlobalEventFrame = z.object({
   runId: z.string(),
   runKind: GlobalRunKind,
   // The event is Looms' envelope, whatever kind it is. Views read its fields defensively.
-  event: z.custom<SessionEvent>(isRecord),
+  event: z.custom<SessionEvent>(isJsonObject),
 })
 
 export type GlobalEventFrame = Readonly<z.infer<typeof GlobalEventFrame>>
@@ -26,16 +27,17 @@ export type GlobalEventFrame = Readonly<z.infer<typeof GlobalEventFrame>>
 /** What the socket sends in place of a frame when it cannot go on. */
 const SocketError = z.object({ type: z.literal('error'), error: z.unknown() })
 
-const OlderPage = z.object({ events: z.array(z.unknown()).optional() })
+/** A page of older events as the Worker answers it. An answer that is not a page reads as an empty one. */
+export const OlderPage = z.object({ events: z.array(z.unknown()).optional() }).catch({})
+
+export type OlderPage = z.infer<typeof OlderPage>
 
 /**
  * The frames in one page of older events. A frame that cannot be read is left out, as one over
  * the socket would be, so one bad event does not hide the rest of the page.
  */
-export function framesOfPage(body: unknown): GlobalEventFrame[] {
-  const page = OlderPage.safeParse(body)
-
-  return (page.data?.events ?? []).flatMap((item) => {
+export function framesOfPage(page: OlderPage): GlobalEventFrame[] {
+  return (page.events ?? []).flatMap((item) => {
     const frame = GlobalEventFrame.safeParse(item)
 
     return frame.success ? [frame.data] : []
@@ -261,7 +263,7 @@ export const latestEventsQuery = queryOptions({
       throw new Error(`Could not load events (${response.status}).`)
     }
 
-    return framesOfPage(await response.json())
+    return framesOfPage(OlderPage.parse(await response.json()))
   },
   // A log is only worth opening on if it is current.
   staleTime: 5000,
@@ -302,8 +304,9 @@ export function useGlobalEvents(
 
   const socketFilter = useMemo(
     (): GlobalEventsFilter => ({
-      ...(runKindsKey ? { runKinds: z.array(GlobalRunKind).parse(runKindsKey.split(',')) } : {}),
-      ...(runIdsKey ? { runIds: runIdsKey.split(',') } : {}),
+      runKinds:
+        runKindsKey === '' ? undefined : z.array(GlobalRunKind).parse(runKindsKey.split(',')),
+      runIds: runIdsKey === '' ? undefined : runIdsKey.split(','),
     }),
     [runKindsKey, runIdsKey],
   )
@@ -440,8 +443,7 @@ export function useGlobalEvents(
       return
     }
 
-    const body: unknown = await response.json()
-    const frames = framesOfPage(body)
+    const frames = framesOfPage(OlderPage.parse(await response.json()))
 
     dispatch({
       type: 'prepend',

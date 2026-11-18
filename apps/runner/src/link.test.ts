@@ -1,10 +1,49 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 
+import { z } from 'zod'
+
 import type { RunnerInbound, RunnerOutbound } from '@shuttle/runner-protocol'
 import { RUNNER_REMOVED } from '@shuttle/runner-protocol'
 
-import { MissingFileError, type LocalBackend } from './backend'
+import {
+  MissingFileError,
+  type ExecOutput,
+  type LocalBackend,
+  type LocalTerminal,
+  type SandboxHttpResponse,
+} from './backend'
 import { connect } from './link'
+
+/** The frames the runner sends, as a test reads them off the wire. */
+const outboundSchema: z.ZodType<RunnerOutbound> = z.union([
+  z.object({
+    type: z.literal('hello'),
+    protocol: z.number(),
+    device: z.object({
+      id: z.string(),
+      name: z.string(),
+      platform: z.string(),
+      arch: z.string(),
+    }),
+    backend: z.object({
+      id: z.string(),
+      label: z.string(),
+      isolation: z.enum(['microvm', 'vm', 'container', 'process']),
+      version: z.string().optional(),
+    }),
+  }),
+  z.object({ type: z.literal('started'), id: z.string(), pid: z.number() }),
+  z.object({ type: z.literal('res'), id: z.string(), ok: z.literal(true), result: z.unknown() }),
+  z.object({
+    type: z.literal('res'),
+    id: z.string(),
+    ok: z.literal(false),
+    error: z.string(),
+    code: z.string().optional(),
+  }),
+  z.object({ type: z.literal('term.data'), term: z.string(), data: z.string() }),
+  z.object({ type: z.literal('term.exit'), term: z.string() }),
+])
 
 /** A stand-in for Shuttle: accepts the runner's socket and lets a test speak on it. */
 function shuttle() {
@@ -25,11 +64,13 @@ function shuttle() {
         socket = ws
       },
       message(_ws, message) {
-        if (typeof message !== 'string' || !message.startsWith('{')) {
+        const text = z.string().safeParse(message)
+
+        if (!text.success || !text.data.startsWith('{')) {
           return
         }
 
-        const frame = JSON.parse(message) as RunnerOutbound
+        const frame = outboundSchema.parse(JSON.parse(text.data))
         const next = waiting.shift()
 
         if (next) {
@@ -60,21 +101,53 @@ function shuttle() {
   }
 }
 
-const backend = {
-  info: { id: 'fake', label: 'Fake', isolation: 'container' },
-  exec: async (argv: readonly string[], options: { started?: (pid: number) => void }) => {
+/** A backend that echoes what it is asked to run and has no files. */
+class FakeBackend implements LocalBackend {
+  readonly info = { id: 'fake', label: 'Fake', isolation: 'container' } as const
+
+  ensure(): Promise<void> {
+    return Promise.resolve()
+  }
+
+  destroy(): Promise<void> {
+    return Promise.resolve()
+  }
+
+  exec(
+    argv: readonly string[],
+    options: { readonly started?: (pid: number) => void },
+  ): Promise<ExecOutput> {
     options.started?.(7)
 
-    return {
+    return Promise.resolve({
       stdout: new TextEncoder().encode(argv.join(' ')),
       stderr: new Uint8Array(),
       exitCode: 0,
-    }
-  },
-  readBytes: async (path: string) => {
-    throw new MissingFileError(path)
-  },
-} as unknown as LocalBackend
+    })
+  }
+
+  readBytes(path: string): Promise<Uint8Array> {
+    return Promise.reject(new MissingFileError(path))
+  }
+
+  writeBytes(): Promise<void> {
+    return Promise.resolve()
+  }
+
+  mkdir(): Promise<void> {
+    return Promise.resolve()
+  }
+
+  http(): Promise<SandboxHttpResponse> {
+    return Promise.reject(new Error('not used'))
+  }
+
+  openTerminal(): Promise<LocalTerminal> {
+    return Promise.reject(new Error('not used'))
+  }
+}
+
+const backend = new FakeBackend()
 
 const device = { id: 'laptop-1', name: 'Laptop', platform: 'darwin', arch: 'arm64' }
 const open: { stop(): void }[] = []

@@ -3,7 +3,9 @@ import { describe, expect, test } from 'bun:test'
 import type { RunnerInbound, RunnerOutbound } from '@shuttle/runner-protocol'
 
 import { fakeEnv } from '../../testing/fake-env'
-import { isSandboxOffline, localProvider } from './local'
+import { failureOf } from '../test-failure'
+import { isSandboxOffline, openLocalMachine } from './local'
+import { base64, fromBase64 } from './local-frames'
 
 // Workers has this; the test runtime does not.
 Object.assign(globalThis, { WebSocketRequestResponsePair: function pair() {} })
@@ -15,22 +17,25 @@ function sandbox(answer: (frame: RunnerInbound, reply: (frame: RunnerOutbound) =
   const ctx = {
     setWebSocketAutoResponse: () => {},
     getWebSockets: () => sockets,
-    storage: { get: async () => undefined, put: async () => {} },
-  } as unknown as DurableObjectState
+    acceptWebSocket: () => {},
+    hello: { read: async () => null, write: async () => {} },
+  }
 
-  const machine = localProvider.open({ ctx, env: fakeEnv({}), name: 'local:org:alice:laptop-1' })
+  const machine = openLocalMachine(ctx, fakeEnv({}), 'local:org:alice:laptop-1')
 
   const connect = (at = 1) => {
+    // SAFETY: the machine only touches `readyState`, `deserializeAttachment` and `send` of a runner's
+    // socket, and every frame it sends is one the machine itself serialised from a RunnerInbound.
     const socket = {
       readyState: WebSocket.OPEN,
       deserializeAttachment: () => ({ at }),
       send: (text: string) =>
         answer(JSON.parse(text) as RunnerInbound, (frame) => {
-          void machine.webSocketMessage?.(socket as unknown as WebSocket, JSON.stringify(frame))
+          void machine.webSocketMessage?.(socket, JSON.stringify(frame))
         }),
-    }
+    } as WebSocket
 
-    sockets.push(socket as unknown as WebSocket)
+    sockets.push(socket)
 
     return socket
   }
@@ -38,7 +43,7 @@ function sandbox(answer: (frame: RunnerInbound, reply: (frame: RunnerOutbound) =
   return { machine, connect, sockets }
 }
 
-const b64 = (text: string) => Buffer.from(text).toString('base64')
+const b64 = (text: string) => base64(new TextEncoder().encode(text))
 
 describe("a sandbox on a person's machine", () => {
   test('runs a command through the runner and reports its pid before its output', async () => {
@@ -46,7 +51,7 @@ describe("a sandbox on a person's machine", () => {
       if (frame.type === 'req' && frame.op === 'exec') {
         expect(frame.argv).toEqual(['echo', 'hi'])
         expect(frame.cwd).toBe('/workspace')
-        expect(Buffer.from(frame.stdin ?? '', 'base64').toString()).toBe('input')
+        expect(new TextDecoder().decode(fromBase64(frame.stdin ?? ''))).toBe('input')
         reply({ type: 'started', id: frame.id, pid: 42 })
 
         reply({
@@ -100,7 +105,7 @@ describe("a sandbox on a person's machine", () => {
 
     await host.writeFile('/workspace/a.txt', 'héllo')
     expect(await host.readFile('/workspace/a.txt')).toBe('héllo')
-    expect(host.readFile('/workspace/missing')).rejects.toThrow(/^ENOENT/)
+    expect(await failureOf(host.readFile('/workspace/missing'))).toMatch(/^ENOENT/)
   })
 
   test('is offline, in a way callers can recognise, until a runner connects', async () => {
@@ -137,7 +142,7 @@ describe("a sandbox on a person's machine", () => {
     const pending = (await machine.host()).mkdir('/workspace/x')
 
     Object.assign(socket, { readyState: WebSocket.CLOSED })
-    await machine.webSocketClose?.(socket as unknown as WebSocket)
+    await machine.webSocketClose?.(socket)
 
     expect(isSandboxOffline(await pending.catch((cause: unknown) => cause))).toBe(true)
   })

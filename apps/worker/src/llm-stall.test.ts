@@ -39,7 +39,7 @@ describe('stallGuard', () => {
 
     expect(guard.signal.aborted).toBe(true)
     expect(guard.stalled()).toBe(false)
-    expect((guard.signal.reason as Error).message).toBe('stopped by a person')
+    expect(guard.signal.reason).toHaveProperty('message', 'stopped by a person')
     guard.done()
   })
 

@@ -85,6 +85,11 @@ async function download(request: Request, env: SiteEnv, name: string): Promise<R
   return new Response(object.body, { headers })
 }
 
+/** Whether a value read from a pointer file is text. */
+function isText(value: unknown): value is string {
+  return typeof value === 'string'
+}
+
 export default {
   async fetch(request: Request, env: SiteEnv): Promise<Response> {
     const secure = httpsRedirect(request)
@@ -101,7 +106,7 @@ export default {
       const data = pointer ? await pointer.json<{ file?: unknown }>().catch(() => null) : null
 
       const name =
-        typeof data?.file === 'string' && /^Shuttle-[A-Za-z0-9._-]+\.dmg$/.test(data.file)
+        isText(data?.file) && /^Shuttle-[A-Za-z0-9._-]+\.dmg$/.test(data.file)
           ? data.file
           : env.LATEST_MAC
 
@@ -115,7 +120,7 @@ export default {
 
       const name = releaseName(url.pathname)
 
-      return name
+      return name !== null
         ? download(request, env, name)
         : new Response('No such download.', { status: 404 })
     }

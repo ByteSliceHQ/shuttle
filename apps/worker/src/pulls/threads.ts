@@ -18,7 +18,7 @@ export type { PullComment, PullThread, PullThreadsState }
  */
 
 const byAge = (a: PullComment, b: PullComment) =>
-  a.createdAt - b.createdAt || a.commentId - b.commentId
+  a.createdAt === b.createdAt ? a.commentId - b.commentId : a.createdAt - b.createdAt
 
 function withComment(threads: readonly PullThread[], comment: PullComment): readonly PullThread[] {
   const thread = threads.find((item) => item.rootId === comment.rootId)
@@ -65,78 +65,79 @@ const PullThreadSchema = Schema.Struct({
   comments: Schema.Array(PullCommentSchema),
 })
 
+export const PullThreadsStateSchema = Schema.Struct({
+  pulls: Schema.Record(Schema.String, Schema.Array(PullThreadSchema)),
+})
+
 export const pullThreads = pullsModule.projection({
   name: 'pullThreads',
-  shape: Schema.Struct({ pulls: Schema.Record(Schema.String, Schema.Array(PullThreadSchema)) }),
+  shape: PullThreadsStateSchema,
   initialState: { pulls: {} } satisfies PullThreadsState,
   reduce(state, event): PullThreadsState {
-    switch (event.type) {
-      case 'pulls.comment.upserted': {
-        const key = pullKey(event.payload.fullName, event.payload.number)
-        const threads = state.pulls[key] ?? []
-        const next = withComment(threads, event.payload.comment)
+    if (event.type === 'pulls.comment.upserted') {
+      const key = pullKey(event.payload.fullName, event.payload.number)
+      const threads = state.pulls[key] ?? []
+      const next = withComment(threads, event.payload.comment)
 
-        return next === threads ? state : { pulls: { ...state.pulls, [key]: next } }
-      }
-
-      case 'pulls.comment.removed': {
-        const key = pullKey(event.payload.fullName, event.payload.number)
-        const threads = state.pulls[key]
-
-        return threads
-          ? { pulls: { ...state.pulls, [key]: withoutComment(threads, event.payload.commentId) } }
-          : state
-      }
-
-      case 'pulls.thread.resolution': {
-        const key = pullKey(event.payload.fullName, event.payload.number)
-        const threads = state.pulls[key]
-
-        if (!threads) {
-          return state
-        }
-
-        return {
-          pulls: {
-            ...state.pulls,
-            [key]: threads.map((thread) =>
-              thread.rootId === event.payload.rootId
-                ? { ...thread, resolved: event.payload.resolved }
-                : thread,
-            ),
-          },
-        }
-      }
-
-      case 'pulls.threads.synced': {
-        const key = pullKey(event.payload.fullName, event.payload.number)
-
-        return {
-          pulls: {
-            ...state.pulls,
-            [key]: event.payload.threads.map((thread) => ({
-              rootId: thread.rootId,
-              resolved: thread.resolved,
-              comments: thread.comments.toSorted(byAge),
-            })),
-          },
-        }
-      }
-
-      case 'pulls.pull.closed': {
-        const key = pullKey(event.payload.fullName, event.payload.number)
-
-        if (!state.pulls[key]) {
-          return state
-        }
-
-        const { [key]: _closed, ...pulls } = state.pulls
-
-        return { pulls }
-      }
-
-      default:
-        return state
+      return next === threads ? state : { pulls: { ...state.pulls, [key]: next } }
     }
+
+    if (event.type === 'pulls.comment.removed') {
+      const key = pullKey(event.payload.fullName, event.payload.number)
+      const threads = state.pulls[key]
+
+      return threads
+        ? { pulls: { ...state.pulls, [key]: withoutComment(threads, event.payload.commentId) } }
+        : state
+    }
+
+    if (event.type === 'pulls.thread.resolution') {
+      const key = pullKey(event.payload.fullName, event.payload.number)
+      const threads = state.pulls[key]
+
+      if (!threads) {
+        return state
+      }
+
+      return {
+        pulls: {
+          ...state.pulls,
+          [key]: threads.map((thread) =>
+            thread.rootId === event.payload.rootId
+              ? { ...thread, resolved: event.payload.resolved }
+              : thread,
+          ),
+        },
+      }
+    }
+
+    if (event.type === 'pulls.threads.synced') {
+      const key = pullKey(event.payload.fullName, event.payload.number)
+
+      return {
+        pulls: {
+          ...state.pulls,
+          [key]: event.payload.threads.map((thread) => ({
+            rootId: thread.rootId,
+            resolved: thread.resolved,
+            comments: thread.comments.toSorted(byAge),
+          })),
+        },
+      }
+    }
+
+    if (event.type === 'pulls.pull.closed') {
+      const key = pullKey(event.payload.fullName, event.payload.number)
+
+      if (!state.pulls[key]) {
+        return state
+      }
+
+      const { [key]: _closed, ...pulls } = state.pulls
+
+      return { pulls }
+    }
+
+    return state
   },
 })

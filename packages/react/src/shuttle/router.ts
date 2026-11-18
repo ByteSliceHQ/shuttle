@@ -29,7 +29,7 @@ export interface ShuttleRouter {
   /** An anchor to a destination. It passes every other prop on, so it works under `asChild`. */
   readonly Link: ComponentType<ShuttleLinkProps>
   /** Goes to a destination. */
-  navigate(to: ShuttleDestination): void
+  readonly navigate: (to: ShuttleDestination) => void
   /** The destination now on screen, or null when it is none of Shuttle's. */
   readonly location: ShuttleDestination | null
 }

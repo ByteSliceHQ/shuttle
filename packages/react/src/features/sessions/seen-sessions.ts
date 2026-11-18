@@ -1,6 +1,5 @@
 import { useSyncExternalStore } from 'react'
-
-import { isRecord } from '../../lib/json'
+import { z } from 'zod'
 
 const STORAGE_KEY = 'shuttle.session-seen'
 const SEEN_LIMIT = 250
@@ -17,35 +16,35 @@ function hasLocalStorage(): boolean {
   return typeof localStorage !== 'undefined'
 }
 
+/** What storage holds. Entries that are not finite numbers are dropped rather than refused. */
+const StoredSnapshot = z.object({
+  baselineAt: z.number(),
+  seen: z.record(z.string(), z.unknown()).catch({}),
+})
+
 function parseSnapshot(raw: string | null): SeenSessionsSnapshot | null {
-  if (!raw) {
+  if (raw === null || raw === '') {
     return null
   }
 
   try {
-    const parsed: unknown = JSON.parse(raw)
+    const record = StoredSnapshot.safeParse(JSON.parse(raw))
 
-    if (!isRecord(parsed)) {
-      return null
-    }
-
-    const record = parsed
-
-    if (typeof record.baselineAt !== 'number' || !Number.isFinite(record.baselineAt)) {
+    if (!record.success) {
       return null
     }
 
     const seen: Record<string, number> = {}
 
-    if (isRecord(record.seen)) {
-      for (const [key, value] of Object.entries(record.seen)) {
-        if (typeof value === 'number' && Number.isFinite(value)) {
-          seen[key] = value
-        }
+    for (const [key, value] of Object.entries(record.data.seen)) {
+      const timestamp = z.number().safeParse(value)
+
+      if (timestamp.success) {
+        seen[key] = timestamp.data
       }
     }
 
-    return { baselineAt: record.baselineAt, seen }
+    return { baselineAt: record.data.baselineAt, seen }
   } catch {
     return null
   }
@@ -147,7 +146,7 @@ export function isSessionUnread(
     return false
   }
 
-  if (typeof session.unread === 'boolean') {
+  if (session.unread !== undefined) {
     return session.unread
   }
 

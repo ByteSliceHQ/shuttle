@@ -12,7 +12,7 @@ export function vendorModel(harness: VendorHarnessId): string {
 
 /** The harness a `model` names, or null for an ordinary model id. */
 export function vendorHarnessOfModel(model: string | undefined): VendorHarnessId | null {
-  if (!model?.startsWith('vendor:')) {
+  if (model?.startsWith('vendor:') !== true) {
     return null
   }
 

@@ -43,7 +43,7 @@ export function StartAttachments({
   files: readonly File[]
   remove: (index: number) => void
 }) {
-  return files.length ? (
+  return files.length > 0 ? (
     <ul aria-label="Attached files" className="flex flex-wrap gap-2 px-3 pt-3">
       {files.map((file, index) => (
         <Preview key={index} file={file} remove={() => remove(index)} />

@@ -2,12 +2,32 @@ import { cancel, deterministicThreadId, emit, spawn, type RuntimeEffect } from '
 
 import { attributedWithFiles } from './attribution'
 import { liveConductorThreadId } from './conductor'
+import type { JsonObjectBuilder } from './json-object'
 import { shuttleModule, type AttachmentRef } from './scope'
 import type { PendingRoute, SessionState } from './thread'
 
 export interface RouteResult {
   readonly summary: string
   readonly queued: boolean
+}
+
+type SteerMessage = {
+  role: 'user'
+  content: string
+  name?: string
+  attachments?: AttachmentRef[]
+}
+
+type SteerPayload = {
+  turn: number
+  messageId?: string
+  message: SteerMessage
+  interrupt: boolean
+}
+
+/** True for a string that is neither missing nor empty. */
+function isPresent(value: string | undefined | null): value is string {
+  return value !== undefined && value !== null && value !== ''
 }
 
 /**
@@ -23,22 +43,24 @@ function steerEvent(
   sponsorId?: string,
   attachments?: readonly AttachmentRef[],
 ) {
-  return {
-    type: 'agent.steered' as const,
-    payload: {
-      turn: 0,
-      ...(messageId ? { messageId } : {}),
-      message: {
-        role: 'user' as const,
-        content,
-        ...(sponsorId ? { name: sponsorId } : {}),
-        // Sent to the model itself where it can read them. The text already says where each is.
-        ...(attachments?.length ? { attachments: [...attachments] } : {}),
-      },
-      interrupt,
-    },
-    threadId,
+  const message: SteerMessage = { role: 'user', content }
+
+  if (isPresent(sponsorId)) {
+    message.name = sponsorId
   }
+
+  // Sent to the model itself where it can read them. The text already says where each is.
+  if (attachments !== undefined && attachments.length > 0) {
+    message.attachments = [...attachments]
+  }
+
+  const payload: SteerPayload = { turn: 0, message, interrupt }
+
+  if (isPresent(messageId)) {
+    payload.messageId = messageId
+  }
+
+  return { type: 'agent.steered' as const, payload, threadId }
 }
 
 export function routeForEffects(
@@ -62,6 +84,18 @@ export function routeForEffects(
     case 'question': {
       const childThreadId = deterministicThreadId(sessionThreadId, 'narrator', route.messageId)
 
+      const narratorInput: JsonObjectBuilder = {
+        text,
+        messageId: route.messageId,
+        sessionRunId: runId,
+        brief: state.briefText,
+        workers: state.workerThreadIds,
+      }
+
+      if (attachments !== undefined && attachments.length > 0) {
+        narratorInput.attachments = [...attachments]
+      }
+
       effects.push(
         emit(
           shuttleModule.input('narrator.spawned', {
@@ -74,14 +108,7 @@ export function routeForEffects(
           childThreadId,
           kind: 'agent',
           definitionName: 'narrator',
-          input: {
-            text,
-            messageId: route.messageId,
-            sessionRunId: runId,
-            brief: state.briefText,
-            workers: state.workerThreadIds,
-            ...(attachments?.length ? { attachments: [...attachments] } : {}),
-          },
+          input: narratorInput,
         }),
       )
 
@@ -106,7 +133,7 @@ export function routeForEffects(
       )
 
       const recipients = [
-        ...(conductorThreadId ? [conductorThreadId] : []),
+        ...(isPresent(conductorThreadId) ? [conductorThreadId] : []),
         ...state.workerThreadIds,
       ]
 
@@ -134,7 +161,7 @@ export function routeForEffects(
     }
 
     case 'correction': {
-      if (!target) {
+      if (!isPresent(target)) {
         return { summary: 'correction dropped (no target)', queued: false }
       }
 
@@ -149,7 +176,7 @@ export function routeForEffects(
     }
 
     case 'task': {
-      if (!conductorThreadId) {
+      if (!isPresent(conductorThreadId)) {
         return { summary: 'queued for conductor', queued: true }
       }
 
@@ -171,7 +198,7 @@ export function routeForEffects(
     }
 
     case 'stop': {
-      if (!target) {
+      if (!isPresent(target)) {
         return { summary: 'stop ignored (no target)', queued: false }
       }
 

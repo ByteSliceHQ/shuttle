@@ -1,11 +1,11 @@
-import { isJsonObject, type JsonObject } from '@swirls/looms/core'
+import { isJsonObject, type JsonObject, type JsonValue } from '@swirls/looms/core'
 
 /** The value as a JSON object, or an empty object when it is anything else. */
-export function jsonObject(value: unknown): JsonObject {
+export function jsonObject(value: JsonValue | undefined): JsonObject {
   return isJsonObject(value) ? value : {}
 }
 
-/** True for a plain, non-array object. Its values stay `unknown` until each is checked. */
-export function isRecord(value: unknown): value is { readonly [key: string]: unknown } {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+/** True for a plain, non-array object, read as the JSON object Looms events carry. */
+export function isRecord(value: unknown): value is JsonObject {
+  return isJsonObject(value)
 }

@@ -19,14 +19,9 @@ import { shuttleAttributes } from './attributes'
 import { sandboxStub, type ShuttleEnv } from './env'
 import { createFirehoseProjector } from './firehose/projector'
 import { isVendorHarness, readPinnedHarness, writeStoredHarness } from './harness'
-import {
-  createReasoningLlm,
-  createStubThinkingLlm,
-  getTurnThread,
-  reasoningEffortFor,
-  type ReasoningEffort,
-} from './llm'
+import { createReasoningLlm, createStubThinkingLlm, getTurnThread, reasoningEffortFor } from './llm'
 import { loomsStub } from './looms-stub'
+import { present } from './present'
 import { isLocalSandbox, sandboxIsPersonal } from './sandbox/names'
 import { sessionWorkDir } from './sandbox/workspace'
 import { readSandboxBinding, sandboxNameForSession } from './session/bind-sandbox'
@@ -107,9 +102,7 @@ export const DEFAULT_LLM_MODEL = 'anthropic/claude-sonnet-5.5'
 export const DEFAULT_JEV_MODEL = 'jev-latest'
 export const LLM_MODEL_STORAGE_KEY = 'shuttle:llmModel'
 
-function reasoningSettingsFor(modelId: string): {
-  effort: ReasoningEffort
-} {
+function reasoningSettingsFor(modelId: string) {
   return { effort: reasoningEffortFor(modelId) }
 }
 
@@ -119,7 +112,7 @@ function rejectsReasoningParams(cause: unknown): boolean {
 }
 
 export function defaultLlmModel(env: ShuttleEnv): string {
-  return env.LOOMS_MODEL?.trim() || DEFAULT_LLM_MODEL
+  return present(env.LOOMS_MODEL?.trim()) ?? DEFAULT_LLM_MODEL
 }
 
 /**
@@ -155,7 +148,7 @@ export function resolveLlm(
 ): LlmAdapter {
   const openRouter = resolveOpenRouterLlm(env, storage, runId)
 
-  if (!storage || !runId) {
+  if (storage === undefined || runId === undefined || runId === '') {
     return openRouter
   }
 
@@ -182,7 +175,7 @@ export function resolveLlm(
       // keeps it, so changing the default later does not switch a session that is under way.
       let sessionHarness = await readPinnedHarness(storage)
 
-      if (!sessionHarness) {
+      if (sessionHarness === null) {
         const preferred = await loomsStub(
           env.LOOMS_RUN,
           workspaceRunId(env, orgOfRun(runId)),
@@ -205,7 +198,10 @@ export function resolveLlm(
 
       const label = vendorHarnessInfo(harness).label
 
-      if (memberHarness && !onTeam(await resolveTeam(env, storage, runId), memberHarness)) {
+      if (
+        memberHarness !== null &&
+        !onTeam(await resolveTeam(env, storage, runId), memberHarness)
+      ) {
         return {
           message: {
             role: 'assistant',
@@ -246,13 +242,14 @@ export function resolveLlm(
           cwd: sessionWorkDir(runId, binding.repos),
           sandbox,
           storage,
-          ...(choice ? { choice } : {}),
-          ...(memberHarness
-            ? { member: { threadId: getTurnThread(args.signal) ?? crypto.randomUUID() } }
-            : {}),
+          choice: choice ?? undefined,
+          member:
+            memberHarness === null
+              ? undefined
+              : { threadId: getTurnThread(args.signal) ?? crypto.randomUUID() },
           // The turn runs on the sign-in of the person it is working for, and on no one else's.
           // A session Shuttle started itself, which nobody has spoken in, has no one's.
-          ...(sponsorId ? { billedTo: sponsorId } : {}),
+          billedTo: sponsorId ?? undefined,
           signInStaysInSandbox: sandboxIsPersonal(sandboxName, env),
           signInPresent: async () =>
             (await sandbox.exec(signInFilesPresent(vendorHarnessInfo(harness).credentialFiles)))
@@ -267,9 +264,10 @@ export function resolveLlm(
               sharedBy: getTurnThread(args.signal) ?? harness,
             }),
           credentials: {
-            get: async (id) => (sponsorId ? credentials.getCredential(sponsorId, id) : null),
+            get: async (id) =>
+              sponsorId === null ? null : credentials.getCredential(sponsorId, id),
             put: async (id, payload) => {
-              if (sponsorId) {
+              if (sponsorId !== null) {
                 await credentials.putCredential(sponsorId, id, payload)
               }
             },
@@ -288,7 +286,7 @@ function resolveOpenRouterLlm(
 ): LlmAdapter {
   const apiKey = env.OPENROUTER_API_KEY
 
-  if (!apiKey) {
+  if (apiKey === undefined || apiKey === '') {
     return createStubThinkingLlm()
   }
 
@@ -298,12 +296,14 @@ function resolveOpenRouterLlm(
   const plainChatModels = new Set<string>()
 
   const resolveAttachment =
-    env.ASSETS && runId ? modelAttachmentResolver(env.ASSETS, runId) : undefined
+    env.ASSETS !== undefined && runId !== undefined && runId !== ''
+      ? modelAttachmentResolver(env.ASSETS, runId)
+      : undefined
 
   return {
     complete: async (args: LlmCompleteArgs) => {
       const stored = storage ? await storage.get<string>(LLM_MODEL_STORAGE_KEY) : undefined
-      const modelId = stored?.trim() || fallback
+      const modelId = present(stored?.trim()) ?? fallback
 
       const withReasoning = !plainChatModels.has(modelId)
 
@@ -347,9 +347,9 @@ export interface ResolvedEvaluator {
  * Without a key, fall back to local intake heuristics (no network).
  */
 export function resolveEvaluator(env: ShuttleEnv): ResolvedEvaluator {
-  const apiKey = env.TYPESAFE_AI_API_KEY?.trim()
+  const apiKey = present(env.TYPESAFE_AI_API_KEY?.trim())
 
-  if (!apiKey) {
+  if (apiKey === undefined) {
     return {
       evaluatorPolicy: {
         evaluate: heuristicIntakeEvaluate,
@@ -357,7 +357,7 @@ export function resolveEvaluator(env: ShuttleEnv): ResolvedEvaluator {
     }
   }
 
-  const model = env.JEV_MODEL?.trim() || DEFAULT_JEV_MODEL
+  const model = present(env.JEV_MODEL?.trim()) ?? DEFAULT_JEV_MODEL
 
   return {
     evaluator: vercelEvaluator({
@@ -384,7 +384,7 @@ export async function readStoredLlmModel(
   env: ShuttleEnv,
 ): Promise<string> {
   const stored = await storage.get<string>(LLM_MODEL_STORAGE_KEY)
-  return stored?.trim() || defaultLlmModel(env)
+  return present(stored?.trim()) ?? defaultLlmModel(env)
 }
 
 export async function writeStoredLlmModel(
@@ -393,7 +393,7 @@ export async function writeStoredLlmModel(
 ): Promise<string> {
   const trimmed = model.trim()
 
-  if (!trimmed) {
+  if (trimmed === '') {
     throw new Error('model is required')
   }
 

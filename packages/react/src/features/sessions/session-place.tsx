@@ -13,10 +13,14 @@ import {
 } from '../../shuttle'
 import { sessionQueries } from './session-queries'
 
-const PROVIDERS: Record<string, string> = {
+const PROVIDERS = {
   daytona: 'Daytona',
   cloudflare: 'Cloudflare',
   memory: 'In memory',
+} satisfies Record<string, string>
+
+function isKnownProvider(provider: string): provider is keyof typeof PROVIDERS {
+  return Object.hasOwn(PROVIDERS, provider)
 }
 
 const rowClass =
@@ -137,6 +141,7 @@ export function SessionPlace({ runId, working }: { runId: string; working: boole
 
   const moving = move.isPending ? move.variables.to : null
   const error = move.error?.message
+  const hasError = error !== undefined && error !== ''
 
   if (!place || (!app && place.sandbox.location !== 'local' && !place.local)) {
     return null
@@ -146,14 +151,19 @@ export function SessionPlace({ runId, working }: { runId: string; working: boole
   const onThisMachine = local && app !== null && place.sandbox.deviceId === app.deviceId
   const elsewhere = local && !onThisMachine
   const deviceName = place.sandbox.device?.name ?? 'another machine'
-  const cloudName = PROVIDERS[place.cloud.provider] ?? place.cloud.provider
+
+  const cloudName = isKnownProvider(place.cloud.provider)
+    ? PROVIDERS[place.cloud.provider]
+    : place.cloud.provider
+
   const backend = machine?.backend ?? runner?.backend
 
-  const localDetail = !machine?.online
-    ? runner?.status === 'preparing'
-      ? (runner.message ?? 'Getting the sandbox ready…')
-      : (runner?.message ?? 'The local sandbox is not running.')
-    : `${backend?.label ?? 'Local sandbox'}, ${isolationLabel(backend?.isolation)}. Files and sign-ins stay on this machine.`
+  const localDetail =
+    machine?.online !== true
+      ? runner?.status === 'preparing'
+        ? (runner.message ?? 'Getting the sandbox ready…')
+        : (runner?.message ?? 'The local sandbox is not running.')
+      : `${backend?.label ?? 'Local sandbox'}, ${isolationLabel(backend?.isolation)}. Files and sign-ins stay on this machine.`
 
   return (
     <Popover
@@ -175,7 +185,7 @@ export function SessionPlace({ runId, working }: { runId: string; working: boole
             local && place.sandbox.online === false && 'border-amber-500/40 text-amber-600',
           )}
         >
-          {moving ? (
+          {moving !== null ? (
             <LoaderCircle className="size-3 animate-spin" />
           ) : local ? (
             <Laptop className="size-3" />
@@ -183,7 +193,13 @@ export function SessionPlace({ runId, working }: { runId: string; working: boole
             <Cloud className="size-3" />
           )}
           <span className="max-w-32 truncate">
-            {moving ? 'Moving…' : local ? (onThisMachine ? 'This machine' : deviceName) : 'Cloud'}
+            {moving !== null
+              ? 'Moving…'
+              : local
+                ? onThisMachine
+                  ? 'This machine'
+                  : deviceName
+                : 'Cloud'}
           </span>
         </button>
       </PopoverTrigger>
@@ -199,12 +215,8 @@ export function SessionPlace({ runId, working }: { runId: string; working: boole
               detail={localDetail}
               current={onThisMachine}
               busy={moving === 'local'}
-              disabled={moving !== null || !machine?.online || !place.cloud.movable}
-              onSelect={() => {
-                if (app) {
-                  move.mutate({ id: runId, to: 'local', deviceId: app.deviceId })
-                }
-              }}
+              disabled={moving !== null || machine?.online !== true || !place.cloud.movable}
+              onSelect={() => move.mutate({ id: runId, to: 'local', deviceId: app.deviceId })}
             />
           ) : null}
           {elsewhere ? (
@@ -212,7 +224,7 @@ export function SessionPlace({ runId, working }: { runId: string; working: boole
               icon={<Laptop />}
               title={deviceName}
               detail={
-                place.sandbox.online
+                place.sandbox.online === true
                   ? 'Connected. Its files and sign-ins stay on that machine.'
                   : 'Not connected. The session can still move to the cloud from its last save.'
               }
@@ -235,14 +247,14 @@ export function SessionPlace({ runId, working }: { runId: string; working: boole
           />
         </div>
         <p
-          role={error ? 'alert' : undefined}
+          role={hasError ? 'alert' : undefined}
           className={cn(
             'px-2 pt-1 pb-1.5 text-[11px] leading-snug text-pretty',
-            error ? 'text-destructive' : 'text-muted-foreground',
+            hasError ? 'text-destructive' : 'text-muted-foreground',
           )}
         >
           {error ??
-            (place.pending
+            (place.pending !== null
               ? `Moves to ${place.pending === 'local' ? 'this machine' : 'the cloud'} when this turn ends.`
               : place.leftBehind
                 ? 'This session left a machine that was not connected, from its last save. Anything changed there since is still on that machine.'

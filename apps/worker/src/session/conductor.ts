@@ -112,6 +112,7 @@ export function conductorEndReason(eventType: string | undefined): ConductorEndR
       return 'cancelled'
     case 'runtime.thread.completed':
       return 'completed'
+    case undefined:
     default:
       return 'failed'
   }

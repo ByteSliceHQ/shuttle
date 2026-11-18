@@ -1,4 +1,5 @@
 import { ORPCError } from '@orpc/server'
+import { z } from 'zod'
 
 import {
   FileDiagnostics,
@@ -85,7 +86,7 @@ async function isAsleep(home: { stub: SandboxStub; personal: boolean }): Promise
 }
 
 /** What went wrong, said to the caller as it was before: a 500 that carries the reason. */
-function failure(cause: unknown): ORPCError<string, unknown> {
+function failure(cause: unknown): Error {
   return cause instanceof ORPCError
     ? cause
     : new ORPCError('INTERNAL_SERVER_ERROR', {
@@ -113,7 +114,10 @@ async function sessionPlace(env: ShuttleEnv, actor: Actor, runId: string): Promi
   const run = loomsStub(env.LOOMS_RUN, runId)
   const home = await run.getSandboxName()
   const placement = await run.getSandboxPlacement()
-  const personal = home ? sandboxIsPersonal(home, env) : sandboxesArePersonal(env)
+
+  const personal =
+    home !== null && home !== '' ? sandboxIsPersonal(home, env) : sandboxesArePersonal(env)
+
   const local = home !== null && isLocalSandbox(home)
 
   const machine = local
@@ -131,22 +135,28 @@ async function sessionPlace(env: ShuttleEnv, actor: Actor, runId: string): Promi
     // Set when the session last left a machine that could not be reached. What it took was that
     // machine's last save; anything changed there afterwards is still there.
     leftBehind:
-      moves.last?.fromSave && isLocalSandbox(moves.last.from)
+      moves.last?.fromSave === true && isLocalSandbox(moves.last.from)
         ? { deviceId: deviceOfSandbox(moves.last.from), at: moves.last.at }
         : null,
     personal,
-    holderId: personal && home ? userOfSandbox(home) : null,
+    holderId: personal && home !== null && home !== '' ? userOfSandbox(home) : null,
     here:
       !personal ||
       (local
         ? userOfSandbox(home) === actor.userId
         : home === userSandboxName(actor.orgId, actor.userId)),
-    sandbox: {
-      provider: home ? providerIdForSandbox(home, env) : cloud,
-      location: local ? 'local' : 'cloud',
-      ...(local ? { deviceId: deviceOfSandbox(home) } : {}),
-      ...machine,
-    },
+    sandbox: local
+      ? {
+          provider: home !== '' ? providerIdForSandbox(home, env) : cloud,
+          location: 'local',
+          deviceId: deviceOfSandbox(home),
+          ...machine,
+        }
+      : {
+          provider: home !== null && home !== '' ? providerIdForSandbox(home, env) : cloud,
+          location: 'cloud',
+          ...machine,
+        },
     local: placement
       ? { deviceId: placement.deviceId, mine: placement.userId === actor.userId }
       : null,
@@ -176,7 +186,7 @@ function describeRepo(repo: LinkedSandboxRepo) {
 
 /** `path` relative to the session's worktree, or null when it is missing or points outside it. */
 function worktreePath(sessionRoot: string, path: string | undefined): string | null {
-  if (!path) {
+  if (path === undefined || path === '') {
     return null
   }
 
@@ -186,7 +196,9 @@ function worktreePath(sessionRoot: string, path: string | undefined): string | n
       : null
     : path.replace(/^\.\//, '')
 
-  return relative && !relative.split('/').includes('..') ? relative : null
+  return relative !== null && relative !== '' && !relative.split('/').includes('..')
+    ? relative
+    : null
 }
 
 /** Splits `<repository>/<path>` into the session repository it names and the path inside it. */
@@ -198,7 +210,7 @@ async function repoFile(env: ShuttleEnv, runId: string, path: string | undefined
     (item) => item.name === relative?.slice(0, slash),
   )
 
-  return relative && slash > 0 && repo
+  return relative !== null && relative !== '' && slash > 0 && repo !== undefined
     ? { repo, relative, inRepo: relative.slice(slash + 1) }
     : null
 }
@@ -240,9 +252,8 @@ async function savedWork(env: ShuttleEnv, runId: string) {
   let client: SavedWorkClient | null = null
   let saved: SavedRepo[] = []
 
-  if (orgId && codeStorageConfigured(env)) {
-    // The SDK's lists are also promises of their first page; only the iteration is used here.
-    client = codeStorageClient(env) as unknown as SavedWorkClient
+  if (orgId !== null && orgId !== '' && codeStorageConfigured(env)) {
+    client = codeStorageClient(env)
 
     saved = await findSavedWork(
       client,
@@ -327,7 +338,7 @@ function parseDiagnosticsReply(stdout: string): FileDiagnostics {
     return reply.data
   }
 
-  return typeof printed === 'object' && printed !== null
+  return z.union([z.looseObject({}), z.array(z.unknown())]).safeParse(printed).success
     ? { status: 'error', reason: 'The language server gave an answer that could not be read.' }
     : { status: 'unavailable', reason: 'This sandbox has no language server.' }
 }
@@ -431,6 +442,8 @@ function measuredRepo(
   const measure = found?.measure
   const name = describeRepo(repo)
 
+  const wanted = fetchableRefs(against).join(' or ')
+
   return {
     ...name,
     files: found?.files ?? [],
@@ -447,7 +460,7 @@ function measuredRepo(
       headSha: measure?.headSha ?? null,
       error:
         measure?.error === 'missing'
-          ? `${fetchableRefs(against).join(' or ') || 'That commit'} is not in ${name.fullName ?? 'this repository'}, or the sandbox could not fetch it.`
+          ? `${wanted === '' ? 'That commit' : wanted} is not in ${name.fullName ?? 'this repository'}, or the sandbox could not fetch it.`
           : null,
     },
   }
@@ -566,7 +579,7 @@ export const sandboxRouter = {
       throw notFound(cause instanceof Error ? cause.message : String(cause))
     })
 
-    if (result.missing) {
+    if (result.missing === true) {
       throw notFound(result.error)
     }
 
@@ -586,12 +599,12 @@ export const sandboxRouter = {
           return { diffs: [], ...from }
         }
 
-        if (input.path) {
+        if (input.path !== undefined && input.path !== '') {
           const relative = worktreePath(sessionRoot, input.path)
 
           return {
             path: relative,
-            diff: relative ? await savedFileDiff(work.client, work.saved, relative) : '',
+            diff: relative !== null ? await savedFileDiff(work.client, work.saved, relative) : '',
             ...from,
           }
         }
@@ -607,7 +620,7 @@ export const sandboxRouter = {
     }
 
     // One file's changes since the session started. `path` is `<repository>/<path>`.
-    if (input.path) {
+    if (input.path !== undefined && input.path !== '') {
       const file = await repoFile(env, runId, input.path)
 
       if (!file) {
@@ -639,7 +652,7 @@ export const sandboxRouter = {
           timeoutMs: DIFF_TIMEOUT_MS,
         })
 
-        if (result.exitCode === 0 && result.stdout.trim()) {
+        if (result.exitCode === 0 && result.stdout.trim() !== '') {
           diffs.push({ cwd, name: repo.name, diff: result.stdout })
         }
       }
@@ -676,7 +689,7 @@ export const sandboxRouter = {
       for (const line of result.stdout.split('\n')) {
         const [kind, name] = [line.slice(0, line.indexOf(' ')), line.slice(line.indexOf(' ') + 1)]
 
-        if (name && (kind === 'REMOTE' || kind === 'LOCAL')) {
+        if (name !== '' && (kind === 'REMOTE' || kind === 'LOCAL')) {
           branches.set(name, {
             name,
             remote: kind === 'REMOTE' || branches.get(name)?.remote === true,
@@ -686,12 +699,18 @@ export const sandboxRouter = {
 
       // The default branch first, then GitHub's, then the sandbox's own.
       return {
-        branches: [...branches.values()].toSorted(
-          (a, b) =>
-            Number(b.name === repo.defaultBranch) - Number(a.name === repo.defaultBranch) ||
-            Number(b.remote) - Number(a.remote) ||
-            a.name.localeCompare(b.name),
-        ),
+        branches: [...branches.values()].toSorted((a, b) => {
+          const byDefault =
+            Number(b.name === repo.defaultBranch) - Number(a.name === repo.defaultBranch)
+
+          if (byDefault !== 0) {
+            return byDefault
+          }
+
+          const byRemote = Number(b.remote) - Number(a.remote)
+
+          return byRemote === 0 ? a.name.localeCompare(b.name) : byRemote
+        }),
       }
     })
   }),
@@ -699,6 +718,10 @@ export const sandboxRouter = {
   workspace: sandbox.workspace.handler(async ({ input, context: { env } }) => {
     const runId = input.id
     const home = await sessionSandbox(env, runId)
+    const againstOf = (repo: LinkedSandboxRepo) => input.against?.[repo.name] ?? 'session'
+
+    const asked = (list: readonly LinkedSandboxRepo[]): SummaryRepo[] =>
+      list.map((repo) => ({ ...repo, against: againstOf(repo) }))
 
     return reporting(async () => {
       if (await isAsleep(home)) {
@@ -727,11 +750,6 @@ export const sandboxRouter = {
       // The session's workspace as it stands in the sandbox it is in, each repository measured
       // the way it was asked for.
       const repos = await sessionRepos(env, runId)
-      const againstOf = (repo: LinkedSandboxRepo) => input.against?.[repo.name] ?? 'session'
-
-      const asked = (list: readonly LinkedSandboxRepo[]): SummaryRepo[] =>
-        list.map((repo) => ({ ...repo, against: againstOf(repo) }))
-
       const summary = await home.stub.workspaceSummary(runId, asked(repos))
       const found = new Map(summary.repos.map((repo) => [repo.name, repo]))
 
@@ -813,7 +831,7 @@ export const sandboxRouter = {
       if (input.expected !== undefined) {
         const current = await home.stub.readFile(absolute)
 
-        if (current.missing || current.content !== input.expected) {
+        if (current.missing === true || current.content !== input.expected) {
           throw new ORPCError('CONFLICT', {
             message:
               'This file changed while you were editing it. Reload it and make the edit again.',
@@ -932,17 +950,18 @@ export const sandboxRouter = {
               )?.device?.name
             : undefined
 
+          const from = isLocalSandbox(moved.from) ? 'local' : 'cloud'
+          const to = isLocalSandbox(moved.to) ? 'local' : 'cloud'
+
           // In the session's history, so it shows where each stretch of work happened.
           await run
             .signal([
               {
                 type: 'shuttle.sandbox.moved',
-                payload: {
-                  from: isLocalSandbox(moved.from) ? 'local' : 'cloud',
-                  to: isLocalSandbox(moved.to) ? 'local' : 'cloud',
-                  fromSave: moved.fromSave,
-                  ...(device ? { device } : {}),
-                },
+                payload:
+                  device === undefined || device === ''
+                    ? { from, to, fromSave: moved.fromSave }
+                    : { from, to, fromSave: moved.fromSave, device },
                 idempotencyKey: `sandbox-moved:${moved.at}`,
                 origin: { type: 'external', actorId: actor.userId },
               },
@@ -966,9 +985,9 @@ export const sandboxRouter = {
 
     // The label for this session's preview hostname (see `tenancy/previews.ts`), and the domain
     // the deployment serves previews under.
-    return {
-      label: await previewKeyFor(env.AUTH_DB, input.id),
-      ...(env.SHUTTLE_PREVIEW_HOST ? { host: env.SHUTTLE_PREVIEW_HOST } : {}),
-    }
+    const label = await previewKeyFor(env.AUTH_DB, input.id)
+    const host = env.SHUTTLE_PREVIEW_HOST
+
+    return host === undefined || host === '' ? { label } : { label, host }
   }),
 }

@@ -15,7 +15,9 @@ import { desktop } from './desktop'
 function sessionOnScreen(pathname: string): string | null {
   const match = pathname.match(/^\/sessions\/([^/]+)$/)
 
-  return match?.[1] ? decodeURIComponent(match[1]) : null
+  const id = match?.[1]
+
+  return id !== undefined && id !== '' ? decodeURIComponent(id) : null
 }
 
 /**
@@ -44,7 +46,7 @@ export function DesktopAttention() {
       for (const change of attentionChanges(previous.current, sessions, userId)) {
         if (change.runId !== watching) {
           app.notify?.({
-            title: change.title || 'Shuttle',
+            title: change.title !== '' ? change.title : 'Shuttle',
             body: attentionMessage(change.kind),
             path: `/sessions/${encodeURIComponent(change.runId)}`,
           })

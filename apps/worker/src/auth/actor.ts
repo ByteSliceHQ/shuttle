@@ -33,9 +33,9 @@ export async function resolveActor(auth: Auth, request: Request): Promise<Actor 
   const first = organizations[0] ?? (await createPersonalOrganization(auth, user))
 
   await auth.api.setActiveOrganization({ body: { organizationId: first.id }, headers })
-  const member = await auth.api.getActiveMember({ headers })
+  const member = await auth.api.getActiveMember({ headers }).catch(() => null)
 
-  if (!member) {
+  if (member === null) {
     return null
   }
 
@@ -48,15 +48,11 @@ async function createPersonalOrganization(
 ): Promise<{ id: string }> {
   const created = await auth.api.createOrganization({
     body: {
-      name: `${user.name || 'My'} workspace`,
+      name: `${user.name === '' ? 'My' : user.name} workspace`,
       slug: `personal-${user.id.toLowerCase()}`,
       userId: user.id,
     },
   })
-
-  if (!created) {
-    throw new Error('could not create an organization for this account')
-  }
 
   return created
 }

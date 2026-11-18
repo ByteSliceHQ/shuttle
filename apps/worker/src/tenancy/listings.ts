@@ -28,7 +28,7 @@ export function listingChanges(
   orgId: string,
   before: SessionAccess | null,
   after: SessionAccess | null,
-): { readonly added: string[]; readonly removed: string[]; readonly kept: string[] } {
+) {
   const old = listingRunIds(env, orgId, before)
   const next = listingRunIds(env, orgId, after)
 

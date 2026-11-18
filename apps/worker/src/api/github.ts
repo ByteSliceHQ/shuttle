@@ -50,14 +50,15 @@ export const githubRouter = {
       await Promise.all(installationIds.map((id) => listInstallationRepos(env, id)))
     ).flat()
 
-    const filtered = query
-      ? repos.filter(
-          (repo) =>
-            repo.fullName.toLowerCase().includes(query) ||
-            repo.name.toLowerCase().includes(query) ||
-            repo.owner.toLowerCase().includes(query),
-        )
-      : repos
+    const filtered =
+      query !== ''
+        ? repos.filter(
+            (repo) =>
+              repo.fullName.toLowerCase().includes(query) ||
+              repo.name.toLowerCase().includes(query) ||
+              repo.owner.toLowerCase().includes(query),
+          )
+        : repos
 
     return {
       repos: filtered.slice(0, 50).map((repo) => ({

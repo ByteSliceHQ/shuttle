@@ -18,11 +18,7 @@ import {
 const bridgeDir = join(import.meta.dir, '../../bridge')
 
 /** Runs container commands on this machine, with a throwaway home directory. */
-function localContainer(mode: string): {
-  container: AgentRunContainer
-  options: AgentRunOptions
-  home: string
-} {
+function localContainer(mode: string) {
   const home = mkdtempSync(join(tmpdir(), 'shuttle-agent-home-'))
   const root = mkdtempSync(join(tmpdir(), 'shuttle-agent-runs-'))
 

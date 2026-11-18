@@ -18,7 +18,7 @@ export function previewPorts(text: string): string[] {
     for (const match of text.matchAll(pattern)) {
       const port = match[1]
 
-      if (port && Number(port) > 0 && Number(port) <= 65535) {
+      if (port !== undefined && port !== '' && Number(port) > 0 && Number(port) <= 65535) {
         found.push({ index: match.index, port })
       }
     }
@@ -42,7 +42,7 @@ export function changedPaths(calls: readonly ToolCallItem[]): string[] {
 
     const path = jsonText(jsonFields(call.args).path)
 
-    if (path) {
+    if (path !== undefined && path !== '') {
       paths.add(path)
     }
   }

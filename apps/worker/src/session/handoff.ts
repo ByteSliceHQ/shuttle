@@ -120,16 +120,17 @@ async function checkoutPull(
     )
   }
 
-  if (!pull.headSha) {
+  if (pull.headSha === '') {
     throw new Error(
       `Cannot review ${pull.fullName}#${pull.number}: the session was started without the pull request's head commit.`,
     )
   }
 
-  await sandbox.checkoutRef(runId, repo, {
-    sha: pull.headSha,
-    ...(pull.baseSha ? { baseSha: pull.baseSha } : {}),
-  })
+  await sandbox.checkoutRef(
+    runId,
+    repo,
+    pull.baseSha === '' ? { sha: pull.headSha } : { sha: pull.headSha, baseSha: pull.baseSha },
+  )
 }
 
 async function prepare(
@@ -149,8 +150,9 @@ async function prepare(
 
   // A session with no linked repository still has work to carry: the demo repository's.
   const { carried, fromSave } =
-    storage &&
-    home &&
+    storage !== undefined &&
+    home !== undefined &&
+    home !== '' &&
     home !== name &&
     sandboxCarriesWork(home, env) &&
     sandboxCarriesWork(name, env)
@@ -312,7 +314,7 @@ export async function saveSessionWork(
 ): Promise<SavedSnapshot | null> {
   const home = await storage.get<string>(SANDBOX_HOME_KEY)
 
-  if (!home || !sandboxIsPersonal(home, env)) {
+  if (home === undefined || home === '' || !sandboxIsPersonal(home, env)) {
     return null
   }
 

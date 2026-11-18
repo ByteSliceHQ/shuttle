@@ -5,10 +5,23 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { LspConnection } from './framing.ts'
 import {
+  arrayField,
+  decodeEach,
+  field,
+  isNumber,
+  isJsonObject,
+  isString,
+  nonEmpty,
+  numberField,
+  objectField,
+  stringField,
+  type JsonValue,
+} from './json.ts'
+import {
   LSP_DEFAULT_WAIT_MS,
+  LSP_SEVERITIES,
   type LspDiagnostic,
   type LspDiagnosticsReply,
-  type LspSeverity,
   type LspStatusReply,
 } from './protocol.ts'
 import { resolveServer, SERVERS, type LaunchCommand, type ServerDefinition } from './registry.ts'
@@ -38,15 +51,58 @@ const UNWATCHED = new Set(['.git', 'node_modules', 'target', 'dist', '.turbo', '
 const FILE_CHANGED = 2
 const FILE_DELETED = 3
 
+interface Position {
+  readonly line?: number
+  readonly character?: number
+}
+
 interface RawDiagnostic {
   readonly range?: {
-    readonly start?: { readonly line?: number; readonly character?: number }
-    readonly end?: { readonly line?: number; readonly character?: number }
+    readonly start?: Position
+    readonly end?: Position
   }
   readonly severity?: number
   readonly message?: string
   readonly code?: string | number
   readonly source?: string
+}
+
+function decodePosition(value: JsonValue | undefined): Position | undefined {
+  return isJsonObject(value)
+    ? { line: numberField(value, 'line'), character: numberField(value, 'character') }
+    : undefined
+}
+
+function decodeRawDiagnostic(value: JsonValue): RawDiagnostic | undefined {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  const range = objectField(value, 'range')
+  const code = field(value, 'code')
+
+  return {
+    range:
+      range === undefined
+        ? undefined
+        : {
+            start: decodePosition(field(range, 'start')),
+            end: decodePosition(field(range, 'end')),
+          },
+    severity: numberField(value, 'severity'),
+    message: stringField(value, 'message'),
+    code: isString(code) || isNumber(code) ? code : undefined,
+    source: stringField(value, 'source'),
+  }
+}
+
+function decodeRawDiagnostics(value: JsonValue | undefined): RawDiagnostic[] {
+  return decodeEach(value, decodeRawDiagnostic)
+}
+
+interface SyncResult {
+  readonly uri: string
+  readonly changed: boolean
 }
 
 interface OpenDocument {
@@ -62,13 +118,6 @@ interface Published {
   readonly diagnostics: readonly RawDiagnostic[]
 }
 
-const SEVERITIES: Readonly<Record<number, LspSeverity>> = {
-  1: 'error',
-  2: 'warning',
-  3: 'info',
-  4: 'hint',
-}
-
 function toDiagnostic(raw: RawDiagnostic): LspDiagnostic {
   const line = (raw.range?.start?.line ?? 0) + 1
   const column = (raw.range?.start?.character ?? 0) + 1
@@ -78,10 +127,10 @@ function toDiagnostic(raw: RawDiagnostic): LspDiagnostic {
     column,
     endLine: (raw.range?.end?.line ?? line - 1) + 1,
     endColumn: (raw.range?.end?.character ?? column - 1) + 1,
-    severity: SEVERITIES[raw.severity ?? 1] ?? 'error',
+    severity: LSP_SEVERITIES[(raw.severity ?? 1) - 1] ?? 'error',
     message: raw.message ?? '',
-    ...(raw.code === undefined ? {} : { code: String(raw.code) }),
-    ...(raw.source ? { source: raw.source } : {}),
+    code: raw.code === undefined ? undefined : String(raw.code),
+    source: nonEmpty(raw.source),
   }
 }
 
@@ -96,9 +145,9 @@ function within<T>(promise: Promise<T>, ms: number): Promise<T | typeof PENDING>
         clearTimeout(timer)
         resolve(value)
       },
-      (error: unknown) => {
+      (cause: unknown) => {
         clearTimeout(timer)
-        reject(error instanceof Error ? error : new Error(String(error)))
+        reject(cause instanceof Error ? cause : new Error(String(cause)))
       },
     )
   })
@@ -132,14 +181,13 @@ class ServerSession {
 
     const connection = new LspConnection(child, {
       onNotification: (method, params) => {
-        if (method === 'textDocument/publishDiagnostics') {
-          const { uri, version, diagnostics } = params as {
-            uri: string
-            version?: number
-            diagnostics?: RawDiagnostic[]
-          }
+        const uri = isJsonObject(params) ? stringField(params, 'uri') : undefined
 
-          this.published.set(uri, { version, diagnostics: diagnostics ?? [] })
+        if (method === 'textDocument/publishDiagnostics' && isJsonObject(params) && uri) {
+          this.published.set(uri, {
+            version: numberField(params, 'version'),
+            diagnostics: decodeRawDiagnostics(field(params, 'diagnostics')),
+          })
 
           for (const listener of this.listeners) {
             listener(uri)
@@ -149,7 +197,9 @@ class ServerSession {
       onRequest: (method, params) => {
         if (method === 'workspace/configuration') {
           // One answer per item asked for. Null means "use your default".
-          return ((params as { items?: unknown[] }).items ?? []).map(() => null)
+          const items = isJsonObject(params) ? (arrayField(params, 'items') ?? []) : []
+
+          return items.map(() => null)
         }
 
         return method === 'workspace/workspaceFolders' ? folders : null
@@ -160,7 +210,7 @@ class ServerSession {
 
     this.ready = (async () => {
       const result = await within(
-        connection.request<{ capabilities?: { diagnosticProvider?: unknown } }>('initialize', {
+        connection.request('initialize', {
           processId: process.pid,
           clientInfo: { name: 'shuttle-lsp' },
           rootUri,
@@ -187,7 +237,10 @@ class ServerSession {
         throw new Error(`${id} language server did not start within ${INITIALIZE_TIMEOUT_MS}ms`)
       }
 
-      this.pulls = Boolean(result.capabilities?.diagnosticProvider)
+      const capabilities = isJsonObject(result) ? objectField(result, 'capabilities') : undefined
+      const provider = capabilities ? field(capabilities, 'diagnosticProvider') : undefined
+
+      this.pulls = provider !== undefined && provider !== null && provider !== false
       connection.notify('initialized', {})
       this.watch()
     })()
@@ -265,11 +318,7 @@ class ServerSession {
    * Tells the server what a file holds now: `draft` when given, otherwise what is on disk.
    * Answers whether that changed anything.
    */
-  private sync(
-    file: string,
-    languageId: string | undefined,
-    draft?: string,
-  ): { uri: string; changed: boolean } {
+  private sync(file: string, languageId: string | undefined, draft?: string): SyncResult {
     const uri = pathToFileURL(file).href
     const text = draft ?? readFileSync(file, 'utf8')
     const mtimeMs = statSync(file).mtimeMs
@@ -362,10 +411,10 @@ class ServerSession {
     const raw = await within(
       this.pulls
         ? this.connection
-            .request<{ items?: RawDiagnostic[] }>('textDocument/diagnostic', {
-              textDocument: { uri },
-            })
-            .then((report) => report?.items ?? [])
+            .request('textDocument/diagnostic', { textDocument: { uri } })
+            .then((report) =>
+              decodeRawDiagnostics(isJsonObject(report) ? field(report, 'items') : undefined),
+            )
         : this.pushed(uri, version),
       remaining,
     )

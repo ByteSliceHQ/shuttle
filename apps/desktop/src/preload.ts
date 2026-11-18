@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
 import {
   CHANNELS,
-  type DesktopInfo,
+  desktopInfoSchema,
   type DesktopNotice,
   type RunnerStatus,
   type UpdateStatus,
@@ -13,7 +13,7 @@ import {
  * the desktop app, which machine this is, and whether its sandbox is up. See `lib/desktop.ts`
  * in the web app for the other side.
  */
-const info = ipcRenderer.sendSync(CHANNELS.info) as DesktopInfo
+const info = desktopInfoSchema.parse(ipcRenderer.sendSync(CHANNELS.info))
 
 contextBridge.exposeInMainWorld('shuttleDesktop', {
   ...info,

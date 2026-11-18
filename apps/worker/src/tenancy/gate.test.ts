@@ -21,6 +21,7 @@ function envWith(records: Record<string, SessionAccess>) {
   const env = fakeEnv({
     LOOMS_RUN: {
       getByName: (runId: string) =>
+        // SAFETY: the gate only calls `getAccess` on the stub, which this fake answers.
         ({
           getAccess: async () => {
             asked.push(runId)

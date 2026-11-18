@@ -10,22 +10,28 @@ import type { SessionFeed } from './session-feed'
 /** How long to wait for the card before saying something went wrong. */
 const CARD_TIMEOUT_MS = 30_000
 
-/** Where the session's pull request stands, from the publish cards in its feed. */
-export function pullRequestState(feed: SessionFeed): {
+export interface PullRequestState {
   /** A card waiting for someone to publish or discard it. */
   readonly awaiting: string | null
   /** A card that was approved and is being published now. */
   readonly publishing: boolean
-} {
+}
+
+/** Where the session's pull request stands, from the publish cards in its feed. */
+export function pullRequestState(feed: SessionFeed): PullRequestState {
   let awaiting: string | null = null
   let publishing = false
 
   for (const item of feed.items) {
-    if (item.kind !== 'question' || !item.approvalId.startsWith('pr_publish_') || item.publish) {
+    if (
+      item.kind !== 'question' ||
+      !item.approvalId.startsWith('pr_publish_') ||
+      item.publish !== undefined
+    ) {
       continue
     }
 
-    if (!item.decision) {
+    if (item.decision === undefined) {
       awaiting = item.approvalId
     } else if (item.decision.answer !== null && item.decision.answer !== 'discard') {
       publishing = true
@@ -73,13 +79,13 @@ export function OpenPullRequestButton({
 
   // The card the button asked for has arrived: take the person to it.
   useEffect(() => {
-    if (arrived && requested) {
+    if (arrived) {
       requestAnimationFrame(() => showCard(requested))
     }
   }, [arrived, requested])
 
   useEffect(() => {
-    if (!requested || arrived) {
+    if (requested === null || arrived) {
       return
     }
 
@@ -101,14 +107,14 @@ export function OpenPullRequestButton({
 
   const disabledReason = publishing
     ? 'Publishing the pull request…'
-    : working && !awaiting
+    : working && awaiting === null
       ? 'Available when the agents finish their turn'
       : null
 
   const tip =
     error ??
     disabledReason ??
-    (awaiting
+    (awaiting !== null
       ? 'A pull request is waiting for your approval. Show it.'
       : hasPulls
         ? 'Push the latest work to this session’s pull request. You review it before anything is published.'
@@ -118,7 +124,7 @@ export function OpenPullRequestButton({
     setTimedOut(false)
     request.reset()
 
-    if (awaiting) {
+    if (awaiting !== null) {
       showCard(awaiting)
       return
     }
@@ -133,12 +139,12 @@ export function OpenPullRequestButton({
           type="button"
           onClick={onClick}
           disabled={opening || disabledReason !== null}
-          aria-label={awaiting ? 'Show the pull request waiting for approval' : label}
+          aria-label={awaiting !== null ? 'Show the pull request waiting for approval' : label}
           className={cn(
             'focus-visible:ring-ring/50 inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full border px-2 text-[11px] transition-colors duration-100 outline-none focus-visible:ring-2 disabled:opacity-50',
-            awaiting
+            awaiting !== null
               ? 'border-brand/50 text-brand hover:bg-brand/10'
-              : error
+              : error !== null
                 ? 'border-status-failed/50 text-status-failed'
                 : 'text-muted-foreground hover:text-foreground',
           )}
@@ -149,7 +155,13 @@ export function OpenPullRequestButton({
             <GitPullRequestArrow className="size-3" />
           )}
           <span className="hidden @lg:inline">
-            {opening ? 'Opening…' : publishing ? 'Publishing…' : awaiting ? 'Review PR' : label}
+            {opening
+              ? 'Opening…'
+              : publishing
+                ? 'Publishing…'
+                : awaiting !== null
+                  ? 'Review PR'
+                  : label}
           </span>
         </button>
       </TooltipTrigger>

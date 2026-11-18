@@ -1,7 +1,14 @@
+import { z } from 'zod'
+
 import { parseHarness, type VendorHarnessId } from '../harness'
 
 const KEY_PREFIX = 'shuttle:credential:'
 const OWNER_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
+
+const CredentialPayloadSchema = z.object({
+  env: z.record(z.string(), z.string()).optional(),
+  files: z.record(z.string(), z.string()).optional(),
+})
 
 /** What a vendor agent needs to run signed in. */
 export interface CredentialPayload {
@@ -26,7 +33,7 @@ interface StoredCredential {
 /** The slice of Durable Object storage the store needs. */
 export interface CredentialStorage {
   get<T>(key: string): Promise<T | undefined>
-  put(key: string, value: unknown): Promise<void>
+  put(key: string, value: StoredCredential): Promise<void>
   delete(key: string): Promise<boolean>
   list<T>(options: { prefix: string }): Promise<Map<string, T>>
 }
@@ -75,6 +82,12 @@ function ownerPrefix(owner: string): string {
   return `${KEY_PREFIX}${owner}:`
 }
 
+function slot(owner: string, harness: VendorHarnessId) {
+  const storageKey = `${ownerPrefix(owner)}${harness}`
+
+  return { storageKey, additionalData: new TextEncoder().encode(`${owner}:${harness}`) }
+}
+
 /**
  * Encrypted store for vendor agent credentials. Records are AES-GCM encrypted with a key derived
  * from `secret` (which must be a long random value) and bound to their owner and harness, so a
@@ -92,7 +105,7 @@ export function createCredentialStore(options: {
   const key = (): Promise<CryptoKey> => {
     const secret = options.secret?.trim()
 
-    if (!secret) {
+    if (secret === undefined || secret === '') {
       return Promise.reject(new CredentialsKeyMissingError())
     }
 
@@ -103,12 +116,6 @@ export function createCredentialStore(options: {
       )
 
     return cachedKey
-  }
-
-  const slot = (owner: string, harness: VendorHarnessId) => {
-    const storageKey = `${ownerPrefix(owner)}${harness}`
-
-    return { storageKey, additionalData: new TextEncoder().encode(`${owner}:${harness}`) }
   }
 
   return {
@@ -136,7 +143,7 @@ export function createCredentialStore(options: {
       const { storageKey, additionalData } = slot(owner, harness)
       const record = await storage.get<StoredCredential>(storageKey)
 
-      if (!record) {
+      if (record === undefined) {
         return null
       }
 
@@ -146,7 +153,7 @@ export function createCredentialStore(options: {
         fromBase64(record.data),
       )
 
-      return JSON.parse(new TextDecoder().decode(decrypted)) as CredentialPayload
+      return CredentialPayloadSchema.parse(JSON.parse(new TextDecoder().decode(decrypted)))
     },
 
     async remove(owner, harness) {
@@ -161,7 +168,7 @@ export function createCredentialStore(options: {
       for (const [storageKey, record] of records) {
         const harness = parseHarness(storageKey.slice(prefix.length))
 
-        if (harness && harness !== 'shuttle') {
+        if (harness !== null && harness !== 'shuttle') {
           summaries.push({ harness, updatedAt: record.updatedAt })
         }
       }

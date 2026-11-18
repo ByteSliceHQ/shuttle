@@ -70,7 +70,7 @@ function inOrderScore(needle: string, haystack: string, nameStart: number): numb
 export function matchScore(query: string, path: string): number | null {
   const needle = query.toLowerCase().replaceAll(/\s+/g, '')
 
-  if (!needle) {
+  if (needle === '') {
     return 0
   }
 
@@ -111,7 +111,11 @@ export function searchFiles(paths: readonly string[], query: string, limit = 50)
   }
 
   return scored
-    .toSorted((left, right) => right.score - left.score || left.path.localeCompare(right.path))
+    .toSorted((left, right) =>
+      right.score - left.score !== 0
+        ? right.score - left.score
+        : left.path.localeCompare(right.path),
+    )
     .slice(0, limit)
     .map((item) => item.path)
 }

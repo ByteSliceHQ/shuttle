@@ -2,6 +2,7 @@ import { MAX_SESSION_COMMITS, parseComparison, type ParsedComparison } from '@sh
 
 import { shellQuote } from './exec-argv'
 import { REVIEW_BASE_CONFIG_KEY } from './stack'
+import { nullIfEmpty } from './text'
 import { worktreeRepoPath, worktreeRoot } from './workspace'
 
 /**
@@ -174,7 +175,9 @@ export function comparisonScript(defaultBranch: string, comparison: ParsedCompar
 
 /** The comparison a repository asks for, the session's start when it names none or a bad one. */
 function comparisonOf(against: string | undefined): ParsedComparison {
-  return (against && parseComparison(against)) || { kind: 'session' }
+  const parsed = against === undefined || against === '' ? null : parseComparison(against)
+
+  return parsed ?? { kind: 'session' }
 }
 
 /**
@@ -184,7 +187,7 @@ function comparisonOf(against: string | undefined): ParsedComparison {
  * index and the branch are untouched. Nothing runs when there is no `$base`.
  */
 function measuredDiff(options: string, pathspec = ''): string {
-  const tail = pathspec ? ` -- ${pathspec}` : ''
+  const tail = pathspec === '' ? '' : ` -- ${pathspec}`
 
   return [
     'if [ -z "$base" ]; then :',
@@ -250,7 +253,8 @@ function localBranches(decorations: string): string[] {
     .split(', ')
     .map((item) => item.replace(/^HEAD -> /, '').trim())
     .filter(
-      (item) => item && item !== 'HEAD' && !item.startsWith('tag: ') && !item.startsWith('origin/'),
+      (item) =>
+        item !== '' && item !== 'HEAD' && !item.startsWith('tag: ') && !item.startsWith('origin/'),
     )
 }
 
@@ -277,7 +281,7 @@ export function parseWorkspaceSummary(output: string): WorkspaceSummary {
     const rest = space < 0 ? '' : line.slice(space + 1)
     const repo = repos.at(-1)
 
-    if (kind === 'REPO' && rest) {
+    if (kind === 'REPO' && rest !== '') {
       repos.push({
         name: rest,
         files: [],
@@ -288,39 +292,39 @@ export function parseWorkspaceSummary(output: string): WorkspaceSummary {
         commits: [],
         measure: { baseSha: null, baseMode: null, headSha: null, error: null },
       })
-    } else if (kind === 'FILE' && rest && repo) {
+    } else if (kind === 'FILE' && rest !== '' && repo) {
       repo.files.push(rest)
     } else if (kind === 'CHANGE' && repo) {
       // `git diff --name-status` separates the status from the path with a tab.
       const [code = '', path = ''] = rest.split('\t')
 
-      if (path) {
+      if (path !== '') {
         repo.changes.push({ path, status: changeStatus(code) })
       }
     } else if (kind === 'MEASURE' && repo) {
       const [session = '', base = '', mode = '', head = ''] = rest.split('\t')
 
-      repo.sessionBaseSha = session || null
-      repo.measure.baseSha = base || null
+      repo.sessionBaseSha = nullIfEmpty(session)
+      repo.measure.baseSha = nullIfEmpty(base)
       repo.measure.baseMode = mode === 'merge-base' || mode === 'tip' ? mode : null
-      repo.measure.headSha = head || null
+      repo.measure.headSha = nullIfEmpty(head)
     } else if (kind === 'ERROR' && repo) {
       repo.measure.error = rest === 'missing' ? 'missing' : null
     } else if (kind === 'HEAD' && repo) {
       const [branch = '', sha = '', tree = ''] = rest.split('\t')
 
-      repo.head = sha ? { branch: branch || null, sha, tree } : null
+      repo.head = sha === '' ? null : { branch: nullIfEmpty(branch), sha, tree }
     } else if (kind === 'DIRTY' && repo) {
       repo.dirty = true
     } else if (kind === 'COMMIT' && repo) {
       const [sha = '', tree = '', time = '', decorations = '', ...subject] = rest.split('\t')
 
-      if (sha) {
+      if (sha !== '') {
         repo.commits.push({
           sha,
           tree,
           subject: subject.join('\t'),
-          at: Number(time) * 1000 || 0,
+          at: Number.isNaN(Number(time)) ? 0 : Number(time) * 1000,
           branches: localBranches(decorations),
         })
       }

@@ -1,4 +1,5 @@
 import type { InterjectionKind } from '@shuttle/api'
+import type { JsonObject } from '@swirls/looms/core'
 
 import { type ShuttleHost, SignalError } from '../../shuttle'
 
@@ -10,7 +11,7 @@ async function signal(
   host: ShuttleHost,
   runId: string,
   name: string,
-  input: object,
+  input: JsonObject,
   failure: string,
 ): Promise<void> {
   try {
@@ -32,13 +33,12 @@ export function reroute(
   kind: InterjectionKind,
   targetThreadId?: string,
 ): Promise<void> {
-  return signal(
-    host,
-    runId,
-    'shuttle/reroute',
-    { messageId, kind, ...(targetThreadId ? { targetThreadId } : {}) },
-    'Failed to reroute',
-  )
+  const input: JsonObject =
+    targetThreadId === undefined || targetThreadId === ''
+      ? { messageId, kind }
+      : { messageId, kind, targetThreadId }
+
+  return signal(host, runId, 'shuttle/reroute', input, 'Failed to reroute')
 }
 
 /** Resolves an agent's `ask_user` gate; `null` lets the agent use its own judgment. */
@@ -48,7 +48,7 @@ export function answerQuestion(
   approvalId: string,
   answer: string | null,
 ): Promise<void> {
-  const choice =
+  const choice: JsonObject =
     answer === null
       ? { actionId: 'defer', outcome: 'reject' }
       : { actionId: 'answer', outcome: 'approve', payload: { answer } }
@@ -79,14 +79,19 @@ export function decideStructuredApproval(
   choice: {
     readonly actionId: string
     readonly outcome: 'approve' | 'reject'
-    readonly payload?: Record<string, unknown>
+    readonly payload?: JsonObject
   },
 ): Promise<void> {
+  const decision: JsonObject =
+    choice.payload === undefined
+      ? { actionId: choice.actionId, outcome: choice.outcome }
+      : { actionId: choice.actionId, outcome: choice.outcome, payload: choice.payload }
+
   return signal(
     host,
     runId,
     'approval/decision',
-    { approvalId, choice },
+    { approvalId, choice: decision },
     'Failed to decide approval',
   )
 }

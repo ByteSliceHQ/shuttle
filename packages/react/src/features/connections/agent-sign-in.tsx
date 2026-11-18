@@ -6,6 +6,7 @@ import type { Connection, SandboxPlace } from '@shuttle/api'
 
 import { Button } from '../../components/ui/button'
 import { Input } from '../../components/ui/input'
+import { hasText } from '../../lib/text'
 import {
   type DeviceRunnerStatus,
   type ShuttleDevice,
@@ -38,7 +39,7 @@ const POLL_MS = 1_500
 export function useSignIn(
   harness: Connection['harness'],
   place: SignInPlace,
-  onDone?: () => Promise<unknown> | void,
+  onDone?: () => Promise<void> | void,
 ) {
   const host = useShuttleHost()
   const api = useApi()
@@ -62,16 +63,16 @@ export function useSignIn(
   const loginId = begin.data?.loginId
 
   const loginKey = api.connections.login.follow.queryKey({
-    input: loginId ? { harness, loginId } : skipToken,
+    input: hasText(loginId) ? { harness, loginId } : skipToken,
   })
 
   // One entry per sign-in, holding everything it has said so far: what a single read from the
   // start would return. Each poll asks only for what came after the last one and adds it on.
   const follow = useQuery(
     api.connections.login.follow.queryOptions({
-      input: loginId ? { harness, loginId } : skipToken,
+      input: hasText(loginId) ? { harness, loginId } : skipToken,
       context,
-      queryFn: loginId
+      queryFn: hasText(loginId)
         ? async ({ client: cache, signal }) => {
             const soFar = cache.getQueryData(loginKey)
 
@@ -136,7 +137,7 @@ export function useSignIn(
     sendCode.reset()
     setCodeSentFor(null)
 
-    if (loginId) {
+    if (hasText(loginId)) {
       // Best effort: the sign-in is no longer followed either way.
       stop.mutate({ harness, loginId })
     }
@@ -145,7 +146,7 @@ export function useSignIn(
   const prompt = outcome?.status === 'waiting' ? outcome.prompt : null
 
   function submitCode(code: string) {
-    if (!loginId || !prompt || !code.trim()) {
+    if (!hasText(loginId) || !prompt || code.trim() === '') {
       return
     }
 
@@ -164,7 +165,7 @@ export function useSignIn(
       return { step: 'failed', error: begin.error.message }
     }
 
-    if (!loginId || connected) {
+    if (!hasText(loginId) || connected) {
       return null
     }
 
@@ -246,7 +247,7 @@ export function SignInProgress({
         Open the {label} sign-in page <ExternalLink className="size-3" />
       </a>
 
-      {signIn.code ? (
+      {hasText(signIn.code) ? (
         <div className="flex items-center gap-2">
           <span className="text-muted-foreground">Enter this code there:</span>
           <code className="bg-muted text-foreground rounded px-2 py-1 font-mono text-sm tracking-wider">
@@ -280,7 +281,7 @@ export function SignInProgress({
             autoComplete="off"
             className="h-8 flex-1 font-mono text-xs"
           />
-          <Button size="sm" type="submit" disabled={!codeInput.trim()}>
+          <Button size="sm" type="submit" disabled={codeInput.trim() === ''}>
             Submit
           </Button>
         </form>
@@ -350,13 +351,13 @@ export function SignInGate({
   /** For a session not started yet, which will run at `place`. */
   upcoming?: boolean
   /** Called once signed in. The connections are read again without it. */
-  onSignedIn?: () => Promise<unknown> | void
+  onSignedIn?: () => Promise<void> | void
   /** Offered when the agent is signed in in the cloud and the session can move there. */
   onMoveToCloud?: () => void
 }) {
   const { label } = connection
   const flow = useSignIn(connection.harness, place, onSignedIn)
-  const cloudInstead = place === 'local' && connection.cloud && onMoveToCloud
+  const cloudInstead = place === 'local' && connection.cloud && onMoveToCloud !== undefined
 
   return (
     <div className="bg-muted/40 mx-1 mt-1 mb-1.5 flex flex-col gap-2 rounded-lg border px-3 py-2.5">
@@ -399,19 +400,18 @@ export function SignInGate({
   )
 }
 
-/**
- * Whether `harness` has to be signed in at `place` before a session there can use it, with the
- * agent's connection for the gate that offers it. Nothing is blocked until the connections are in.
- */
-export function useAgentGate(
-  harness: string,
-  place: SignInPlace | null,
-): {
+export interface AgentGate {
   connection: Connection | undefined
   blocked: boolean
   reload: () => Promise<void>
   connections: readonly Connection[] | null
-} {
+}
+
+/**
+ * Whether `harness` has to be signed in at `place` before a session there can use it, with the
+ * agent's connection for the gate that offers it. Nothing is blocked until the connections are in.
+ */
+export function useAgentGate(harness: string, place: SignInPlace | null): AgentGate {
   const api = useApi()
   const queryClient = useQueryClient()
   const { data } = useConnections()
@@ -436,14 +436,16 @@ function signInPlaceOf(place: SandboxPlace, app: ShuttleDevice | null): SignInPl
   return app && place.sandbox.deviceId === app.deviceId ? 'local' : null
 }
 
+export interface SessionRunsAt {
+  place: SignInPlace | null
+  moveToCloud: () => Promise<void>
+}
+
 /**
  * Where a session runs, as far as sign-ins go: this machine, the cloud, or null for another of
  * the viewer's machines (or not known yet), whose sign-ins cannot be checked from here.
  */
-export function useSessionRunsAt(runId: string): {
-  place: SignInPlace | null
-  moveToCloud: () => Promise<void>
-} {
+export function useSessionRunsAt(runId: string): SessionRunsAt {
   const api = useApi()
   const device = useDevice()
   const queryClient = useQueryClient()

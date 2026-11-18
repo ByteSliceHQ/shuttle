@@ -1,3 +1,5 @@
+import { Schema } from 'effect'
+
 import { pullsRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { listPullThreads, type PullThreadSnapshot } from '../github/pulls'
@@ -5,7 +7,7 @@ import { loomsStub } from '../looms-stub'
 import type { LinkedRepo } from '../workspace/scope'
 import { pullKey } from './scope'
 import { syncThreads } from './signals'
-import type { PullThreadsState } from './threads'
+import { PullThreadsStateSchema } from './threads'
 
 /**
  * Brings the mirror of a pull request's review threads up to date with GitHub. Webhooks keep it
@@ -42,6 +44,8 @@ export function sameThreads(
   return shape(known ?? []) === shape(fetched)
 }
 
+const ProjectionBodySchema = Schema.Struct({ value: Schema.optional(PullThreadsStateSchema) })
+
 async function knownThreads(
   env: ShuttleEnv,
   runId: string,
@@ -57,7 +61,7 @@ async function knownThreads(
     return undefined
   }
 
-  const body = (await response.json()) as { value?: PullThreadsState }
+  const body = Schema.decodeUnknownSync(ProjectionBodySchema)(await response.json())
 
   return body.value?.pulls[key]
 }

@@ -26,7 +26,7 @@ async function run(command: readonly string[], cwd: string): Promise<string> {
 }
 
 interface Manifest {
-  readonly exports?: Record<string, unknown>
+  readonly exports?: object
   readonly dependencies?: Record<string, string>
   readonly peerDependencies?: Record<string, string>
 }
@@ -38,8 +38,41 @@ function imports(specifiers: readonly string[]): string {
     .join('\n')
 }
 
+function isString(value: unknown): value is string {
+  return typeof value === 'string'
+}
+
+/** Whether a parsed JSON value is a plain object (not an array, not null). */
+function isObject(value: unknown): value is object {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Whether a parsed JSON value is an object whose values all satisfy `guard`. */
+function isRecordOf<Value>(
+  value: unknown,
+  guard: (entry: unknown) => entry is Value,
+): value is Readonly<Record<string, Value>> {
+  return isObject(value) && Object.values(value).every(guard)
+}
+
+/** Whether a parsed `package.json` has the fields this script reads, in the shape it reads them. */
+function isManifest(value: unknown): value is Manifest {
+  return (
+    isObject(value) &&
+    (!('exports' in value) || isObject(value.exports)) &&
+    (!('dependencies' in value) || isRecordOf(value.dependencies, isString)) &&
+    (!('peerDependencies' in value) || isRecordOf(value.peerDependencies, isString))
+  )
+}
+
 async function manifestOf(directory: string): Promise<Manifest> {
-  return JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
+  const manifest: unknown = JSON.parse(await readFile(join(directory, 'package.json'), 'utf8'))
+
+  if (!isManifest(manifest)) {
+    throw new Error(`${directory}/package.json is not shaped like a package manifest`)
+  }
+
+  return manifest
 }
 
 const root = resolve(import.meta.dirname, '..')

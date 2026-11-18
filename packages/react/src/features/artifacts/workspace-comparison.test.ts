@@ -82,14 +82,14 @@ const second: RunPull = {
 
 describe('the session pull requests', () => {
   test('are the ones linked to it, open first', () => {
-    const inbox = {
+    const inbox: PullInboxState = {
       pulls: {
         a: pull(1, { state: 'closed' }),
         b: pull(2),
         c: pull(3, { linkedSessions: [{ runId: 'other', role: 'author' }] }),
       },
       policies: {},
-    } as unknown as PullInboxState
+    }
 
     expect(runPulls(inbox, RUN).map((run) => run.pull.number)).toEqual([2, 1])
   })

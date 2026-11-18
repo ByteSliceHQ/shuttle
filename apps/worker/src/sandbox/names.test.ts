@@ -10,20 +10,29 @@ import { orgOfSandbox, sandboxesArePersonal, userSandboxName } from './names'
 const ORG = 'orgA0000000000000000000000000000'
 const session = scopedRunId(ORG, 'session_1')
 
-function storageWith(values: Record<string, unknown>): DurableObjectStorage {
+interface StoredAccess {
+  readonly ownerId: string
+  readonly memberIds: readonly string[]
+  readonly visibility: 'private'
+}
+
+type Stored = string | StoredAccess
+
+function storageWith(values: Record<string, Stored>): DurableObjectStorage {
   const map = new Map(Object.entries(values))
 
+  // SAFETY: only `get` and `put` are used by the code under test; the rest of the storage API is not touched.
   return {
     get: async (key: string) => map.get(key),
-    put: async (key: string, value: unknown) => {
+    put: async (key: string, value: Stored) => {
       map.set(key, value)
     },
-  } as unknown as DurableObjectStorage
+  } as DurableObjectStorage
 }
 
 const ownedByAlice = {
   [ACCESS_STORAGE_KEY]: { ownerId: 'alice', memberIds: ['bob'], visibility: 'private' },
-}
+} satisfies Record<string, Stored>
 
 describe('sandbox names', () => {
   test("a person's sandbox names its organization", () => {

@@ -7,12 +7,13 @@ import type { LinkedSandboxRepo } from './sandbox/workspace'
 import type { SandboxPlacement } from './session/bind-sandbox'
 import type { PendingPlacement, SessionMove } from './session/handoff'
 import type { SessionStacks } from './session/stack-state'
-import type { Team } from './team'
+import type { Team, TeamInput } from './team'
 import type { SessionAccess } from './tenancy/access'
 import type {
   VendorCatalogue,
   VendorModel,
   VendorModelChoice,
+  VendorModelChoiceInput,
   VendorModelChoices,
 } from './vendor/models'
 import type { SessionActivity } from './workspace/module'
@@ -47,11 +48,11 @@ export interface LoomsRunStub {
   getHarness(): Promise<{ harness: HarnessId }>
   setHarness(harness: string): Promise<{ harness: HarnessId }>
   getTeam(): Promise<{ team: Team }>
-  setTeam(team: unknown): Promise<{ team: Team }>
+  setTeam(team: TeamInput | null): Promise<{ team: Team }>
   getVendorModelChoices(): Promise<{ choices: VendorModelChoices }>
   setVendorModelChoice(
     harness: VendorHarnessId,
-    choice: unknown,
+    choice: VendorModelChoiceInput | null,
   ): Promise<{ choice: VendorModelChoice }>
   getVendorCatalogue(harness: VendorHarnessId): Promise<VendorCatalogue | null>
   putVendorCatalogue(
@@ -64,7 +65,7 @@ export interface LoomsRunStub {
   removeCredential(userId: string, harness: VendorHarnessId): Promise<boolean>
   listCredentials(userId: string): Promise<CredentialSummary[]>
   getAccess(): Promise<SessionAccess | null>
-  setAccess(access: unknown): Promise<SessionAccess>
+  setAccess(access: SessionAccess): Promise<SessionAccess>
   getSandboxName(): Promise<string | null>
   getSandboxPlacement(): Promise<SandboxPlacement | null>
   placeSandbox(

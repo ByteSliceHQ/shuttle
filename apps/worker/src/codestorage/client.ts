@@ -20,7 +20,7 @@ export const TOKEN_TTL_SECONDS = 3600
 const EPHEMERAL_REFS = 'refs/namespaces/ephemeral/refs/heads/'
 
 export function codeStorageConfigured(env: CodeStorageEnv): boolean {
-  return Boolean(env.PIERRE_ORG?.trim() && env.PIERRE_PRIVATE_KEY?.trim())
+  return (env.PIERRE_ORG?.trim() ?? '') !== '' && (env.PIERRE_PRIVATE_KEY?.trim() ?? '') !== ''
 }
 
 /**

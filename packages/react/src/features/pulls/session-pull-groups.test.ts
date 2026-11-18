@@ -5,7 +5,7 @@ import { shuttleStackPosition } from './pulls'
 import { groupSessionPulls } from './session-pull-groups'
 
 function pull(number: number, stack?: PublishedPull['stack'], fullName = 'acme/glue') {
-  return { fullName, number, url: '', draft: true, ...(stack ? { stack } : {}) }
+  return { fullName, number, url: '', draft: true, stack }
 }
 
 function describeGroups(pulls: readonly PublishedPull[]) {

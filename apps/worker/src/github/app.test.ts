@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
+import { z } from 'zod'
+
 import { fakeEnv } from '../testing/fake-env'
 import { createAppJwt, signState, verifyState } from './app'
 
@@ -43,9 +45,9 @@ describe('github app jwt', () => {
     expect(payload).toBeTruthy()
     expect(signature).toBeTruthy()
 
-    const decoded = JSON.parse(atob(payload!.replace(/-/g, '+').replace(/_/g, '/'))) as {
-      iss: string
-    }
+    const decoded = z
+      .object({ iss: z.string() })
+      .parse(JSON.parse(atob(payload!.replace(/-/g, '+').replace(/_/g, '/'))))
 
     expect(decoded.iss).toBe('12345')
   })

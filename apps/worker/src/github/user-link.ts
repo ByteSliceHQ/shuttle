@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 import type { ShuttleEnv } from '../env'
 import { connectInstallation } from '../tenancy/installations'
 import type { GithubAccount } from './client'
@@ -30,7 +32,9 @@ export type LinkOutcome =
   | { readonly kind: 'none' }
 
 export function githubOAuthConfigured(env: OAuthEnv): boolean {
-  return Boolean(env.GITHUB_CLIENT_ID?.trim() && env.GITHUB_CLIENT_SECRET?.trim())
+  return (
+    (env.GITHUB_CLIENT_ID?.trim() ?? '') !== '' && (env.GITHUB_CLIENT_SECRET?.trim() ?? '') !== ''
+  )
 }
 
 /** Where GitHub sends the person back to. It must be listed as a callback URL on the App. */
@@ -66,29 +70,45 @@ export async function exchangeGithubCode(
     }),
   })
 
-  const body = (await response.json().catch(() => null)) as {
-    access_token?: unknown
-    error_description?: unknown
-  } | null
+  const body = TokenExchangeSchema.parse(await response.json().catch(() => null))
 
-  if (!response.ok || typeof body?.access_token !== 'string') {
+  if (!response.ok || body?.access_token === undefined) {
     throw new Error(
-      typeof body?.error_description === 'string'
-        ? body.error_description
-        : `GitHub did not accept the sign-in (${response.status})`,
+      body?.error_description ?? `GitHub did not accept the sign-in (${response.status})`,
     )
   }
 
   return body.access_token
 }
 
-interface InstallationsPage {
-  readonly installations?: readonly {
-    readonly id?: unknown
-    readonly app_id?: unknown
-    readonly account?: { login?: unknown; type?: unknown; avatar_url?: unknown } | null
-  }[]
-}
+/** Fields that are not the expected kind read as absent. */
+const TokenExchangeSchema = z
+  .object({
+    access_token: z.string().optional().catch(undefined),
+    error_description: z.string().optional().catch(undefined),
+  })
+  .nullable()
+  .catch(null)
+
+const InstallationsPageSchema = z.object({
+  installations: z
+    .array(
+      z.object({
+        id: z.number().optional().catch(undefined),
+        app_id: z.number().optional().catch(undefined),
+        account: z
+          .object({
+            login: z.string().optional().catch(undefined),
+            type: z.string().optional().catch(undefined),
+            avatar_url: z.string().optional().catch(undefined),
+          })
+          .nullish()
+          .catch(undefined),
+      }),
+    )
+    .optional()
+    .default([]),
+})
 
 /** The installations of this App that the person can access, as GitHub reports them. */
 export async function listAccessibleInstallations(
@@ -116,16 +136,16 @@ export async function listAccessibleInstallations(
       throw new Error(`GitHub would not list installations (${response.status})`)
     }
 
-    const { installations = [] } = (await response.json()) as InstallationsPage
+    const { installations } = InstallationsPageSchema.parse(await response.json())
 
     for (const installation of installations) {
       const { id, account } = installation
 
       // A token for this App only ever lists this App's installations; the check is a guard.
       if (
-        typeof id !== 'number' ||
+        id === undefined ||
         (Number.isFinite(appId) && installation.app_id !== appId) ||
-        typeof account?.login !== 'string'
+        account?.login === undefined
       ) {
         continue
       }
@@ -134,8 +154,8 @@ export async function listAccessibleInstallations(
         id,
         account: {
           login: account.login,
-          type: typeof account.type === 'string' ? account.type : 'User',
-          avatarUrl: typeof account.avatar_url === 'string' ? account.avatar_url : '',
+          type: account.type ?? 'User',
+          avatarUrl: account.avatar_url ?? '',
         },
       })
     }

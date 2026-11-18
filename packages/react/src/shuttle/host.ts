@@ -4,9 +4,11 @@ import { OpenAPILink } from '@orpc/openapi-client/fetch'
 import { createTanstackQueryUtils } from '@orpc/tanstack-query'
 
 import { clientContract } from '@shuttle/api'
+import type { JsonObject } from '@swirls/looms/core'
 import { preloadRunStore, type RunStoreOptions } from '@swirls/looms/react'
 
 import { eventCacheFor } from '../features/events/event-cache'
+import { hasText } from '../lib/text'
 import type { ShuttleDevice } from './device'
 
 /** What a single call may add to its request. */
@@ -94,7 +96,7 @@ export interface ShuttleHost {
    * Sends a named signal to a run. What the signal does is read back from the run's event
    * stream, not from the response.
    */
-  signalRun(runId: string, name: string, input: object): Promise<void>
+  signalRun(runId: string, name: string, input: JsonObject): Promise<void>
   /**
    * How a run's event store is opened for the person signed in. The provider and anything that
    * preloads are given the same object, so a store opened ahead of a page is the one it uses.
@@ -141,13 +143,14 @@ export function createShuttleHost(options: ShuttleHostOptions = {}): ShuttleHost
   const request: ShuttleFetch = options.fetch ?? ((input, init) => fetch(input, init))
 
   /** The backend's origin: the one it was given, or the page's own. */
-  const origin = () => baseUrl || window.location.origin
+  const origin = () => (baseUrl !== '' ? baseUrl : window.location.origin)
 
   const client: ShuttleClient = createORPCClient(
     new OpenAPILink<CallContext>(clientContract, {
       url: origin,
       fetch: (input, init) => request(input, init),
-      headers: ({ context }) => (context.deviceId ? { 'x-shuttle-device': context.deviceId } : {}),
+      headers: ({ context }) =>
+        hasText(context.deviceId) ? { 'x-shuttle-device': context.deviceId } : {},
     }),
   )
 
@@ -204,7 +207,7 @@ export function createShuttleHost(options: ShuttleHostOptions = {}): ShuttleHost
         const detail = (await response.text().catch(() => '')).trim().slice(0, 300)
 
         throw new SignalError(
-          detail || `The session refused the request (${response.status}).`,
+          detail !== '' ? detail : `The session refused the request (${response.status}).`,
           response.status,
         )
       }

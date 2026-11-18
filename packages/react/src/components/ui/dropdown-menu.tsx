@@ -107,7 +107,7 @@ function DropdownMenuRadioItem({
         </DropdownMenuPrimitive.ItemIndicator>
       </span>
       <span className="flex items-center gap-1.5">{children}</span>
-      {description ? (
+      {description !== undefined && description !== '' ? (
         <span className="text-muted-foreground mt-0.5 text-[11px] leading-snug">{description}</span>
       ) : null}
     </DropdownMenuPrimitive.RadioItem>

@@ -29,7 +29,7 @@ export function createReviewerAgent(
         return { text: input.text }
       }
 
-      return { text: String(input) }
+      return { text: isJsonString(input) ? input : JSON.stringify(input) }
     },
   })
 

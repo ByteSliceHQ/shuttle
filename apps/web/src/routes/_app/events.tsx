@@ -70,6 +70,15 @@ const COLUMN_OPTIONS: readonly { readonly id: keyof EventRowColumns; readonly la
 /** The session name is the widest column, so a narrow log starts without it. */
 const COMPACT_COLUMNS: EventRowColumns = { seq: true, time: false, session: false, detail: true }
 
+/** What a session is called in the log: its title, else its goal, else a short run id. */
+function sessionLabel(session: { title: string; goal: string; runId: string }): string {
+  if (session.title !== '') {
+    return session.title
+  }
+
+  return session.goal !== '' ? session.goal : shortId(session.runId)
+}
+
 function GlobalEventsPage() {
   return <GlobalEventLog />
 }
@@ -79,7 +88,7 @@ function GlobalEventLog() {
   const [query, setQuery] = useState('')
   const [follow, setFollow] = useState(true)
   const [selectedCursor, setSelectedCursor] = useState<number | undefined>()
-  const [widthRef, widthBucket] = useWidthBucket<HTMLDivElement>(COMPACT_BREAKPOINTS)
+  const [widthRef, widthBucket] = useWidthBucket(COMPACT_BREAKPOINTS)
   const compact = widthBucket === 0
   const [compactColumns, setCompactColumns] = useState(COMPACT_COLUMNS)
   const columns = compact ? compactColumns : undefined
@@ -96,8 +105,8 @@ function GlobalEventLog() {
 
   const serverFilter = useMemo(
     () => ({
-      runKinds: [...runKinds] as GlobalRunKind[],
-      runIds: runIds.size > 0 ? ([...runIds] as string[]) : undefined,
+      runKinds: [...runKinds],
+      runIds: runIds.size > 0 ? [...runIds] : undefined,
     }),
     [runKinds, runIds],
   )
@@ -114,7 +123,7 @@ function GlobalEventLog() {
     const labels = new Map<string, string>()
 
     for (const session of Object.values(workspace.tree.sessions)) {
-      labels.set(session.runId, session.title || session.goal || shortId(session.runId))
+      labels.set(session.runId, sessionLabel(session))
     }
 
     return labels
@@ -125,7 +134,7 @@ function GlobalEventLog() {
       Object.values(workspace.tree.sessions)
         .map((session) => ({
           runId: session.runId,
-          label: session.title || session.goal || shortId(session.runId),
+          label: sessionLabel(session),
           folderId: session.folderId,
         }))
         .toSorted((left, right) => left.label.localeCompare(right.label)),
@@ -141,7 +150,7 @@ function GlobalEventLog() {
           return false
         }
 
-        if (!q) {
+        if (q === '') {
           return true
         }
 

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../components/ui/dialog'
 import { ScrollArea } from '../../components/ui/scroll-area'
 import { cn } from '../../lib/cn'
+import { hasText } from '../../lib/text'
 import { searchFiles } from './file-search'
 
 /** The hint for the shortcut that opens file search, as this platform writes it. */
@@ -78,7 +79,7 @@ function QuickOpenBody({
   const listRef = useRef<HTMLUListElement>(null)
 
   const results = useMemo(() => {
-    if (query.trim()) {
+    if (query.trim() !== '') {
       return searchFiles(paths, query)
     }
 
@@ -96,7 +97,7 @@ function QuickOpenBody({
   }, [active])
 
   const pick = (path: string | undefined) => {
-    if (path) {
+    if (hasText(path)) {
       onPick(path)
     }
   }
@@ -129,7 +130,9 @@ function QuickOpenBody({
           role="combobox"
           aria-expanded
           aria-controls="file-quick-open-results"
-          aria-activedescendant={results[active] ? `file-result-${active}` : undefined}
+          aria-activedescendant={
+            results[active] !== undefined ? `file-result-${active}` : undefined
+          }
           spellCheck={false}
           autoComplete="off"
           className="placeholder:text-muted-foreground/70 h-full min-w-0 flex-1 bg-transparent text-[13px] outline-none"
