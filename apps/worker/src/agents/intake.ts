@@ -20,12 +20,51 @@ export function isHardStop(text: string): boolean {
   )
 }
 
+/**
+ * "Did you get stuck?", "worker 5 is still going?", "you there?": the user is asking how the
+ * work is going. Treating it as a correction interrupts the agent that is busy answering it.
+ */
+export function isStatusCheck(text: string): boolean {
+  const trimmed = text.trim()
+
+  if (trimmed.length > 80) {
+    return false
+  }
+
+  if (
+    /^(hello|hey|hi|ping|you there|are you there|anyone there|status|update)\b[\s?!.]*$/i.test(
+      trimmed,
+    )
+  ) {
+    return true
+  }
+
+  const stalled =
+    /\b(stuck|frozen|hung|hanging|stalled|still (going|working|running|there|alive)|making progress)\b/i
+
+  if (!stalled.test(trimmed)) {
+    return false
+  }
+
+  // About the agents themselves, or asked as a question: not "the build is stuck on X, fix it".
+  return (
+    trimmed.endsWith('?') ||
+    /^(i think |looks like |seems like )?(you|u|you're|youre|it|they|agents?|workers?|the conductor|conductor|everything|the session)\b/i.test(
+      trimmed,
+    )
+  )
+}
+
 /** Local classifier used when Jev is unavailable (no TYPESAFE_AI_API_KEY). */
 export function classifyHeuristic(text: string): InterjectionKind {
   const trimmed = text.trim()
 
   if (isHardStop(trimmed)) {
     return 'stop'
+  }
+
+  if (isStatusCheck(trimmed)) {
+    return 'question'
   }
 
   // "stop using tailwind" redirects the work rather than halting it.
@@ -73,6 +112,7 @@ export const intake = defineEvaluator({
   state: ({ text, activeWorkers }) =>
     [
       'Classify the user message for a coding agent session.',
+      'A message asking whether agents are stuck, still working, or there at all is a question about status, even when it is phrased as a statement such as "i think you got stuck". It is never a correction.',
       `Active workers: ${activeWorkers.length}`,
       `Message: ${text}`,
     ].join('\n'),
@@ -81,23 +121,26 @@ export const intake = defineEvaluator({
       type: 'choice',
       instructions: 'What kind of interjection is this?',
       criteria: {
-        question: 'Asking about status, code, or intent without changing the plan',
+        question:
+          'Asking about status (including whether an agent is stuck or still working), code, or intent without changing the plan',
         idea: 'A soft suggestion or preference to fold into the brief',
         constraint: 'A hard requirement the agents must follow',
-        correction: 'The user is correcting an agent mid-work and wants an interrupt',
+        correction:
+          'The user says what an agent is doing is wrong and how to change it, and wants an interrupt',
         task: 'A new unit of work for the conductor to plan or delegate',
         stop: 'Stop the active agent or cancel work',
       },
     },
   },
-  // Fast-path only: cancel/stop should not wait on a model round-trip.
-  // Everything else goes through Jev (or the heuristic stub when no API key).
+  // Fast paths: a stop must not wait on a model round-trip, and a status check must never be
+  // read as a correction that interrupts a busy agent. Everything else goes through Jev (or the
+  // heuristic stub when there is no API key).
   skipModel: ({ text }) => {
-    if (!isHardStop(text)) {
+    const kind = isHardStop(text) ? 'stop' : isStatusCheck(text) ? 'question' : null
+
+    if (!kind) {
       return undefined
     }
-
-    const kind = 'stop' as const
 
     return {
       route: kind,

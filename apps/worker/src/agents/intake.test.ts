@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { classifyHeuristic, intake, isHardStop } from './intake'
+import { classifyHeuristic, intake, isHardStop, isStatusCheck } from './intake'
 
 describe('intake heuristics', () => {
   test('classifies questions', () => {
@@ -48,5 +48,31 @@ describe('intake heuristics', () => {
         hasConductor: true,
       }),
     ).toBeUndefined()
+  })
+
+  test('reads "are you stuck?" in any phrasing as a status question', () => {
+    for (const text of [
+      'did you get stuck?',
+      'i think you got stuck again',
+      'worker 5 is still going?',
+      'You there?',
+      'hello?',
+    ]) {
+      expect(isStatusCheck(text)).toBe(true)
+      expect(classifyHeuristic(text)).toBe('question')
+
+      expect(intake.skipModel?.({ text, activeWorkers: ['w5'], hasConductor: true })?.route).toBe(
+        'question',
+      )
+    }
+  })
+
+  test('does not mistake real requests for status checks', () => {
+    expect(isStatusCheck('the build is stuck on a type error, fix the generics in api.ts')).toBe(
+      false,
+    )
+
+    expect(isStatusCheck('host the tailwind app on port 3001')).toBe(false)
+    expect(classifyHeuristic('Actually, do not edit package.json')).toBe('correction')
   })
 })
