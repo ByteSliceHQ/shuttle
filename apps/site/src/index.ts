@@ -24,13 +24,7 @@ export function releaseName(pathname: string): string | null {
     : null
 }
 
-async function download(request: Request, env: SiteEnv, name: string): Promise<Response> {
-  const object = await env.RELEASES.get(name, { range: request.headers, onlyIf: request.headers })
-
-  if (!object) {
-    return new Response('No such download.', { status: 404 })
-  }
-
+function releaseHeaders(object: R2Object, name: string): Headers {
   const headers = new Headers()
 
   object.writeHttpMetadata(headers)
@@ -43,6 +37,32 @@ async function download(request: Request, env: SiteEnv, name: string): Promise<R
     'cache-control',
     name.startsWith('latest-mac.') ? 'no-store' : 'public, max-age=86400',
   )
+
+  return headers
+}
+
+async function download(request: Request, env: SiteEnv, name: string): Promise<Response> {
+  // A HEAD asks only for the headers; reading the body of a large build would waste the read.
+  if (request.method === 'HEAD') {
+    const object = await env.RELEASES.head(name)
+
+    if (!object) {
+      return new Response(null, { status: 404 })
+    }
+
+    const headers = releaseHeaders(object, name)
+    headers.set('content-length', String(object.size))
+
+    return new Response(null, { headers })
+  }
+
+  const object = await env.RELEASES.get(name, { range: request.headers, onlyIf: request.headers })
+
+  if (!object) {
+    return new Response('No such download.', { status: 404 })
+  }
+
+  const headers = releaseHeaders(object, name)
 
   if (!('body' in object)) {
     return new Response(null, { status: 304, headers })
@@ -57,12 +77,12 @@ async function download(request: Request, env: SiteEnv, name: string): Promise<R
     headers.set('content-range', `bytes ${offset}-${offset + length - 1}/${object.size}`)
     headers.set('content-length', String(length))
 
-    return new Response(request.method === 'HEAD' ? null : object.body, { status: 206, headers })
+    return new Response(object.body, { status: 206, headers })
   }
 
   headers.set('content-length', String(object.size))
 
-  return new Response(request.method === 'HEAD' ? null : object.body, { headers })
+  return new Response(object.body, { headers })
 }
 
 export default {

@@ -2,12 +2,27 @@ import { expect, test } from 'bun:test'
 
 import site, { releaseName, type SiteEnv } from './index'
 
+const heads: string[] = []
+const gets: string[] = []
+
 function env(objects: Record<string, string>): SiteEnv {
   return {
     LATEST_MAC: 'Shuttle-0.0.1-arm64.dmg',
     ASSETS: { fetch: async () => new Response('page') } as unknown as Fetcher,
     RELEASES: {
+      head: async (name: string) => {
+        heads.push(name)
+        const value = objects[name]
+        return value === undefined
+          ? null
+          : {
+              size: new TextEncoder().encode(value).length,
+              httpEtag: '"release"',
+              writeHttpMetadata: () => {},
+            }
+      },
       get: async (name: string) => {
+        gets.push(name)
         const value = objects[name]
         return value === undefined
           ? null
@@ -57,6 +72,8 @@ test('serves updater metadata without caching and versioned files with caching',
 
   expect(await head.text()).toBe('')
   expect(head.headers.get('content-length')).toBe('3')
+  expect(heads).toEqual(['Shuttle-0.1.20-arm64.zip'])
+  expect(gets.filter((name) => name === 'Shuttle-0.1.20-arm64.zip')).toHaveLength(1)
 })
 
 test('download button follows the manual download pointer and retains its initial fallback', async () => {
