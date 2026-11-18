@@ -94,6 +94,8 @@ export function createConductorAgent(
       'Respect brief updates delivered as steer messages.',
       'When the user sends a new request as a steer, acknowledge it and act on it — do not ignore follow-up tasks.',
       'Summarize progress for the user after workers return.',
+      'Everything you write is shown to the user as you write it, including text beside tool calls. When you have already answered part of a message (for example confirming you can see an attachment), do not answer it again in your summary; report only what changed since.',
+      'When you change something that already has a pull request, say which one you are updating ("pushing this to #13") before you propose it.',
     ].join(' '),
     tools: [askUser, shareFile],
     // The team and the linked repositories decide which tools exist, and both can change

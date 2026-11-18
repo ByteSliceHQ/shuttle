@@ -30,6 +30,25 @@ const PUBLISH_ACTIONS = [
 ]
 
 /**
+ * When the layer already has a pull request, publishing pushes to it: GitHub keeps its draft
+ * state, so asking "draft or not" would offer a choice that does nothing.
+ */
+const UPDATE_ACTIONS = [
+  { id: 'update', label: 'Push update', outcome: 'approve' as const },
+  { id: 'discard', label: 'Discard', outcome: 'reject' as const },
+]
+
+/** What the approval asks: to open pull requests, or to update the one the layer already has. */
+export function publishQuestion(existingPullLabel: string | null): {
+  readonly title: string
+  readonly actions: typeof PUBLISH_ACTIONS | typeof UPDATE_ACTIONS
+} {
+  return existingPullLabel
+    ? { title: `Update ${existingPullLabel}?`, actions: UPDATE_ACTIONS }
+    : { title: 'Publish pull requests?', actions: PUBLISH_ACTIONS }
+}
+
+/**
  * Resolve the worktree current layer, stamp `pr.proposed`, and open the publish
  * approval gate with stack labels already filled in. Invoked from the proposing
  * agent tool so `approval.requested` lands on that thread.
@@ -108,6 +127,19 @@ export function createPreparePrPublishGateEffect(env: ShuttleEnv, storage?: Dura
 
       const parentPullLabel = parentPull ? `${parentPull.fullName}#${parentPull.number}` : ''
 
+      // The pull request this layer already has, which publishing will update instead of opening.
+      const existingPull =
+        stackId != null && layer != null && repoName
+          ? (stacks[stackKey(repoName, stackId)]?.layers.find((entry) => entry.layer === layer)
+              ?.pull ?? null)
+          : null
+
+      const existingPullLabel = existingPull
+        ? `${linked?.fullName ?? repoName}#${existingPull.number}`
+        : ''
+
+      const question = publishQuestion(existingPullLabel || null)
+
       const restackLabel =
         restacks.length > 0 ? restacks.map((number) => `#${number}`).join(', ') : ''
 
@@ -128,7 +160,7 @@ export function createPreparePrPublishGateEffect(env: ShuttleEnv, storage?: Dura
           type: 'approval.requested' as const,
           payload: {
             approvalId: input.approvalId,
-            title: 'Publish pull requests?',
+            title: question.title,
             description: title || 'Shuttle changes',
             schema: {
               type: 'object',
@@ -142,9 +174,12 @@ export function createPreparePrPublishGateEffect(env: ShuttleEnv, storage?: Dura
                 layer: { type: 'number', default: layer ?? 1 },
                 parentPullLabel: { type: 'string', default: parentPullLabel },
                 restackLabel: { type: 'string', default: restackLabel },
+                existingPullLabel: { type: 'string', default: existingPullLabel },
+                existingPullUrl: { type: 'string', default: existingPull?.url ?? '' },
+                existingPullDraft: { type: 'boolean', default: existingPull?.draft ?? false },
               },
             },
-            actions: PUBLISH_ACTIONS,
+            actions: question.actions,
           },
           threadId: input.threadId ?? ctx.threadId,
         },

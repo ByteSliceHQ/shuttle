@@ -41,6 +41,7 @@ export function withPrApprovalDecision<S extends PublishSessionSlice>(
     ? fields.repos.filter(Predicate.isString)
     : [...pending.repos]
 
+  // `update` pushes to a pull request that already exists, which keeps its own draft state.
   const draft =
     actionId === 'publish'
       ? false

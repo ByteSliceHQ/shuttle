@@ -363,6 +363,37 @@ describe('session feed', () => {
     })
   })
 
+  test('records whether publishing opened or updated each pull request', () => {
+    const feed = fold([
+      event('approval.requested', { approvalId: 'pr_publish_2', title: 'Update acme/api#7?' }),
+      event('approval.decided', {
+        approvalId: 'pr_publish_2',
+        actionId: 'update',
+        outcome: 'approve',
+        payload: { title: 'Fix login', body: '', draft: true },
+      }),
+      event('shuttle.pr.published', {
+        approvalId: 'pr_publish_2',
+        pulls: [
+          {
+            fullName: 'acme/api',
+            number: 7,
+            url: 'https://github.com/acme/api/pull/7',
+            draft: true,
+            outcome: 'updated',
+          },
+        ],
+      }),
+    ])
+
+    const card = feed.items.find((item) => item.kind === 'question')
+
+    expect(card?.kind === 'question' ? card.publish : undefined).toMatchObject({
+      status: 'published',
+      pulls: [{ number: 7, outcome: 'updated' }],
+    })
+  })
+
   test('falls back to the approval thread for PRs published before thread links', () => {
     const feed = fold([
       event('approval.requested', { approvalId: 'pr_publish_2', title: 'Publish?' }, 'thr_coder'),

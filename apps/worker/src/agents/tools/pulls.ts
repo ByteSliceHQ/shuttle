@@ -22,7 +22,7 @@ export function createProposePullRequestTool() {
   return asEffectsTool({
     name: 'propose_pull_request',
     description:
-      'Propose opening (or updating) a GitHub pull request for the current layer of the current stack. Call stack_layer new first for another PR on top of the current stack, or stack_layer new_stack for a standalone PR off the default branch. Shuttle commits, pushes, and opens/updates the PRs itself after the user approves. Returns the opened/updated PRs (with outcome), a discard message if the user declined, or an error.',
+      'Propose opening (or updating) a GitHub pull request for the current layer of the current stack. Call stack_layer new first for another PR on top of the current stack, or stack_layer new_stack for a standalone PR off the default branch. Shuttle commits, pushes, and opens/updates the PRs itself after the user approves. When the current layer already has a PR (stack_layer status lists its number), this pushes an update to that PR and the user is asked to approve an update of it, not a new PR: say so in your message, for example "I will push this to #13". Returns the opened/updated PRs (with outcome), a discard message if the user declined, or an error.',
     input: z.object({
       repos: z
         .array(z.string())
