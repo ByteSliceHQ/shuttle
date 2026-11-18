@@ -1,4 +1,4 @@
-import { Schema } from 'effect'
+import { Predicate, Schema } from 'effect'
 
 import { jsonObject } from '../json'
 import { shuttleModule } from './scope'
@@ -28,7 +28,7 @@ export const brief = shuttleModule.projection({
 
       const goal = jsonObject(input).goal
 
-      if (typeof goal === 'string') {
+      if (Predicate.isString(goal)) {
         return { version: 1, text: goal }
       }
     }
@@ -107,13 +107,13 @@ export const transcript = shuttleModule.projection({
 
     if (event.type === 'agent.message' && event.payload.message.role === 'assistant') {
       const content = event.payload.message.content
-      const text = typeof content === 'string' ? content : JSON.stringify(content)
+      const text = Predicate.isString(content) ? content : JSON.stringify(content)
       return {
         ...state,
         messages: [
           ...state.messages,
           {
-            messageId: `${event.id}`,
+            messageId: event.id,
             role: 'assistant' as const,
             text,
             threadId: event.threadId ?? undefined,

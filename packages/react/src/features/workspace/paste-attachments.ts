@@ -10,11 +10,17 @@ export const ATTACHMENT_LIMIT_MESSAGE = `Attach up to ${MAX_ATTACHMENTS} nonempt
  * clipboard is always left for the textarea, since apps such as spreadsheets and slide editors
  * copy text with a picture of it beside, and that text is what the person meant to paste.
  */
+interface PasteResult {
+  readonly files: readonly File[]
+  readonly error: string | null
+  readonly takeOver: boolean
+}
+
 export function pasteAttachments(
   current: readonly File[],
   pasted: readonly File[],
   hasText: boolean,
-): { files: readonly File[]; error: string | null; takeOver: boolean } {
+): PasteResult {
   if (pasted.length === 0) {
     return { files: current, error: null, takeOver: false }
   }

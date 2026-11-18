@@ -123,7 +123,7 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
   function start() {
     const trimmed = goal.trim()
 
-    if (!trimmed || busy || gate.blocked) {
+    if (trimmed === '' || busy || gate.blocked) {
       return
     }
 
@@ -240,14 +240,14 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
                 <Button
                   variant="brand"
                   onClick={start}
-                  disabled={busy || !goal.trim() || gate.blocked}
+                  disabled={busy || goal.trim() === '' || gate.blocked}
                 >
                   {busy ? <LoaderCircle className="animate-spin" /> : <ArrowRight />}
                   {busy ? 'Starting' : 'Start session'}
                 </Button>
               </div>
             </div>
-            {attachments.error ? (
+            {attachments.error !== null ? (
               <p role="alert" className="text-status-failed mt-3 text-xs">
                 {attachments.error}
               </p>

@@ -25,18 +25,28 @@ async function run(command: readonly string[], cwd: string): Promise<void> {
 
 const root = resolve(import.meta.dirname, '..')
 
+interface PackageIdentity {
+  readonly name: string
+  readonly version: string
+}
+
+/** Whether a parsed `package.json` names the package and its version. */
+function isPackageIdentity(value: unknown): value is PackageIdentity {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'name' in value &&
+    'version' in value &&
+    typeof value.name === 'string' &&
+    typeof value.version === 'string'
+  )
+}
+
 const manifest: unknown = JSON.parse(
   await readFile(join(root, 'packages', 'shuttle', 'package.json'), 'utf8'),
 )
 
-if (
-  typeof manifest !== 'object' ||
-  manifest === null ||
-  !('name' in manifest) ||
-  !('version' in manifest) ||
-  typeof manifest.name !== 'string' ||
-  typeof manifest.version !== 'string'
-) {
+if (!isPackageIdentity(manifest)) {
   throw new Error('packages/shuttle/package.json has no name or version')
 }
 

@@ -26,7 +26,7 @@ export function scopedRunId(orgId: string | null, local: string): string {
     return local
   }
 
-  if (!isOrgId(orgId)) {
+  if (!ORG_ID.test(orgId)) {
     throw new Error('invalid organization id')
   }
 
@@ -36,8 +36,11 @@ export function scopedRunId(orgId: string | null, local: string): string {
 export function parseRunId(runId: string): ParsedRunId {
   const match = SCOPED.exec(runId)
 
-  return match?.[1] && match[2]
-    ? { orgId: match[1], local: match[2] }
+  const orgId = match?.[1]
+  const local = match?.[2]
+
+  return orgId !== undefined && orgId !== '' && local !== undefined && local !== ''
+    ? { orgId, local }
     : { orgId: null, local: runId }
 }
 
@@ -73,7 +76,7 @@ const PERSONAL = /^member-([A-Za-z0-9]{1,64})-(.+)$/
  * sessions. Only that person can reach it.
  */
 export function personalRunId(orgId: string, userId: string, local: string): string {
-  if (!isOrgId(userId)) {
+  if (!ORG_ID.test(userId)) {
     throw new Error('invalid user id')
   }
 
@@ -87,7 +90,17 @@ export function parsePersonalRunId(
   const { orgId, local } = parseRunId(runId)
   const match = PERSONAL.exec(local)
 
-  return orgId && match?.[1] && match[2] ? { orgId, userId: match[1], local: match[2] } : null
+  const userId = match?.[1]
+  const rest = match?.[2]
+
+  return orgId !== null &&
+    orgId !== '' &&
+    userId !== undefined &&
+    userId !== '' &&
+    rest !== undefined &&
+    rest !== ''
+    ? { orgId, userId, local: rest }
+    : null
 }
 
 /** A run id's name with neither its organization nor, for a personal run, its person. */

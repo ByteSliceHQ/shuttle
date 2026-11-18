@@ -162,7 +162,8 @@ function BriefHistory({ current, feed }: { current: BriefRevision; feed: Session
     .filter((revision) => revision.version !== current.version)
     .toSorted((left, right) => right.version - left.version)
 
-  const trigger = current.sourceMessageId ? feed.messageText[current.sourceMessageId] : undefined
+  const trigger =
+    current.sourceMessageId === undefined ? undefined : feed.messageText[current.sourceMessageId]
 
   return (
     <div className="flex flex-col gap-6 p-5">
@@ -179,7 +180,7 @@ function BriefHistory({ current, feed }: { current: BriefRevision; feed: Session
         >
           {current.text}
         </p>
-        {trigger ? (
+        {trigger !== undefined && trigger !== '' ? (
           <p className="text-muted-foreground mt-2 text-xs leading-relaxed wrap-anywhere">
             Amended after you said <span className="text-foreground/80">“{quote(trigger)}”</span>
           </p>
@@ -307,15 +308,16 @@ function LessonCard({
   detail: PlaybookLesson | null | undefined
 }) {
   const scope = lesson.scope ?? detail?.scope
+  const hasScope = scope !== undefined && scope !== ''
   const retired = detail === null
   const sources = evidenceByRun(detail?.evidence ?? [])
 
   return (
     <li className="bg-card/60 rounded-xl border p-3.5">
       <Markdown text={lesson.text} className="text-[13px] leading-relaxed wrap-anywhere" />
-      {scope || retired || sources.length > 0 ? (
+      {hasScope || retired || sources.length > 0 ? (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          {scope ? <Badge variant="outline">{scope}</Badge> : null}
+          {hasScope ? <Badge variant="outline">{scope}</Badge> : null}
           {retired ? (
             <Badge
               variant="outline"

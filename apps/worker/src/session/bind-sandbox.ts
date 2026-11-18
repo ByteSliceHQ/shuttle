@@ -58,11 +58,10 @@ export function createBindSandboxEffect(storage?: DurableObjectStorage) {
       pull: Schema.optional(PullRefSchema),
     }),
     execute: async (input, ctx) => {
-      const binding = {
-        sandboxName: input.sandboxName,
-        repos: input.repos,
-        ...(input.pull ? { pull: input.pull } : {}),
-      } satisfies SandboxBinding
+      const binding: SandboxBinding =
+        input.pull === undefined
+          ? { sandboxName: input.sandboxName, repos: input.repos }
+          : { sandboxName: input.sandboxName, repos: input.repos, pull: input.pull }
 
       if (storage) {
         await storage.put(SANDBOX_BINDING_KEY, binding)
@@ -80,6 +79,11 @@ export function createBindSandboxEffect(storage?: DurableObjectStorage) {
   })
 }
 
+/** True for a string that is neither missing nor empty. */
+function isPresent(value: string | null): value is string {
+  return value !== null && value !== ''
+}
+
 export async function readSandboxBinding(
   storage: DurableObjectStorage | undefined,
   runId?: string,
@@ -89,7 +93,7 @@ export async function readSandboxBinding(
     return value ?? null
   }
 
-  if (runId) {
+  if (runId !== undefined && runId !== '') {
     return memoryBindings.get(runId) ?? null
   }
 
@@ -154,7 +158,11 @@ export async function sandboxNameForSession(
   const sponsorId = await readSponsor(storage)
   const placement = await readSandboxPlacement(storage)
 
-  if (placement && orgId && (sponsorId === null || sponsorId === placement.userId)) {
+  if (
+    placement !== null &&
+    isPresent(orgId) &&
+    (sponsorId === null || sponsorId === placement.userId)
+  ) {
     return localSandboxName(orgId, placement.userId, placement.deviceId)
   }
 
@@ -162,5 +170,5 @@ export async function sandboxNameForSession(
     return boundName
   }
 
-  return orgId && sponsorId ? userSandboxName(orgId, sponsorId) : boundName
+  return isPresent(orgId) && isPresent(sponsorId) ? userSandboxName(orgId, sponsorId) : boundName
 }

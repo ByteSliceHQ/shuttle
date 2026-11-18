@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 import type { ShuttleEnv } from '../env'
 import type { LinkedRepo } from '../workspace/scope'
 import {
@@ -8,7 +10,7 @@ import {
   githubUserToken,
   GithubGraphqlError,
 } from './client'
-import { commentFromWebhook, type WebhookComment } from './webhooks'
+import { commentFromWebhook, ReviewCommentSchema, type WebhookComment } from './webhooks'
 
 export type PullReviewVerdict = 'approve' | 'request_changes' | 'comment'
 
@@ -104,6 +106,8 @@ function mapCheckRollup(state: string | null | undefined): PullSummary['checkRol
     case 'PENDING':
     case 'EXPECTED':
       return 'pending'
+    case null:
+    case undefined:
     default:
       return 'neutral'
   }
@@ -159,7 +163,7 @@ export async function createPullRequest(
   if (response.status === 403) {
     const user = githubUserToken(env)
 
-    if (user) {
+    if (user !== null) {
       token = user
       response = await postPull(user)
     }
@@ -182,24 +186,36 @@ export async function createPullRequest(
     throw new Error(`Failed to create pull request: ${response.status}${detail}`)
   }
 
-  return pullSummaryFromRest(input.repo, (await response.json()) as GithubPullRestBody)
+  return pullSummaryFromRest(input.repo, GithubPullRestBodySchema.parse(await response.json()))
 }
 
-type GithubPullRestBody = {
-  number: number
-  title: string
-  body?: string
-  html_url: string
-  state: string
-  draft?: boolean
-  user?: { login?: string; avatar_url?: string }
-  head: { ref: string; sha: string; repo?: { fork?: boolean } | null }
-  base: { ref: string; sha: string }
-  additions?: number
-  deletions?: number
-  updated_at: string
-  stack?: { number?: number; position?: number; size?: number } | null
-}
+const GithubPullRestBodySchema = z.object({
+  number: z.number(),
+  title: z.string(),
+  body: z.string().nullish(),
+  html_url: z.string(),
+  state: z.string(),
+  draft: z.boolean().optional(),
+  user: z.object({ login: z.string().optional(), avatar_url: z.string().optional() }).nullish(),
+  head: z.object({
+    ref: z.string(),
+    sha: z.string(),
+    repo: z.object({ fork: z.boolean().optional() }).nullish(),
+  }),
+  base: z.object({ ref: z.string(), sha: z.string() }),
+  additions: z.number().optional(),
+  deletions: z.number().optional(),
+  updated_at: z.string(),
+  stack: z
+    .object({
+      number: z.number().optional(),
+      position: z.number().optional(),
+      size: z.number().optional(),
+    })
+    .nullish(),
+})
+
+type GithubPullRestBody = z.infer<typeof GithubPullRestBodySchema>
 
 function pullSummaryFromRest(
   repo: Pick<LinkedRepo, 'installationId' | 'fullName'>,
@@ -236,24 +252,9 @@ export async function updatePullRequest(
   input: UpdatePullRequestInput,
 ): Promise<PullSummary> {
   const token = await getInstallationToken(env, input.repo.installationId)
-  const body: Record<string, unknown> = {}
-
-  if (input.title !== undefined) {
-    body.title = input.title
-  }
-
-  if (input.body !== undefined) {
-    body.body = input.body
-  }
-
-  if (input.base !== undefined) {
-    body.base = input.base
-  }
-
-  // Draft toggling uses a separate endpoint on some API versions; skip when unchanged.
-  if (input.draft !== undefined) {
-    body.draft = input.draft
-  }
+  // Fields left undefined are dropped when the body is serialized. GitHub may handle draft
+  // toggling on a separate endpoint on some API versions; it is sent only when it is given.
+  const body = { title: input.title, body: input.body, base: input.base, draft: input.draft }
 
   const response = await githubFetch(
     env,
@@ -270,7 +271,7 @@ export async function updatePullRequest(
     throw new Error(`Failed to update pull request #${input.number}: ${response.status}`)
   }
 
-  return pullSummaryFromRest(input.repo, (await response.json()) as GithubPullRestBody)
+  return pullSummaryFromRest(input.repo, GithubPullRestBodySchema.parse(await response.json()))
 }
 
 export async function createStack(
@@ -292,7 +293,7 @@ export async function createStack(
     throw new Error(`Failed to create stack: ${response.status}`)
   }
 
-  return parseStackResponse(repo, (await response.json()) as StackRestBody)
+  return parseStackResponse(repo, StackRestBodySchema.parse(await response.json()))
 }
 
 export async function addToStack(
@@ -319,15 +320,17 @@ export async function addToStack(
     throw new Error(`Failed to add to stack #${stackNumber}: ${response.status}`)
   }
 
-  return parseStackResponse(repo, (await response.json()) as StackRestBody)
+  return parseStackResponse(repo, StackRestBodySchema.parse(await response.json()))
 }
 
-type StackRestBody = {
-  number: number
-  url?: string
-  html_url?: string
-  pull_requests?: { number: number }[]
-}
+const StackRestBodySchema = z.object({
+  number: z.number(),
+  url: z.string().optional(),
+  html_url: z.string().optional(),
+  pull_requests: z.array(z.object({ number: z.number() })).optional(),
+})
+
+type StackRestBody = z.infer<typeof StackRestBodySchema>
 
 function parseStackResponse(repo: LinkedRepo, body: StackRestBody): GithubStack {
   return {
@@ -343,16 +346,17 @@ function stackFromRest(body: {
 }): PullStackMembership | null {
   const stack = body.stack
 
-  if (
-    !stack ||
-    typeof stack.number !== 'number' ||
-    typeof stack.position !== 'number' ||
-    typeof stack.size !== 'number'
-  ) {
+  if (!stack) {
     return null
   }
 
-  return { number: stack.number, position: stack.position, size: stack.size }
+  const { number, position, size } = stack
+
+  if (number === undefined || position === undefined || size === undefined) {
+    return null
+  }
+
+  return { number, position, size }
 }
 
 /** When create returns 422 because the head branch already has a PR, reuse it. */
@@ -374,7 +378,7 @@ async function findOpenPullByHead(
     return null
   }
 
-  const body = (await response.json()) as GithubPullRestBody[]
+  const body = z.array(GithubPullRestBodySchema).parse(await response.json())
   const match = body[0]
 
   return match ? pullSummaryFromRest(repo, match) : null
@@ -395,45 +399,21 @@ export async function getPullRequest(
     throw new Error(`Failed to load pull request #${number}: ${response.status}`)
   }
 
-  const body = (await response.json()) as {
-    number: number
-    title: string
-    body?: string
-    html_url: string
-    state: string
-    draft?: boolean
-    user?: { login?: string; avatar_url?: string }
-    head: { ref: string; sha: string; repo?: { fork?: boolean } | null }
-    base: { ref: string; sha: string }
-    additions?: number
-    deletions?: number
-    updated_at: string
-  }
-
   return {
-    installationId: repo.installationId,
-    fullName: repo.fullName,
-    number: body.number,
-    title: body.title,
-    body: body.body ?? '',
-    url: body.html_url,
-    state: body.state === 'closed' ? 'closed' : 'open',
-    draft: Boolean(body.draft),
-    authorLogin: body.user?.login ?? 'unknown',
-    authorAvatarUrl: body.user?.avatar_url ?? '',
-    headRef: body.head.ref,
-    headSha: body.head.sha,
-    baseRef: body.base.ref,
-    baseSha: body.base.sha,
-    additions: body.additions ?? 0,
-    deletions: body.deletions ?? 0,
-    reviewDecision: 'none',
+    ...pullSummaryFromRest(repo, GithubPullRestBodySchema.parse(await response.json())),
     checkRollup: 'neutral',
-    updatedAt: Date.parse(body.updated_at),
-    isFork: Boolean(body.head.repo?.fork),
-    stack: stackFromRest(body as GithubPullRestBody),
   }
 }
+
+const PullFilesSchema = z.array(
+  z.object({
+    filename: z.string(),
+    status: z.string(),
+    additions: z.number(),
+    deletions: z.number(),
+    patch: z.string().optional(),
+  }),
+)
 
 export async function listPullFiles(
   env: ShuttleEnv,
@@ -455,13 +435,7 @@ export async function listPullFiles(
       throw new Error(`Failed to list pull files: ${response.status}`)
     }
 
-    const batch = (await response.json()) as {
-      filename: string
-      status: string
-      additions: number
-      deletions: number
-      patch?: string
-    }[]
+    const batch = PullFilesSchema.parse(await response.json())
 
     for (const file of batch) {
       files.push({
@@ -483,28 +457,37 @@ export async function listPullFiles(
   return files
 }
 
+const ReviewThreadsSchema = z.object({
+  repository: z.object({
+    pullRequest: z.object({
+      reviewThreads: z.object({
+        nodes: z.array(
+          z.object({
+            id: z.string(),
+            isResolved: z.boolean(),
+            path: z.string(),
+            line: z.number().nullable(),
+            comments: z.object({
+              nodes: z.array(
+                z.object({
+                  body: z.string(),
+                  author: z.object({ login: z.string() }).nullable(),
+                }),
+              ),
+            }),
+          }),
+        ),
+      }),
+    }),
+  }),
+})
+
 export async function listReviewThreads(
   env: ShuttleEnv,
   repo: LinkedRepo,
   number: number,
 ): Promise<ReviewThread[]> {
-  const data = await githubGraphql<{
-    repository: {
-      pullRequest: {
-        reviewThreads: {
-          nodes: {
-            id: string
-            isResolved: boolean
-            path: string
-            line: number | null
-            comments: {
-              nodes: { body: string; author: { login: string } | null }[]
-            }
-          }[]
-        }
-      }
-    }
-  }>(
+  const data = await githubGraphql(
     env,
     `query($owner: String!, $name: String!, $number: Int!) {
       repository(owner: $owner, name: $name) {
@@ -525,6 +508,7 @@ export async function listReviewThreads(
     }`,
     { owner: repo.owner, name: repo.name, number },
     repo.installationId,
+    ReviewThreadsSchema,
   )
 
   return data.repository.pullRequest.reviewThreads.nodes.map((thread) => ({
@@ -559,26 +543,42 @@ export interface PullThreadSnapshot {
   }[]
 }
 
-interface ThreadNode {
-  isResolved: boolean
-  isOutdated: boolean
-  path: string
-  line: number | null
-  originalLine: number | null
-  startLine: number | null
-  originalStartLine: number | null
-  diffSide: 'LEFT' | 'RIGHT'
-  comments: {
-    nodes: {
-      fullDatabaseId: string
-      body: string
-      url: string
-      createdAt: string
-      updatedAt: string
-      author: { login: string; avatarUrl: string } | null
-    }[]
-  }
-}
+const PageInfoSchema = z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() })
+
+const ThreadNodeSchema = z.object({
+  isResolved: z.boolean(),
+  isOutdated: z.boolean(),
+  path: z.string(),
+  line: z.number().nullable(),
+  originalLine: z.number().nullable(),
+  startLine: z.number().nullable(),
+  originalStartLine: z.number().nullable(),
+  diffSide: z.enum(['LEFT', 'RIGHT']),
+  comments: z.object({
+    nodes: z.array(
+      z.object({
+        fullDatabaseId: z.string(),
+        body: z.string(),
+        url: z.string(),
+        createdAt: z.string(),
+        updatedAt: z.string(),
+        author: z.object({ login: z.string(), avatarUrl: z.string() }).nullable(),
+      }),
+    ),
+  }),
+})
+
+type ThreadNode = z.infer<typeof ThreadNodeSchema>
+
+const ThreadsPageSchema = z.object({
+  repository: z.object({
+    pullRequest: z
+      .object({
+        reviewThreads: z.object({ pageInfo: PageInfoSchema, nodes: z.array(ThreadNodeSchema) }),
+      })
+      .nullable(),
+  }),
+})
 
 const THREADS_QUERY = `query($owner: String!, $name: String!, $number: Int!, $after: String) {
   repository(owner: $owner, name: $name) {
@@ -631,7 +631,7 @@ export function threadSnapshot(node: ThreadNode): PullThreadSnapshot | null {
       rootId,
       path: node.path,
       line: node.line ?? node.originalLine,
-      ...(startLine === null ? {} : { startLine }),
+      startLine: startLine ?? undefined,
       side: node.diffSide === 'LEFT' ? 'LEFT' : 'RIGHT',
       outdated: node.isOutdated,
       body: comment.body,
@@ -656,20 +656,12 @@ export async function listPullThreads(
   let after: string | null = null
 
   for (let page = 0; page < THREAD_PAGES; page += 1) {
-    const data: {
-      repository: {
-        pullRequest: {
-          reviewThreads: {
-            pageInfo: { hasNextPage: boolean; endCursor: string | null }
-            nodes: ThreadNode[]
-          }
-        } | null
-      }
-    } = await githubGraphql(
+    const data: z.infer<typeof ThreadsPageSchema> = await githubGraphql(
       env,
       THREADS_QUERY,
       { owner: repo.owner, name: repo.name, number, after },
       repo.installationId,
+      ThreadsPageSchema,
     )
 
     const connection = data.repository.pullRequest?.reviewThreads
@@ -701,7 +693,7 @@ async function postComment(
   env: ShuttleEnv,
   path: string,
   userToken: string,
-  payload: Record<string, unknown>,
+  payload: Readonly<Record<string, string | number | undefined>>,
 ): Promise<WebhookComment> {
   const response = await githubFetch(env, path, {
     method: 'POST',
@@ -713,10 +705,12 @@ async function postComment(
   if (!response.ok) {
     const detail = (await response.text().catch(() => '')).slice(0, 300)
 
-    throw new Error(`GitHub refused the comment (${response.status})${detail ? `: ${detail}` : ''}`)
+    throw new Error(
+      `GitHub refused the comment (${response.status})${detail.length > 0 ? `: ${detail}` : ''}`,
+    )
   }
 
-  return commentFromWebhook((await response.json()) as Record<string, unknown>)
+  return commentFromWebhook(ReviewCommentSchema.parse(await response.json()))
 }
 
 /** Replies to a review thread as the person. `rootId` is the thread's first comment. */
@@ -745,20 +739,41 @@ export function commentOnLine(
     readonly body: string
   },
 ): Promise<WebhookComment> {
+  const payload = {
+    body: input.body,
+    commit_id: input.commitId,
+    path: input.path,
+    line: input.line,
+    side: input.side,
+    start_line: input.start?.line,
+    start_side: input.start?.side,
+  }
+
   return postComment(
     env,
     `/repos/${input.repo.owner}/${input.repo.name}/pulls/${input.number}/comments`,
     input.userToken,
-    {
-      body: input.body,
-      commit_id: input.commitId,
-      path: input.path,
-      line: input.line,
-      side: input.side,
-      ...(input.start ? { start_line: input.start.line, start_side: input.start.side } : {}),
-    },
+    payload,
   )
 }
+
+const ThreadIdsPageSchema = z.object({
+  repository: z.object({
+    pullRequest: z
+      .object({
+        reviewThreads: z.object({
+          pageInfo: PageInfoSchema,
+          nodes: z.array(
+            z.object({
+              id: z.string(),
+              comments: z.object({ nodes: z.array(z.object({ fullDatabaseId: z.string() })) }),
+            }),
+          ),
+        }),
+      })
+      .nullable(),
+  }),
+})
 
 const THREAD_IDS_QUERY = `query($owner: String!, $name: String!, $number: Int!, $after: String) {
   repository(owner: $owner, name: $name) {
@@ -781,20 +796,12 @@ export async function setThreadResolved(
   let threadId: string | undefined
   let after: string | null = null
 
-  for (let page = 0; page < THREAD_PAGES && !threadId; page += 1) {
-    const data: {
-      repository: {
-        pullRequest: {
-          reviewThreads: {
-            pageInfo: { hasNextPage: boolean; endCursor: string | null }
-            nodes: { id: string; comments: { nodes: { fullDatabaseId: string }[] } }[]
-          }
-        } | null
-      }
-    } = await githubGraphqlWithToken(
+  for (let page = 0; page < THREAD_PAGES && threadId === undefined; page += 1) {
+    const data: z.infer<typeof ThreadIdsPageSchema> = await githubGraphqlWithToken(
       THREAD_IDS_QUERY,
       { owner: input.repo.owner, name: input.repo.name, number: input.number, after },
       input.userToken,
+      ThreadIdsPageSchema,
     )
 
     const connection = data.repository.pullRequest?.reviewThreads
@@ -803,14 +810,14 @@ export async function setThreadResolved(
       (node) => Number(node.comments.nodes[0]?.fullDatabaseId) === input.rootId,
     )?.id
 
-    if (!connection?.pageInfo.hasNextPage) {
+    if (connection?.pageInfo.hasNextPage !== true) {
       break
     }
 
     after = connection.pageInfo.endCursor
   }
 
-  if (!threadId) {
+  if (threadId === undefined) {
     throw new Error('That thread is no longer on the pull request.')
   }
 
@@ -820,6 +827,7 @@ export async function setThreadResolved(
     `mutation($threadId: ID!) { ${mutation}(input: { threadId: $threadId }) { thread { id } } }`,
     { threadId },
     input.userToken,
+    z.unknown(),
   )
 }
 
@@ -844,7 +852,7 @@ export async function submitPullReview(
 
     default: {
       const exhaustive: never = input.verdict
-      throw new Error(`Unknown verdict: ${exhaustive}`)
+      throw new Error('Unknown verdict', { cause: exhaustive })
     }
   }
 
@@ -872,10 +880,12 @@ export async function submitPullReview(
   if (!response.ok) {
     const detail = (await response.text().catch(() => '')).slice(0, 500)
 
-    throw new Error(`GitHub refused the review (${response.status})${detail ? `: ${detail}` : ''}`)
+    throw new Error(
+      `GitHub refused the review (${response.status})${detail.length > 0 ? `: ${detail}` : ''}`,
+    )
   }
 
-  const body = (await response.json()) as { id: number }
+  const body = z.object({ id: z.number() }).parse(await response.json())
   return { id: body.id }
 }
 
@@ -920,39 +930,55 @@ const OPEN_PULLS_QUERY = `query($owner: String!, $name: String!, $after: String)
   }
 }`
 
-interface OpenPullNode {
-  number?: number
-  title?: string
-  body?: string
-  url?: string
-  state?: string
-  isDraft?: boolean
-  updatedAt?: string
-  additions?: number
-  deletions?: number
-  author?: { login?: string; avatarUrl?: string } | null
-  headRefName?: string
-  headRefOid?: string
-  baseRefName?: string
-  baseRefOid?: string
-  reviewDecision?: string | null
-  stack?: { number?: number; size?: number } | null
-  stackEntry?: { position?: number } | null
-  commits?: {
-    nodes: { commit: { statusCheckRollup: { state: string } | null } | null }[]
-  } | null
-  headRepository?: { isFork?: boolean } | null
-}
+const OpenPullNodeSchema = z.object({
+  number: z.number().nullish(),
+  title: z.string().nullish(),
+  body: z.string().nullish(),
+  url: z.string().nullish(),
+  state: z.string().nullish(),
+  isDraft: z.boolean().nullish(),
+  updatedAt: z.string().nullish(),
+  additions: z.number().nullish(),
+  deletions: z.number().nullish(),
+  author: z.object({ login: z.string().nullish(), avatarUrl: z.string().nullish() }).nullish(),
+  headRefName: z.string().nullish(),
+  headRefOid: z.string().nullish(),
+  baseRefName: z.string().nullish(),
+  baseRefOid: z.string().nullish(),
+  reviewDecision: z.string().nullish(),
+  stack: z.object({ number: z.number().nullish(), size: z.number().nullish() }).nullish(),
+  stackEntry: z.object({ position: z.number().nullish() }).nullish(),
+  commits: z
+    .object({
+      nodes: z.array(
+        z.object({
+          commit: z
+            .object({ statusCheckRollup: z.object({ state: z.string() }).nullish() })
+            .nullish(),
+        }),
+      ),
+    })
+    .nullish(),
+  headRepository: z.object({ isFork: z.boolean().nullish() }).nullish(),
+})
 
-interface OpenPullsPage {
-  repository: {
-    pullRequests: {
-      totalCount: number
-      pageInfo: { hasNextPage: boolean; endCursor: string | null }
-      nodes: (OpenPullNode | null)[]
-    } | null
-  } | null
-}
+type OpenPullNode = z.infer<typeof OpenPullNodeSchema>
+
+const OpenPullsPageSchema = z.object({
+  repository: z
+    .object({
+      pullRequests: z
+        .object({
+          totalCount: z.number(),
+          pageInfo: PageInfoSchema,
+          nodes: z.array(OpenPullNodeSchema.nullable()),
+        })
+        .nullable(),
+    })
+    .nullable(),
+})
+
+type OpenPullsPage = z.infer<typeof OpenPullsPageSchema>
 
 /** Inbox rows only need a preview; full descriptions live on GitHub. */
 const BODY_PREVIEW_CHARS = 8_000
@@ -997,11 +1023,13 @@ export async function listOpenPulls(
       }
     }
 
-    if (!connection.pageInfo.hasNextPage || !connection.pageInfo.endCursor) {
+    const { endCursor } = connection.pageInfo
+
+    if (!connection.pageInfo.hasNextPage || endCursor === null || endCursor === '') {
       break
     }
 
-    after = connection.pageInfo.endCursor
+    after = endCursor
   }
 
   return { pulls: pulls.slice(0, limit), totalCount, checksHidden }
@@ -1014,19 +1042,22 @@ async function fetchOpenPullsPage(
   after: string | null,
 ): Promise<{ page: OpenPullsPage; partial: boolean }> {
   try {
-    const page = await githubGraphql<OpenPullsPage>(
+    const page = await githubGraphql(
       env,
       OPEN_PULLS_QUERY,
       { owner: repo.owner, name: repo.name, after },
       repo.installationId,
+      OpenPullsPageSchema,
     )
 
     return { page, partial: false }
   } catch (cause) {
-    const data = cause instanceof GithubGraphqlError ? (cause.data as OpenPullsPage | null) : null
+    if (cause instanceof GithubGraphqlError) {
+      const partial = OpenPullsPageSchema.safeParse(cause.data)
 
-    if (data?.repository?.pullRequests) {
-      return { page: data, partial: true }
+      if (partial.success && partial.data.repository?.pullRequests) {
+        return { page: partial.data, partial: true }
+      }
     }
 
     throw cause
@@ -1059,7 +1090,10 @@ function toPullSummary(
     deletions: node.deletions ?? 0,
     reviewDecision: mapReviewDecision(node.reviewDecision),
     checkRollup: mapCheckRollup(rollup),
-    updatedAt: node.updatedAt ? Date.parse(node.updatedAt) : Date.now(),
+    updatedAt:
+      node.updatedAt !== undefined && node.updatedAt !== null && node.updatedAt !== ''
+        ? Date.parse(node.updatedAt)
+        : Date.now(),
     isFork: Boolean(node.headRepository?.isFork),
     stack:
       node.stack?.number != null && node.stackEntry?.position != null && node.stack.size != null

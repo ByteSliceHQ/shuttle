@@ -1,5 +1,7 @@
 import type { LoginEvent, LoginProgress } from '@shuttle/api'
 
+import { hasText } from '../../lib/text'
+
 /** The page to open, and the code to enter there or bring back, as the vendor CLI printed it. */
 export type LoginPrompt = Extract<LoginEvent, { type: 'login_prompt' }>
 
@@ -38,7 +40,7 @@ export function loginOutcome(progress: LoginProgress): LoginOutcome {
     return { status: 'connected' }
   }
 
-  if (progress.error) {
+  if (hasText(progress.error)) {
     return { status: 'failed', error: progress.error }
   }
 

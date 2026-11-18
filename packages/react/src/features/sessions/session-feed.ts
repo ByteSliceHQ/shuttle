@@ -1,9 +1,22 @@
-import type { JsonValue, ProjectionDefinition } from '@swirls/looms/core'
+import { z } from 'zod'
+
+import {
+  isJsonObject,
+  type JsonObject,
+  type JsonValue,
+  type ProjectionDefinition,
+} from '@swirls/looms/core'
 import type { LiveFoldDefinition } from '@swirls/looms/react'
 
 import { jsonFields, jsonNumber, jsonText } from '../../lib/json'
+import { hasText } from '../../lib/text'
 import type { SessionEvent } from '../events/event-catalog'
 import { mediaAssetsOf, sharedAssetOf, type MediaAsset, type SessionMedia } from './media'
+
+/** The fields of an event's payload, or no fields when the payload is not a JSON object. */
+export function eventFields(event: SessionEvent): JsonObject {
+  return isJsonObject(event.payload) ? event.payload : {}
+}
 
 export const interjectionKinds = [
   'question',
@@ -158,6 +171,11 @@ export interface PublishedPull {
   readonly stack?: PullStackPosition
 }
 
+/** The recorded outcome of publishing a pull request; anything else counts as not recorded. */
+function publishOutcome(value: string | undefined): PublishedPull['outcome'] {
+  return value === 'opened' || value === 'updated' || value === 'unchanged' ? value : undefined
+}
+
 export interface PullStackPosition {
   /** Independent stack within the repo; a one-layer stack is a standalone PR. */
   readonly id: number
@@ -243,14 +261,13 @@ export interface MessageAuthor {
   readonly name: string
 }
 
-function messageAuthor(value: unknown): { author?: MessageAuthor } {
-  if (!value || typeof value !== 'object') {
-    return {}
-  }
+const MessageAuthorSchema = z.object({ id: z.string(), name: z.string() })
 
-  const { id, name } = value as { id?: unknown; name?: unknown }
+/** Who sent a message, when the payload says. */
+function messageAuthor(value: JsonValue | undefined): MessageAuthor | undefined {
+  const author = MessageAuthorSchema.safeParse(value)
 
-  return typeof id === 'string' && typeof name === 'string' ? { author: { id, name } } : {}
+  return author.success ? { id: author.data.id, name: author.data.name } : undefined
 }
 
 export interface PlaybookLessonRef {
@@ -281,14 +298,12 @@ const initialFeed: SessionFeed = {
 }
 
 function withoutKey<T>(record: Readonly<Record<string, T>>, key: string): Record<string, T> {
-  const next = { ...record }
-  delete next[key]
-  return next
+  return Object.fromEntries(Object.entries(record).filter(([entryKey]) => entryKey !== key))
 }
 
 type PublishOutcome = NonNullable<Extract<FeedItem, { kind: 'question' }>['publish']>
 
-function schemaDefaults(schema: JsonValue | undefined): Record<string, JsonValue> {
+function schemaDefaults(schema: JsonValue | undefined): JsonObject {
   const properties = jsonFields(jsonFields(schema).properties)
   const defaults: Record<string, JsonValue> = {}
 
@@ -323,11 +338,12 @@ function appendItem(feed: SessionFeed, item: FeedItem): SessionFeed {
   return { ...feed, items: [...feed.items, item] }
 }
 
-function takePendingThought(
-  feed: SessionFeed,
-  threadId: string,
-  turn?: number,
-): { readonly feed: SessionFeed; readonly thought?: ThoughtInfo } {
+interface TakenThought {
+  readonly feed: SessionFeed
+  readonly thought?: ThoughtInfo
+}
+
+function takePendingThought(feed: SessionFeed, threadId: string, turn?: number): TakenThought {
   const pending = feed.pendingThoughts[threadId]
 
   if (!pending || (turn !== undefined && pending.turn !== turn)) {
@@ -342,7 +358,7 @@ function takePendingThought(
 
 /** Flush an unclaimed thought when a turn settles without messages, tools, or approvals. */
 function flushPendingThought(feed: SessionFeed, threadId: string | null | undefined): SessionFeed {
-  if (!threadId) {
+  if (!hasText(threadId)) {
     return feed
   }
 
@@ -398,7 +414,7 @@ function mapValues<T, U>(
  * above what it did. The agent reads them next, so they move below it.
  */
 function endTurn(feed: SessionFeed, threadId: string | null | undefined): SessionFeed {
-  if (!threadId || !feed.openTurns[threadId]) {
+  if (!hasText(threadId) || feed.openTurns[threadId] === undefined) {
     return feed
   }
 
@@ -435,7 +451,7 @@ function endTurn(feed: SessionFeed, threadId: string | null | undefined): Sessio
 }
 
 function onToolCall(feed: SessionFeed, event: SessionEvent): SessionFeed {
-  const payload = jsonFields(event.payload)
+  const payload = eventFields(event)
   const call = jsonFields(payload.toolCall)
   const toolCallId = jsonText(call.id)
   const threadId = event.threadId
@@ -443,7 +459,12 @@ function onToolCall(feed: SessionFeed, event: SessionEvent): SessionFeed {
   const name = jsonText(call.name) ?? 'tool'
 
   // `ask_user` surfaces as a question card from its approval gate instead.
-  if (!toolCallId || !threadId || name === 'ask_user' || feed.toolIndex[toolCallId] !== undefined) {
+  if (
+    !hasText(toolCallId) ||
+    !hasText(threadId) ||
+    name === 'ask_user' ||
+    feed.toolIndex[toolCallId] !== undefined
+  ) {
     return feed
   }
 
@@ -501,9 +522,9 @@ function onToolCall(feed: SessionFeed, event: SessionEvent): SessionFeed {
 }
 
 function onToolResult(feed: SessionFeed, event: SessionEvent): SessionFeed {
-  const payload = jsonFields(event.payload)
+  const payload = eventFields(event)
   const toolCallId = jsonText(payload.toolCallId)
-  const index = toolCallId ? feed.toolIndex[toolCallId] : undefined
+  const index = hasText(toolCallId) ? feed.toolIndex[toolCallId] : undefined
   const group = index === undefined ? undefined : feed.items[index]
 
   if (index === undefined || group?.kind !== 'tools') {
@@ -517,7 +538,7 @@ function onToolResult(feed: SessionFeed, event: SessionEvent): SessionFeed {
     call.toolCallId === toolCallId
       ? {
           ...call,
-          status: error ? 'error' : 'ok',
+          status: hasText(error) ? 'error' : 'ok',
           result: payload.result ?? null,
           error,
         }
@@ -534,7 +555,7 @@ function onToolResult(feed: SessionFeed, event: SessionEvent): SessionFeed {
   const call = group.calls.find((candidate) => candidate.toolCallId === toolCallId)
 
   const shared =
-    call?.name === SHARE_FILE_TOOL && !error ? sharedAssetOf(payload.result) : undefined
+    call?.name === SHARE_FILE_TOOL && !hasText(error) ? sharedAssetOf(payload.result) : undefined
 
   return shared
     ? withSharedMedia({ ...feed, items }, event, group.threadId, shared)
@@ -588,18 +609,18 @@ function withSharedMedia(
 }
 
 function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
-  const payload = jsonFields(event.payload)
+  const payload = eventFields(event)
 
   switch (event.type) {
     case 'runtime.thread.started': {
-      if (feed.rootThreadId || event.parentThreadId) {
+      if (hasText(feed.rootThreadId) || hasText(event.parentThreadId)) {
         return feed
       }
 
       const goal = jsonText(jsonFields(payload.input).goal)
       const attachments = mediaAssetsOf(jsonFields(payload.input).attachments)
 
-      if (!goal || !event.threadId) {
+      if (!hasText(goal) || !hasText(event.threadId)) {
         return { ...feed, rootThreadId: event.threadId ?? undefined }
       }
 
@@ -612,7 +633,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
           messageId: `goal_${event.id}`,
           text: goal,
           goal: true,
-          ...(attachments.length ? { attachments } : {}),
+          attachments: attachments.length > 0 ? attachments : undefined,
         }),
         media: [
           ...feed.media,
@@ -634,7 +655,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       const attachments = mediaAssetsOf(payload.attachments)
 
       // A message may be files alone.
-      if (!messageId || (!text && attachments.length === 0)) {
+      if (!hasText(messageId) || (!hasText(text) && attachments.length === 0)) {
         return feed
       }
 
@@ -651,8 +672,8 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
           text,
           goal: false,
           forced: isInterjectionKind(forced) ? forced : undefined,
-          ...author,
-          ...(attachments.length > 0 ? { attachments } : {}),
+          author,
+          attachments: attachments.length > 0 ? attachments : undefined,
         }),
         messageText: { ...feed.messageText, [messageId]: text },
         media: [
@@ -662,7 +683,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
             source: 'upload' as const,
             seq: event.seq,
             ts: event.ts,
-            ...(author.author ? { authorName: author.author.name } : {}),
+            authorName: author?.name,
           })),
         ],
       }
@@ -670,14 +691,16 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
 
     case 'shuttle.intake.started': {
       const messageId = jsonText(payload.messageId)
-      return messageId ? { ...feed, classifying: { ...feed.classifying, [messageId]: true } } : feed
+      return hasText(messageId)
+        ? { ...feed, classifying: { ...feed.classifying, [messageId]: true } }
+        : feed
     }
 
     case 'shuttle.routed': {
       const messageId = jsonText(payload.messageId)
       const kind = jsonText(payload.kind)
 
-      if (!messageId || !isInterjectionKind(kind)) {
+      if (!hasText(messageId) || !isInterjectionKind(kind)) {
         return feed
       }
 
@@ -700,7 +723,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       const messageId = jsonText(payload.messageId)
       const childThreadId = jsonText(payload.childThreadId)
 
-      if (!messageId || !childThreadId) {
+      if (!hasText(messageId) || !hasText(childThreadId)) {
         return feed
       }
 
@@ -738,7 +761,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
             const fields = jsonFields(lesson)
             const id = jsonText(fields.id)
             const text = jsonText(fields.text)
-            return id && text ? [{ id, text, scope: jsonText(fields.scope) }] : []
+            return hasText(id) && hasText(text) ? [{ id, text, scope: jsonText(fields.scope) }] : []
           }),
         },
       }
@@ -752,7 +775,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
         return feed
       }
 
-      const reasonLabel = reason && reason !== 'initial' ? ` after ${reason}` : ''
+      const reasonLabel = hasText(reason) && reason !== 'initial' ? ` after ${reason}` : ''
 
       return appendItem(feed, {
         kind: 'notice',
@@ -767,7 +790,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
     case 'shuttle.reflection.launched': {
       const runId = jsonText(payload.runId)
 
-      if (!runId) {
+      if (!hasText(runId)) {
         return feed
       }
 
@@ -788,7 +811,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
     case 'agent.steered': {
       const messageId = jsonText(payload.messageId)
 
-      if (!messageId || !event.threadId) {
+      if (!hasText(messageId) || !hasText(event.threadId)) {
         return feed
       }
 
@@ -805,16 +828,17 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
           ...feed.deliveries,
           [messageId]: [...(feed.deliveries[messageId] ?? []), delivery],
         },
-        ...(waits && feed.queued[messageId] === undefined
-          ? { queued: { ...feed.queued, [messageId]: event.threadId } }
-          : {}),
+        queued:
+          waits && feed.queued[messageId] === undefined
+            ? { ...feed.queued, [messageId]: event.threadId }
+            : feed.queued,
       }
     }
 
     case 'runtime.effect.attempt.started': {
       const threadId = MODEL_TURN_EFFECT.exec(jsonText(payload.effectId) ?? '')?.[1]
 
-      return threadId && !feed.openTurns[threadId]
+      return hasText(threadId) && feed.openTurns[threadId] === undefined
         ? { ...feed, openTurns: { ...feed.openTurns, [threadId]: true } }
         : feed
     }
@@ -823,7 +847,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       const text = jsonText(payload.text)?.trim()
       const turn = jsonNumber(payload.turn)
 
-      if (!text || turn === undefined || !event.threadId) {
+      if (!hasText(text) || turn === undefined || !hasText(event.threadId)) {
         return feed
       }
 
@@ -846,8 +870,8 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
     }
 
     case 'shuttle.sandbox.moved': {
-      const machine = typeof payload.device === 'string' ? payload.device : 'a local machine'
-      const place = (end: unknown) => (end === 'local' ? machine : 'the cloud')
+      const machine = jsonText(payload.device) ?? 'a local machine'
+      const place = (end: JsonValue | undefined) => (end === 'local' ? machine : 'the cloud')
 
       return appendItem(feed, {
         kind: 'notice',
@@ -884,7 +908,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       const label = jsonText(payload.label)
       const harness = jsonText(payload.harness)
 
-      if (!label || !harness || !event.threadId) {
+      if (!hasText(label) || !hasText(harness) || !hasText(event.threadId)) {
         return feed
       }
 
@@ -898,8 +922,8 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
           [event.threadId]: {
             harness,
             label,
-            ...(model ? { model } : {}),
-            ...(billedTo ? { billedTo } : {}),
+            model: hasText(model) ? model : undefined,
+            billedTo: hasText(billedTo) ? billedTo : undefined,
           },
         },
       }
@@ -909,7 +933,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
     case 'shuttle.vendor.message': {
       const text = jsonText(payload.text)?.trim()
 
-      if (!text || !event.threadId) {
+      if (!hasText(text) || !hasText(event.threadId)) {
         return feed
       }
 
@@ -923,7 +947,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
         threadId: event.threadId,
         text,
         replyTo: taken.feed.narrators[event.threadId],
-        ...(taken.thought ? { thought: taken.thought } : {}),
+        thought: taken.thought,
       })
     }
 
@@ -931,7 +955,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       const message = jsonFields(payload.message)
       const text = jsonText(message.content)?.trim()
 
-      if (message.role !== 'assistant' || !text || !event.threadId) {
+      if (message.role !== 'assistant' || !hasText(text) || !hasText(event.threadId)) {
         return feed
       }
 
@@ -946,7 +970,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
         threadId: event.threadId,
         text,
         replyTo: taken.feed.narrators[event.threadId],
-        ...(taken.thought ? { thought: taken.thought } : {}),
+        thought: taken.thought,
       })
     }
 
@@ -958,14 +982,18 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
     case 'approval.requested': {
       const approvalId = jsonText(payload.approvalId)
 
-      if (!approvalId || !event.threadId || feed.questionIndex[approvalId] !== undefined) {
+      if (
+        !hasText(approvalId) ||
+        !hasText(event.threadId) ||
+        feed.questionIndex[approvalId] !== undefined
+      ) {
         return feed
       }
 
       const taken = takePendingThought(feed, event.threadId)
       const defaults = schemaDefaults(payload.schema)
 
-      return {
+      const asked: SessionFeed = {
         ...appendItem(taken.feed, {
           kind: 'question',
           id: event.id,
@@ -974,22 +1002,26 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
           threadId: event.threadId,
           approvalId,
           title: jsonText(payload.title) ?? 'The agent needs your input',
-          ...(Object.keys(defaults).length > 0 ? { defaults } : {}),
-          ...(taken.thought ? { thought: taken.thought } : {}),
+          defaults: Object.keys(defaults).length > 0 ? defaults : undefined,
+          thought: taken.thought,
         }),
         questionIndex: { ...taken.feed.questionIndex, [approvalId]: taken.feed.items.length },
-        ...(approvalId.startsWith('pr_review_')
-          ? {
-              pendingReviewApprovalId: approvalId,
-              reviewOutcome: undefined,
-              reviewProposal: {
-                ...(jsonText(defaults.summary) ? { summary: jsonText(defaults.summary) } : {}),
-                ...(reviewVerdict(defaults.verdict)
-                  ? { verdict: reviewVerdict(defaults.verdict) }
-                  : {}),
-              },
-            }
-          : {}),
+      }
+
+      if (!approvalId.startsWith('pr_review_')) {
+        return asked
+      }
+
+      const summary = jsonText(defaults.summary)
+
+      return {
+        ...asked,
+        pendingReviewApprovalId: approvalId,
+        reviewOutcome: undefined,
+        reviewProposal: {
+          summary: hasText(summary) ? summary : undefined,
+          verdict: reviewVerdict(defaults.verdict),
+        },
       }
     }
 
@@ -1017,7 +1049,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
 
     case 'approval.decided': {
       const approvalId = jsonText(payload.approvalId)
-      const index = approvalId ? feed.questionIndex[approvalId] : undefined
+      const index = hasText(approvalId) ? feed.questionIndex[approvalId] : undefined
       const question = index === undefined ? undefined : feed.items[index]
 
       if (index === undefined || question?.kind !== 'question') {
@@ -1035,16 +1067,17 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       return {
         ...feed,
         items,
-        ...(approvalId && approvalId === feed.pendingReviewApprovalId
-          ? { pendingReviewApprovalId: undefined }
-          : {}),
+        pendingReviewApprovalId:
+          hasText(approvalId) && approvalId === feed.pendingReviewApprovalId
+            ? undefined
+            : feed.pendingReviewApprovalId,
       }
     }
 
     case 'shuttle.pr.published': {
       const pullsRaw = Array.isArray(payload.pulls) ? payload.pulls : []
       const approvalId = jsonText(payload.approvalId)
-      const index = approvalId ? feed.questionIndex[approvalId] : undefined
+      const index = hasText(approvalId) ? feed.questionIndex[approvalId] : undefined
       const question = index === undefined ? undefined : feed.items[index]
       const proposedBy = question?.kind === 'question' ? question.threadId : undefined
       const threadId = jsonText(payload.threadId) ?? proposedBy
@@ -1058,7 +1091,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
         const layer = jsonNumber(pull.layer)
         const outcome = jsonText(pull.outcome)
 
-        if (!fullName || number === undefined || !url) {
+        if (!hasText(fullName) || number === undefined || !hasText(url)) {
           return []
         }
 
@@ -1068,11 +1101,9 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
             number,
             url,
             draft: pull.draft === true,
-            ...(outcome === 'opened' || outcome === 'updated' || outcome === 'unchanged'
-              ? { outcome }
-              : {}),
-            ...(threadId ? { threadId } : {}),
-            ...(layer !== undefined ? { stack: { id: stackId, layer } } : {}),
+            outcome: publishOutcome(outcome),
+            threadId: hasText(threadId) ? threadId : undefined,
+            stack: layer === undefined ? undefined : { id: stackId, layer },
           } satisfies PublishedPull,
         ]
       })
@@ -1089,7 +1120,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
 
     case 'shuttle.pr.publish_failed': {
       const approvalId = jsonText(payload.approvalId)
-      const index = approvalId ? feed.questionIndex[approvalId] : undefined
+      const index = hasText(approvalId) ? feed.questionIndex[approvalId] : undefined
 
       return withPublishOutcome(feed, index, {
         status: 'failed',
@@ -1103,7 +1134,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       const line = jsonNumber(payload.line)
       const body = jsonText(payload.body)
 
-      if (!commentId || !path || line === undefined || !body) {
+      if (!hasText(commentId) || !hasText(path) || line === undefined || !hasText(body)) {
         return feed
       }
 
@@ -1126,7 +1157,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
             side,
             severity,
             body,
-            ...(suggestion ? { suggestion } : {}),
+            suggestion: hasText(suggestion) ? suggestion : undefined,
           },
         ],
       }
@@ -1179,7 +1210,7 @@ export const sessionFeed: ProjectionDefinition<SessionFeed> = {
   initialState: initialFeed,
   // Live copies of a vendor agent's steps are folded by `vendorLiveFeed`; the durable copies
   // that arrive with the turn's result are the ones that belong here.
-  reduce: (feed, event) => (event.ephemeral ? feed : reduceFeed(feed, event)),
+  reduce: (feed, event) => (event.ephemeral === true ? feed : reduceFeed(feed, event)),
 }
 
 const VENDOR_STEP_TYPES = new Set([
@@ -1214,15 +1245,15 @@ export const vendorLiveFeed: LiveFoldDefinition<
   reduce(state, event) {
     const threadId = event.threadId
 
-    if (!threadId) {
+    if (!hasText(threadId)) {
       return state
     }
 
-    if (event.ephemeral && VENDOR_STEP_TYPES.has(event.type)) {
+    if (event.ephemeral === true && VENDOR_STEP_TYPES.has(event.type)) {
       return { ...state, [threadId]: reduceFeed(state[threadId] ?? initialFeed, event) }
     }
 
-    const durableStep = !event.ephemeral && VENDOR_STEP_TYPES.has(event.type)
+    const durableStep = event.ephemeral !== true && VENDOR_STEP_TYPES.has(event.type)
 
     if ((durableStep || TURN_ENDED_TYPES.has(event.type)) && threadId in state) {
       return withoutKey(state, threadId)
@@ -1281,7 +1312,7 @@ export const streamingTurns: LiveFoldDefinition<
   reduce(state, event) {
     const threadId = event.threadId
 
-    if (!threadId) {
+    if (!hasText(threadId)) {
       return state
     }
 
@@ -1296,17 +1327,17 @@ export const streamingTurns: LiveFoldDefinition<
       return clearStreamingTurn(state, threadId)
     }
 
-    const payload = jsonFields(event.payload)
+    const payload = eventFields(event)
     const turn = jsonNumber(payload.turn) ?? state[threadId]?.turn ?? 0
     const current = state[threadId]
 
     // A vendor agent's turn has several messages and thoughts. Once one is recorded as a step,
     // it stops being streamed text and the next one starts from empty.
-    if (current && event.ephemeral && event.type === 'shuttle.vendor.message') {
+    if (current && event.ephemeral === true && event.type === 'shuttle.vendor.message') {
       return { ...state, [threadId]: { ...current, text: '' } }
     }
 
-    if (current && event.ephemeral && event.type === 'shuttle.turn.thought') {
+    if (current && event.ephemeral === true && event.type === 'shuttle.turn.thought') {
       return { ...state, [threadId]: { turn: current.turn, thinking: '', text: current.text } }
     }
 
@@ -1319,7 +1350,7 @@ export const streamingTurns: LiveFoldDefinition<
     if (event.type === 'shuttle.turn.thinking_delta') {
       const delta = jsonText(payload.delta)
 
-      if (!delta) {
+      if (!hasText(delta)) {
         return state
       }
 
@@ -1343,7 +1374,7 @@ export const streamingTurns: LiveFoldDefinition<
     if (event.type === 'agent.turn.text_delta') {
       const delta = jsonText(payload.delta)
 
-      if (!delta) {
+      if (!hasText(delta)) {
         return state
       }
 
@@ -1355,7 +1386,8 @@ export const streamingTurns: LiveFoldDefinition<
           ...nextTurn,
           turn,
           text: `${nextTurn.text}${delta}`,
-          thinkingEndedAt: nextTurn.thinking ? (nextTurn.thinkingEndedAt ?? event.ts) : undefined,
+          thinkingEndedAt:
+            nextTurn.thinking !== '' ? (nextTurn.thinkingEndedAt ?? event.ts) : undefined,
         },
       }
     }

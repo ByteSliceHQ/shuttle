@@ -44,7 +44,7 @@ async function origin() {
       cloneUrl: `file://${remote}`,
       basicAuth: 'unused',
       sha,
-      ...(base ? { baseSha: base } : {}),
+      baseSha: base,
     })}`
       .quiet()
       .nothrow()

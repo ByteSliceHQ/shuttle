@@ -1,5 +1,19 @@
 import { spawn } from 'node:child_process'
 
+import {
+  booleanField,
+  decodeEach,
+  definedFields,
+  field,
+  isJsonObject,
+  isString,
+  nonEmpty,
+  numberField,
+  objectField,
+  stringField,
+  type JsonObject,
+  type JsonValue,
+} from './json.ts'
 import { JsonRpcPeer } from './jsonrpc.ts'
 import {
   clipToolOutput,
@@ -58,14 +72,100 @@ interface CodexItem {
   readonly text?: string
   readonly command?: string
   readonly status?: string
-  readonly aggregatedOutput?: string | null
-  readonly exitCode?: number | null
-  readonly changes?: ReadonlyArray<{ readonly path: string }>
+  readonly aggregatedOutput?: string
+  readonly exitCode?: number
+  readonly changes?: readonly { readonly path: string }[]
   readonly server?: string
   readonly tool?: string
   readonly query?: string
   readonly summary?: readonly string[]
   readonly content?: readonly string[]
+}
+
+function decodeString(value: JsonValue): string | undefined {
+  return isString(value) ? value : undefined
+}
+
+function decodeChange(value: JsonValue): { readonly path: string } | undefined {
+  return isJsonObject(value) ? { path: stringField(value, 'path') ?? '' } : undefined
+}
+
+function decodeItem(value: JsonValue | undefined): CodexItem | undefined {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  return {
+    type: stringField(value, 'type') ?? '',
+    id: stringField(value, 'id') ?? '',
+    text: stringField(value, 'text'),
+    command: stringField(value, 'command'),
+    status: stringField(value, 'status'),
+    aggregatedOutput: stringField(value, 'aggregatedOutput'),
+    exitCode: numberField(value, 'exitCode'),
+    changes: decodeEach(field(value, 'changes'), decodeChange),
+    server: stringField(value, 'server'),
+    tool: stringField(value, 'tool'),
+    query: stringField(value, 'query'),
+    summary: decodeEach(field(value, 'summary'), decodeString),
+    content: decodeEach(field(value, 'content'), decodeString),
+  }
+}
+
+/** What a notification from `codex app-server` carries, whichever of these it has. */
+interface NotificationParams {
+  readonly delta?: string
+  readonly item?: CodexItem
+  readonly tokenUsage?: {
+    readonly last?: { readonly inputTokens?: number; readonly outputTokens?: number }
+    readonly modelContextWindow?: number
+  }
+  readonly turn?: { readonly status?: string; readonly errorMessage?: string }
+  readonly errorMessage?: string
+  readonly willRetry?: boolean
+}
+
+function messageOf(value: JsonValue | undefined): string | undefined {
+  return isJsonObject(value) ? stringField(value, 'message') : undefined
+}
+
+function decodeTokenUsage(value: JsonValue | undefined): NotificationParams['tokenUsage'] {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  const last = objectField(value, 'last')
+
+  return {
+    last:
+      last === undefined
+        ? undefined
+        : {
+            inputTokens: numberField(last, 'inputTokens'),
+            outputTokens: numberField(last, 'outputTokens'),
+          },
+    modelContextWindow: numberField(value, 'modelContextWindow'),
+  }
+}
+
+function decodeNotification(raw: JsonValue | undefined): NotificationParams {
+  if (!isJsonObject(raw)) {
+    return {}
+  }
+
+  const turn = objectField(raw, 'turn')
+
+  return {
+    delta: stringField(raw, 'delta'),
+    item: decodeItem(field(raw, 'item')),
+    tokenUsage: decodeTokenUsage(field(raw, 'tokenUsage')),
+    turn:
+      turn === undefined
+        ? undefined
+        : { status: stringField(turn, 'status'), errorMessage: messageOf(field(turn, 'error')) },
+    errorMessage: messageOf(field(raw, 'error')),
+    willRetry: booleanField(raw, 'willRetry'),
+  }
 }
 
 /** Codex runs commands as `/bin/bash -lc '<script>'`. Show the script, not the wrapper. */
@@ -115,7 +215,7 @@ function toolStatus(status: string | undefined): BridgeToolStatus {
 
 function connect(
   options: CodexOptions,
-  onNotification: (method: string, params: unknown) => void,
+  onNotification: (method: string, params: JsonValue | undefined) => void,
 ): JsonRpcPeer {
   const [bin, ...base] = options.command ?? defaultCommand()
   const args = [...base, ...codexMcpOverrides(options.mcp)]
@@ -152,7 +252,97 @@ interface CodexModel {
   readonly hidden?: boolean
   readonly isDefault?: boolean
   readonly defaultReasoningEffort?: string
-  readonly supportedReasoningEfforts?: ReadonlyArray<{ readonly reasoningEffort: string }>
+  readonly supportedReasoningEfforts: readonly string[]
+}
+
+interface CodexModelPage {
+  readonly data: readonly CodexModel[]
+  readonly nextCursor?: string
+}
+
+function decodeEffort(value: JsonValue): string | undefined {
+  return isJsonObject(value) ? stringField(value, 'reasoningEffort') : undefined
+}
+
+function decodeModel(value: JsonValue): CodexModel | undefined {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  const id = stringField(value, 'id')
+
+  if (id === undefined) {
+    return undefined
+  }
+
+  return {
+    id,
+    model: stringField(value, 'model'),
+    displayName: stringField(value, 'displayName'),
+    description: stringField(value, 'description'),
+    hidden: booleanField(value, 'hidden'),
+    isDefault: booleanField(value, 'isDefault'),
+    defaultReasoningEffort: stringField(value, 'defaultReasoningEffort'),
+    supportedReasoningEfforts: decodeEach(field(value, 'supportedReasoningEfforts'), decodeEffort),
+  }
+}
+
+function decodeModelPage(value: JsonValue): CodexModelPage {
+  if (!isJsonObject(value)) {
+    return { data: [] }
+  }
+
+  return {
+    data: decodeEach(field(value, 'data'), decodeModel),
+    nextCursor: stringField(value, 'nextCursor'),
+  }
+}
+
+/** The thread Codex opened, from the answer to `thread/start` or `thread/resume`. */
+interface OpenedThread {
+  readonly id: string
+  readonly model?: string
+}
+
+function decodeOpenedThread(value: JsonValue): OpenedThread {
+  const thread = isJsonObject(value) ? objectField(value, 'thread') : undefined
+  const id = thread === undefined ? undefined : stringField(thread, 'id')
+
+  if (!isJsonObject(value) || id === undefined) {
+    throw new Error('codex did not say which thread it opened')
+  }
+
+  return { id, model: stringField(value, 'model') }
+}
+
+function decodeStartedTurnId(value: JsonValue): string {
+  const turn = isJsonObject(value) ? objectField(value, 'turn') : undefined
+  const id = turn === undefined ? undefined : stringField(turn, 'id')
+
+  if (id === undefined) {
+    throw new Error('codex did not say which turn it started')
+  }
+
+  return id
+}
+
+interface DeviceLogin {
+  readonly loginId: string
+  readonly verificationUrl: string
+  readonly userCode: string
+}
+
+function decodeDeviceLogin(value: JsonValue): DeviceLogin {
+  const login = isJsonObject(value) ? value : undefined
+  const loginId = login === undefined ? undefined : stringField(login, 'loginId')
+  const verificationUrl = login === undefined ? undefined : stringField(login, 'verificationUrl')
+  const userCode = login === undefined ? undefined : stringField(login, 'userCode')
+
+  if (loginId === undefined || verificationUrl === undefined || userCode === undefined) {
+    throw new Error('codex did not offer a device code')
+  }
+
+  return { loginId, verificationUrl, userCode }
 }
 
 /** The models Codex offers in its own picker. Codex answers this without being signed in. */
@@ -167,10 +357,7 @@ export async function listCodexModels(options: CodexOptions = {}): Promise<Bridg
 
     // A handful of pages at most. The cap only stops a server that never ends its list.
     for (let page = 0; page < 10; page += 1) {
-      const listed: { data: CodexModel[]; nextCursor?: string | null } = await peer.request(
-        'model/list',
-        cursor ? { cursor } : {},
-      )
+      const listed = decodeModelPage(await peer.request('model/list', cursor ? { cursor } : {}))
 
       for (const entry of listed.data) {
         if (entry.hidden) {
@@ -181,9 +368,9 @@ export async function listCodexModels(options: CodexOptions = {}): Promise<Bridg
           id: entry.model ?? entry.id,
           label: entry.displayName ?? entry.id,
           description: entry.description ?? '',
-          efforts: (entry.supportedReasoningEfforts ?? []).map((option) => option.reasoningEffort),
-          ...(entry.defaultReasoningEffort ? { defaultEffort: entry.defaultReasoningEffort } : {}),
-          ...(entry.isDefault ? { isDefault: true } : {}),
+          efforts: entry.supportedReasoningEfforts,
+          defaultEffort: nonEmpty(entry.defaultReasoningEffort),
+          isDefault: entry.isDefault === true ? true : undefined,
         })
       }
 
@@ -216,17 +403,7 @@ export async function runCodexTurn(
   }>()
 
   const peer = connect(options, (method, raw) => {
-    const params = (raw ?? {}) as {
-      delta?: string
-      item?: CodexItem
-      tokenUsage?: {
-        last?: { inputTokens?: number; outputTokens?: number }
-        modelContextWindow?: number | null
-      }
-      turn?: { status?: string; error?: { message?: string } | null }
-      error?: { message?: string }
-      willRetry?: boolean
-    }
+    const params = decodeNotification(raw)
 
     switch (method) {
       case 'item/agentMessage/delta': {
@@ -283,13 +460,15 @@ export async function runCodexTurn(
         const view = toolView(item)
 
         if (view) {
+          const output = nonEmpty(item.aggregatedOutput)
+
           emit({
             type: 'tool_finished',
             id: item.id,
             ...view,
             status: toolStatus(item.status),
-            ...(item.aggregatedOutput ? { output: clipToolOutput(item.aggregatedOutput) } : {}),
-            ...(typeof item.exitCode === 'number' ? { exitCode: item.exitCode } : {}),
+            output: output === undefined ? undefined : clipToolOutput(output),
+            exitCode: item.exitCode,
           })
         }
 
@@ -304,9 +483,7 @@ export async function runCodexTurn(
             type: 'usage',
             input: usage.last.inputTokens ?? 0,
             output: usage.last.outputTokens ?? 0,
-            ...(typeof usage.modelContextWindow === 'number'
-              ? { contextWindow: usage.modelContextWindow }
-              : {}),
+            contextWindow: usage.modelContextWindow,
           })
         }
 
@@ -318,7 +495,7 @@ export async function runCodexTurn(
 
         finish({
           status: status === 'completed' || status === 'interrupted' ? status : 'failed',
-          ...(params.turn?.error?.message ? { error: params.turn.error.message } : {}),
+          error: nonEmpty(params.turn?.errorMessage),
         })
 
         break
@@ -326,7 +503,7 @@ export async function runCodexTurn(
 
       case 'error': {
         if (params.willRetry === false) {
-          finish({ status: 'failed', error: params.error?.message ?? 'codex reported an error' })
+          finish({ status: 'failed', error: params.errorMessage ?? 'codex reported an error' })
         }
 
         break
@@ -360,43 +537,54 @@ export async function runCodexTurn(
     const session = { cwd: request.cwd, approvalPolicy: 'never', sandbox: 'danger-full-access' }
 
     const startThread = () =>
-      peer.request<{ thread: { id: string }; model?: string }>('thread/start', {
-        ...session,
-        serviceName: CLIENT_INFO.name,
-        ...(request.model ? { model: request.model } : {}),
-        ...(request.instructions ? { developerInstructions: request.instructions } : {}),
-      })
+      peer.request(
+        'thread/start',
+        definedFields({
+          ...session,
+          serviceName: CLIENT_INFO.name,
+          model: nonEmpty(request.model),
+          developerInstructions: nonEmpty(request.instructions),
+        }),
+      )
 
     // Codex keeps conversations on the container disk. After the container is replaced the old
     // thread is gone, so carry on in a new one instead of failing the turn.
-    const opened = threadId
-      ? await peer
-          .request<{ thread: { id: string }; model?: string }>('thread/resume', {
-            ...session,
-            threadId,
-            excludeTurns: true,
-            ...(request.instructions ? { developerInstructions: request.instructions } : {}),
-          })
-          .catch(startThread)
-      : await startThread()
+    const opened = decodeOpenedThread(
+      threadId
+        ? await peer
+            .request(
+              'thread/resume',
+              definedFields({
+                ...session,
+                threadId,
+                excludeTurns: true,
+                developerInstructions: nonEmpty(request.instructions),
+              }),
+            )
+            .catch(startThread)
+        : await startThread(),
+    )
 
-    threadId = opened.thread.id
+    threadId = opened.id
 
     // A resumed thread reports the model it started on. The turn runs on the one asked for.
     const model = request.model ?? opened.model
 
-    emit({ type: 'thread', vendorThreadId: threadId, ...(model ? { model } : {}) })
+    emit({ type: 'thread', vendorThreadId: threadId, model: nonEmpty(model) })
 
-    const started = await peer.request<{ turn: { id: string } }>('turn/start', {
-      threadId,
-      input: [{ type: 'text', text: request.prompt, text_elements: [] }],
-      // Codex sends no reasoning at all unless a summary is asked for.
-      summary: 'auto',
-      ...(request.model ? { model: request.model } : {}),
-      ...(request.effort ? { effort: request.effort } : {}),
-    })
+    const started = await peer.request(
+      'turn/start',
+      definedFields({
+        threadId,
+        input: [{ type: 'text', text: request.prompt, text_elements: [] }],
+        // Codex sends no reasoning at all unless a summary is asked for.
+        summary: 'auto',
+        model: nonEmpty(request.model),
+        effort: nonEmpty(request.effort),
+      }),
+    )
 
-    turnId = started.turn.id
+    turnId = decodeStartedTurnId(started)
 
     if (signal.aborted) {
       interrupt()
@@ -404,7 +592,12 @@ export async function runCodexTurn(
 
     const result = await finished
 
-    emit({ type: 'turn_done', status: result.status, text: finalText, ...errorField(result) })
+    emit({
+      type: 'turn_done',
+      status: result.status,
+      text: finalText,
+      error: nonEmpty(result.error),
+    })
   } catch (cause) {
     emit({
       type: 'turn_done',
@@ -416,10 +609,6 @@ export async function runCodexTurn(
     signal.removeEventListener('abort', interrupt)
     peer.kill()
   }
-}
-
-function errorField(result: { error?: string }): { error?: string } {
-  return result.error ? { error: result.error } : {}
 }
 
 /** Signs in to Codex with a ChatGPT plan using Codex's own device-code flow. */
@@ -440,10 +629,14 @@ export async function runCodexLogin(
       return
     }
 
-    const params = (raw ?? {}) as { loginId?: string | null; success?: boolean; error?: string }
+    const params: JsonObject = isJsonObject(raw) ? raw : {}
+    const completedLogin = stringField(params, 'loginId')
 
-    if (!loginId || !params.loginId || params.loginId === loginId) {
-      finish({ success: params.success === true, ...(params.error ? { error: params.error } : {}) })
+    if (!loginId || !completedLogin || completedLogin === loginId) {
+      finish({
+        success: booleanField(params, 'success') === true,
+        error: nonEmpty(stringField(params, 'error')),
+      })
     }
   })
 
@@ -464,18 +657,16 @@ export async function runCodexLogin(
   try {
     await handshake(peer)
 
-    const started = await peer.request<{
-      loginId: string
-      verificationUrl: string
-      userCode: string
-    }>('account/login/start', { type: 'chatgptDeviceCode' })
+    const started = decodeDeviceLogin(
+      await peer.request('account/login/start', { type: 'chatgptDeviceCode' }),
+    )
 
     loginId = started.loginId
     emit({ type: 'login_prompt', url: started.verificationUrl, code: started.userCode })
 
     const result = await finished
 
-    emit({ type: 'login_done', success: result.success, ...errorField(result) })
+    emit({ type: 'login_done', success: result.success, error: nonEmpty(result.error) })
   } catch (cause) {
     emit({
       type: 'login_done',

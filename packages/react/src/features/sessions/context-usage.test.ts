@@ -34,11 +34,11 @@ function event(
 }
 
 function foldUsage(events: readonly SessionEvent[]): ContextUsageState {
-  return events.reduce(contextUsage.reduce, contextUsage.initialState)
+  return events.reduce((state, next) => contextUsage.reduce(state, next), contextUsage.initialState)
 }
 
 function foldFeed(events: readonly SessionEvent[]): SessionFeed {
-  return events.reduce(sessionFeed.reduce, sessionFeed.initialState)
+  return events.reduce((state, next) => sessionFeed.reduce(state, next), sessionFeed.initialState)
 }
 
 describe('context usage projection', () => {

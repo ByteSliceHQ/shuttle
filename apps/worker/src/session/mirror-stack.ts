@@ -133,18 +133,18 @@ export async function mirrorRepoStack(
   const status = await sandbox.stackStatus(runId, repo.name, repo.defaultBranch)
   const stackId = input.stackId ?? status.currentStack
   const summary = status.stacks.find((entry) => entry.stack === stackId)
+  const lastLayer = summary?.layers.at(-1)
 
-  if (!summary || summary.layers.length === 0) {
+  if (summary === undefined || lastLayer === undefined) {
     throw new Error(`Stack ${stackId} does not exist in ${repo.name}`)
   }
 
-  if (!summary.baseSha) {
+  if (summary.baseSha === '') {
     throw new Error(`No session base commit recorded for ${repo.name} stack ${stackId}`)
   }
 
   const targetLayer =
-    input.layer ??
-    (stackId === status.currentStack ? status.currentLayer : summary.layers.at(-1)!.layer)
+    input.layer ?? (stackId === status.currentStack ? status.currentLayer : lastLayer.layer)
 
   const prior = priorStacks[stackKey(repo.name, stackId)] ?? null
   const priorByLayer = new Map((prior?.layers ?? []).map((layer) => [layer.layer, layer]))
@@ -185,7 +185,7 @@ export async function mirrorRepoStack(
         ? summary.baseSha
         : summary.layers.find((layer) => layer.layer === planned.layer - 1)?.branch
 
-    if (!localParent) {
+    if (localParent === undefined || localParent === '') {
       throw new Error(`Layer ${planned.layer - 1} of ${repo.name} stack ${stackId} is missing`)
     }
 

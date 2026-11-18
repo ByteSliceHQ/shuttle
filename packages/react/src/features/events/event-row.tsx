@@ -1,4 +1,5 @@
 import { cn, shortId } from '../../lib/cn'
+import { hasText } from '../../lib/text'
 import { Link } from '../../shuttle'
 import { eventMeta, familyColor, type SessionEvent } from './event-catalog'
 
@@ -44,7 +45,7 @@ export function EventRow({
       className={cn(
         'flex h-[26px] w-full items-center gap-2 rounded-sm px-1.5 text-left font-mono text-[11px] transition-colors duration-100',
         selected ? 'bg-accent' : 'hover:bg-accent/40',
-        event.ephemeral && 'opacity-50',
+        event.ephemeral === true && 'opacity-50',
       )}
     >
       <span
@@ -70,8 +71,8 @@ export function EventRow({
               : ''}
         </span>
       ) : null}
-      {(columns?.session ?? true) && (runLabel || runId) ? (
-        runId ? (
+      {(columns?.session ?? true) && (hasText(runLabel) || hasText(runId)) ? (
+        hasText(runId) ? (
           <Link
             to={{ page: 'session', sessionId: runId, thread: event.threadId ?? undefined }}
             onClick={(click) => click.stopPropagation()}
@@ -88,11 +89,11 @@ export function EventRow({
       ) : null}
       <span className="min-w-0 flex-1 truncate whitespace-nowrap">
         <span className="text-foreground">{meta.summary.title}</span>
-        {(columns?.detail ?? true) && meta.summary.detail ? (
+        {(columns?.detail ?? true) && hasText(meta.summary.detail) ? (
           <span className="text-muted-foreground ml-1.5">{meta.summary.detail}</span>
         ) : null}
       </span>
-      {threadLabel ? (
+      {hasText(threadLabel) ? (
         <span className="event-thread text-muted-foreground/70 max-w-24 shrink-0 truncate font-sans">
           {threadLabel}
         </span>

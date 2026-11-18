@@ -44,7 +44,9 @@ function refusal(code: string, status: number, message: string) {
 export function refuseMultipart(context: ApiContext): Response | null {
   const { request, env } = context
 
-  if (!request.headers.get('content-type')?.toLowerCase().startsWith('multipart/form-data')) {
+  if (
+    request.headers.get('content-type')?.toLowerCase().startsWith('multipart/form-data') !== true
+  ) {
     return null
   }
 

@@ -75,7 +75,7 @@ export function parseTar(buffer: ArrayBuffer): TarEntry[] {
     const typeFlag = header[156] ?? 0
     const name = readString(header, 0, 100)
     const prefix = readString(header, 345, 155)
-    const headerPath = prefix ? `${prefix}/${name}` : name
+    const headerPath = prefix === '' ? name : `${prefix}/${name}`
     const path = paxPath ?? headerPath
     paxPath = null
 
@@ -88,7 +88,7 @@ export function parseTar(buffer: ArrayBuffer): TarEntry[] {
       const text = new TextDecoder().decode(data)
       const match = text.match(/(?:^|\n)\d+ path=(.+?)(?:\n|$)/)
 
-      if (match?.[1] && typeFlag !== 103) {
+      if (match?.[1] !== undefined && typeFlag !== 103) {
         paxPath = match[1]
       }
 
@@ -100,7 +100,7 @@ export function parseTar(buffer: ArrayBuffer): TarEntry[] {
       continue
     }
 
-    if (!path || path.endsWith('/') || size > MAX_FILE_BYTES || isBinary(data)) {
+    if (path === '' || path.endsWith('/') || size > MAX_FILE_BYTES || isBinary(data)) {
       continue
     }
 

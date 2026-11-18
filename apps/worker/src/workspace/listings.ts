@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 import type { EventInput } from '@swirls/looms/core'
 
 import { ensureNamedWorkspace } from '../bootstrap'
@@ -21,9 +23,27 @@ export interface ListedSession {
   readonly archived: boolean
 }
 
-interface WorkspaceTreeBody {
-  readonly value?: { readonly sessions?: Readonly<Record<string, Partial<ListedSession>>> }
-}
+const WorkspaceTreeBodySchema = z.object({
+  value: z
+    .object({
+      sessions: z
+        .record(
+          z.string(),
+          z.object({
+            folderId: z.string().optional(),
+            goal: z.string().optional(),
+            title: z.string().optional(),
+            status: z.string().optional(),
+            activity: z.string().optional(),
+            createdAt: z.number().optional(),
+            updatedAt: z.number().optional(),
+            archived: z.boolean().optional(),
+          }),
+        )
+        .nullish(),
+    })
+    .nullish(),
+})
 
 const ACTIVITIES: readonly SessionActivity[] = ['idle', 'working', 'needs_input', 'error']
 
@@ -42,9 +62,10 @@ export async function readListedSession(
       continue
     }
 
-    const entry = ((await response.json()) as WorkspaceTreeBody).value?.sessions?.[sessionRunId]
+    const body = WorkspaceTreeBodySchema.safeParse(await response.json())
+    const entry = body.success ? body.data.value?.sessions?.[sessionRunId] : undefined
 
-    if (entry && typeof entry.folderId === 'string') {
+    if (entry?.folderId !== undefined) {
       return {
         runId: sessionRunId,
         folderId: entry.folderId,

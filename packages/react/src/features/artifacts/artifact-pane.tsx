@@ -118,7 +118,7 @@ export function ArtifactPane({
           </span>
           <span className="flex flex-wrap justify-center gap-1.5">
             {launchableArtifactTypes(types)
-              .filter((type) => type.launcher?.starter)
+              .filter((type) => type.launcher?.starter === true)
               .map((type) => (
                 <Button
                   key={type.kind}

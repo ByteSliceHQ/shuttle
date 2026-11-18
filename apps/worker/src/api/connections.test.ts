@@ -1,8 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 
+import { z } from 'zod'
+
+import type { JsonValue } from '@swirls/looms/core'
+
 import type { BridgeEvent } from '../../bridge/protocol'
-import type { ShuttleEnv } from '../env'
+import type { CredentialPayload } from '../credentials/store'
+import type { SessionSandboxStub, ShuttleEnv } from '../env'
 import type { Actor } from '../tenancy/access'
+import { fakeEnv } from '../testing/fake-env'
 import { signInFilesPresent } from '../vendor/harnesses'
 import { explainDeadRun, removeSignInFiles } from './connections'
 import { handleApi } from './handler'
@@ -52,6 +58,17 @@ const actor: Actor = {
 const TEAM = { workers: true, codex: false, claudeCode: false, cursor: false, preset: 'none' }
 const DEVICE = 'device_123456'
 
+/** What the connection routes answer with, reading only the parts these tests look into. */
+const ReplySchema = z.looseObject({
+  error: z.string().optional(),
+  machine: z.boolean().optional(),
+  connected: z.boolean().optional(),
+  loginId: z.string().optional(),
+  harness: z.string().optional(),
+  connections: z.array(z.json()).optional(),
+  models: z.array(z.looseObject({ id: z.string() })).optional(),
+})
+
 /** A worker whose workspace run and sandboxes are in memory, with a record of what was asked. */
 function fakeWorker(
   options: {
@@ -64,14 +81,14 @@ function fakeWorker(
   } = {},
 ) {
   const calls: unknown[][] = []
-  const stored = new Map<string, unknown>()
+  const stored = new Map<string, CredentialPayload>()
   let defaultHarness = 'shuttle'
   let team = TEAM
 
   const workspace = {
     listCredentials: async () =>
       [...stored.keys()].map((harness) => ({ harness, updatedAt: 1_700_000_000_000 })),
-    putCredential: async (userId: string, harness: string, payload: unknown) => {
+    putCredential: async (userId: string, harness: string, payload: CredentialPayload) => {
       calls.push(['putCredential', userId, harness, payload])
       stored.set(harness, payload)
     },
@@ -89,7 +106,7 @@ function fakeWorker(
 
       return { stdout: '', stderr: '', exitCode: options.signedInOnDisk ? 0 : 1 }
     },
-    startAgentRun: async (input: unknown) => {
+    startAgentRun: async (input: Parameters<SessionSandboxStub['startAgentRun']>[0]) => {
       calls.push(['startAgentRun', name, input])
 
       return { started: true }
@@ -113,37 +130,44 @@ function fakeWorker(
     },
   })
 
-  const env = {
+  const env = fakeEnv({
     SHUTTLE_CREDENTIALS_KEY: 'key',
-    LOOMS_RUN: { getByName: () => workspace },
-    SANDBOX: { getByName: sandbox },
+    // SAFETY: the routes under test call only the methods these fakes implement on each stub.
+    LOOMS_RUN: { getByName: () => workspace } as never,
+    // SAFETY: as above, for the sandbox stub.
+    SANDBOX: { getByName: sandbox } as never,
     ...options.env,
-  } as unknown as ShuttleEnv
+  })
 
   const call = async (
     method: string,
     path: string,
-    init: { body?: unknown; device?: string } = {},
+    init: { body?: JsonValue; device?: string } = {},
   ) => {
+    const headers = new Headers({ 'content-type': 'application/json' })
+
+    if (init.device !== undefined && init.device !== '') {
+      headers.set('x-shuttle-device', init.device)
+    }
+
+    const request: RequestInit = { method, headers }
+
+    if (init.body !== undefined) {
+      request.body = JSON.stringify(init.body)
+    }
+
     const response = await handleApi({
       env,
       actor,
-      request: new Request(`https://shuttle.test/workspace/connections${path}`, {
-        method,
-        // The web app sends this on every call, with a body or without.
-        headers: {
-          'content-type': 'application/json',
-          ...(init.device ? { 'x-shuttle-device': init.device } : {}),
-        },
-        ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
-      }),
+      // The web app sends the content type on every call, with a body or without.
+      request: new Request(`https://shuttle.test/workspace/connections${path}`, request),
     })
 
     if (!response) {
       throw new Error(`${method} ${path} is not in the contract`)
     }
 
-    return { status: response.status, body: (await response.json()) as Record<string, any> }
+    return { status: response.status, body: ReplySchema.parse(await response.json()) }
   }
 
   return { call, calls, stored }
@@ -200,7 +224,7 @@ describe('GET /workspace/connections', () => {
 
     expect(body.machine).toBe(true)
 
-    expect(body.connections[0]).toMatchObject({
+    expect(body.connections?.[0]).toMatchObject({
       harness: 'codex',
       connected: true,
       cloud: false,
@@ -297,7 +321,7 @@ describe('GET /workspace/connections/{harness}/models', () => {
 
     expect(status).toBe(200)
     expect(body.harness).toBe('claude-code')
-    expect(body.models.map((model: { id: string }) => model.id)).toContain('sonnet')
+    expect(body.models?.map((model) => model.id)).toContain('sonnet')
   })
 })
 
@@ -331,6 +355,7 @@ describe('signing in', () => {
 
   test('passes on what the CLI printed, from the offset asked for', async () => {
     const prompt = { type: 'login_prompt', url: 'https://vendor.test', code: 'ABCD', seq: 1, at: 5 }
+    // SAFETY: the fixture has every field of a `login_prompt` event.
     const { call, calls } = fakeWorker({ events: [prompt as BridgeEvent] })
 
     expect((await call('GET', `/codex/login/${LOGIN}?offset=7`)).body).toEqual({
@@ -344,6 +369,7 @@ describe('signing in', () => {
   })
 
   test('stores the sign-in files once the CLI reports success', async () => {
+    // SAFETY: the fixture has every field of a `login_done` event.
     const done = { type: 'login_done', success: true, seq: 2, at: 9 } as BridgeEvent
     const files = { '.codex/auth.json': 'secret' }
     const { call, stored } = fakeWorker({ events: [done], files })
@@ -357,6 +383,7 @@ describe('signing in', () => {
   })
 
   test('a success that left nothing to store is not a connection', async () => {
+    // SAFETY: the fixture has every field of a `login_done` event.
     const done = { type: 'login_done', success: true, seq: 2, at: 9 } as BridgeEvent
     const { call, stored } = fakeWorker({ events: [done] })
 
@@ -369,6 +396,7 @@ describe('signing in', () => {
   })
 
   test('on a machine the sign-in stays on its disk and is not recorded in the cloud', async () => {
+    // SAFETY: the fixture has every field of a `login_done` event.
     const done = { type: 'login_done', success: true, seq: 2, at: 9 } as BridgeEvent
     const { call, stored } = fakeWorker({ events: [done], signedInOnDisk: true })
     const { body } = await call('GET', `/codex/login/${LOGIN}`, { device: DEVICE })

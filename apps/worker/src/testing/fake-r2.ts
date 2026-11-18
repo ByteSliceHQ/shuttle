@@ -1,10 +1,12 @@
 interface Stored {
-  readonly bytes: Uint8Array
+  readonly bytes: Uint8Array<ArrayBuffer>
   readonly httpMetadata?: R2HTTPMetadata
   readonly customMetadata?: Record<string, string>
 }
 
-async function bytesOf(body: unknown): Promise<Uint8Array> {
+type PutBody = ReadableStream | ArrayBuffer | ArrayBufferView | string | Blob | null
+
+async function bytesOf(body: PutBody): Promise<Uint8Array<ArrayBuffer>> {
   if (body instanceof ReadableStream) {
     return new Uint8Array(await new Response(body).arrayBuffer())
   }
@@ -18,10 +20,10 @@ async function bytesOf(body: unknown): Promise<Uint8Array> {
   }
 
   if (ArrayBuffer.isView(body)) {
-    return new Uint8Array(body.buffer, body.byteOffset, body.byteLength)
+    return Uint8Array.from(new Uint8Array(body.buffer, body.byteOffset, body.byteLength))
   }
 
-  return new TextEncoder().encode(String(body))
+  return body === null ? new Uint8Array() : new TextEncoder().encode(body)
 }
 
 function parseRange(
@@ -35,7 +37,7 @@ function parseRange(
   }
 
   const offset = Number(match[1])
-  const end = match[2] ? Math.min(Number(match[2]), size - 1) : size - 1
+  const end = (match[2] ?? '') === '' ? size - 1 : Math.min(Number(match[2]), size - 1)
 
   return { offset, length: end - offset + 1 }
 }
@@ -57,10 +59,10 @@ export function fakeBucket(): R2Bucket & { readonly keys: () => string[] } {
   const bucket = {
     keys: () => [...objects.keys()],
 
-    async put(key: string, body: unknown, options?: R2PutOptions) {
+    async put(key: string, body: PutBody, options?: R2PutOptions) {
       const stored: Stored = {
         bytes: await bytesOf(body),
-        httpMetadata: options?.httpMetadata as R2HTTPMetadata | undefined,
+        httpMetadata: options?.httpMetadata instanceof Headers ? undefined : options?.httpMetadata,
         customMetadata: options?.customMetadata,
       }
 
@@ -92,8 +94,8 @@ export function fakeBucket(): R2Bucket & { readonly keys: () => string[] } {
 
       return {
         ...describe(key, stored),
-        ...(range ? { range } : {}),
-        body: new Blob([bytes as Uint8Array<ArrayBuffer>]).stream(),
+        range: range ?? undefined,
+        body: new Blob([bytes]).stream(),
         arrayBuffer: async () =>
           bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
       }
@@ -104,5 +106,6 @@ export function fakeBucket(): R2Bucket & { readonly keys: () => string[] } {
     },
   }
 
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions, typescript/no-unsafe-type-assertion -- SAFETY: the fake answers put, head, get, delete and keys, the whole R2 surface Shuttle's tests call; R2Bucket has more methods than a test needs to imitate.
   return bucket as unknown as R2Bucket & { readonly keys: () => string[] }
 }

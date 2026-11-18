@@ -80,7 +80,7 @@ function SelectItem({
         </SelectPrimitive.ItemIndicator>
       </span>
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
-      {description ? (
+      {description !== undefined && description !== '' ? (
         <span className="text-muted-foreground text-[11px]">{description}</span>
       ) : null}
     </SelectPrimitive.Item>

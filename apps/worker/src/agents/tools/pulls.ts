@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { asEffectsTool } from '@swirls/looms/agent'
 import { invoke, isJsonObject, isJsonString, type JsonValue } from '@swirls/looms/core'
 
+import type { JsonObjectBuilder } from '../../session/json-object'
+
 function asStringArray(value: JsonValue | undefined): string[] {
   if (!Array.isArray(value)) {
     return []
@@ -37,25 +39,18 @@ export function createProposePullRequestTool() {
       const obj = isJsonObject(input) ? input : {}
       const title = isJsonString(obj.title) ? obj.title : 'Shuttle changes'
       const body = isJsonString(obj.body) ? obj.body : ''
-      const draft = typeof obj.draft === 'boolean' ? obj.draft : true
+      const draft = obj.draft !== false
       const repos = asStringArray(obj.repos)
       const repo = isJsonString(obj.repo) ? obj.repo : (repos[0] ?? '')
       const approvalId = `pr_publish_${crypto.randomUUID()}`
 
-      return [
-        invoke(
-          'shuttle.preparePrPublishGate',
-          {
-            approvalId,
-            title,
-            body,
-            draft,
-            repos,
-            ...(repo ? { repo } : {}),
-          },
-          `prepare_pr_${approvalId}`,
-        ),
-      ]
+      const gateInput: JsonObjectBuilder = { approvalId, title, body, draft, repos }
+
+      if (repo !== '') {
+        gateInput.repo = repo
+      }
+
+      return [invoke('shuttle.preparePrPublishGate', gateInput, `prepare_pr_${approvalId}`)]
     },
     waitOn: {
       type: ['shuttle.pr.published', 'shuttle.pr.publish_failed', 'shuttle.pr.discarded'],

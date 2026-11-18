@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 import type { BridgeModel } from '../../bridge/protocol'
 import type { VendorHarnessId } from '../harness'
 
@@ -128,55 +130,86 @@ export function listsOwnModels(harness: VendorHarnessId): boolean {
   return harness === 'codex' || harness === 'cursor'
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+/** A choice as a caller may state it. Either part may be absent or blank. */
+export interface VendorModelChoiceInput {
+  readonly model?: string
+  readonly effort?: string
 }
 
-/** A valid choice, or null. Blank parts are dropped, so `{}` means "the agent's defaults". */
-export function parseVendorModelChoice(value: unknown): VendorModelChoice | null {
-  if (!isRecord(value)) {
-    return null
-  }
-
-  const model = typeof value.model === 'string' ? value.model.trim() : ''
-  const effort = typeof value.effort === 'string' ? value.effort.trim() : ''
-
-  if ((model && !MODEL_ID.test(model)) || (effort && !EFFORT.test(effort))) {
-    return null
-  }
-
-  return { ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
-}
-
-/** Keeps only well-formed models from an agent's own list. */
-export function parseVendorModels(value: unknown): VendorModel[] {
-  const entries = isRecord(value) && Array.isArray(value.models) ? value.models : []
-
-  return entries.flatMap((entry): VendorModel[] => {
-    if (!isRecord(entry) || typeof entry.id !== 'string' || !MODEL_ID.test(entry.id)) {
-      return []
+/** Blank parts are dropped, so `{}` means "the agent's defaults". Malformed parts reject it. */
+const VendorModelChoiceSchema = z
+  .object({
+    model: z.string().trim().catch(''),
+    effort: z.string().trim().catch(''),
+  })
+  .refine(
+    ({ model, effort }) =>
+      (model === '' || MODEL_ID.test(model)) && (effort === '' || EFFORT.test(effort)),
+  )
+  .transform(({ model, effort }): VendorModelChoice => {
+    if (model !== '' && effort !== '') {
+      return { model, effort }
     }
 
-    const efforts = Array.isArray(entry.efforts)
-      ? entry.efforts.filter(
-          (effort): effort is string => typeof effort === 'string' && EFFORT.test(effort),
-        )
-      : []
+    if (model !== '') {
+      return { model }
+    }
 
-    return [
-      {
-        id: entry.id,
-        label: typeof entry.label === 'string' && entry.label ? entry.label : entry.id,
-        description: typeof entry.description === 'string' ? entry.description : '',
-        efforts,
-        ...(typeof entry.defaultEffort === 'string' && efforts.includes(entry.defaultEffort)
-          ? { defaultEffort: entry.defaultEffort }
-          : {}),
-        ...(entry.isDefault === true ? { isDefault: true } : {}),
-      },
-    ]
+    return effort === '' ? {} : { effort }
+  })
+
+/** A valid choice, or null. Blank parts are dropped, so `{}` means "the agent's defaults". */
+export function parseVendorModelChoice(
+  value: VendorModelChoiceInput | null,
+): VendorModelChoice | null {
+  return VendorModelChoiceSchema.safeParse(value).data ?? null
+}
+
+const EffortSchema = z.string().regex(EFFORT)
+
+/** One model from an agent's own list; a field that is the wrong type falls back to blank. */
+const VendorModelSchema = z
+  .object({
+    id: z.string().regex(MODEL_ID),
+    label: z.string().catch(''),
+    description: z.string().catch(''),
+    efforts: z
+      .array(z.unknown())
+      .catch([])
+      .transform((items) =>
+        items.flatMap((item) => {
+          const effort = EffortSchema.safeParse(item)
+
+          return effort.success ? [effort.data] : []
+        }),
+      ),
+    defaultEffort: z.string().optional().catch(undefined),
+    isDefault: z.boolean().catch(false),
+  })
+  .transform(({ id, label, description, efforts, defaultEffort, isDefault }): VendorModel => {
+    const base = { id, label: label === '' ? id : label, description, efforts }
+
+    const withEffort =
+      defaultEffort !== undefined && efforts.includes(defaultEffort)
+        ? { ...base, defaultEffort }
+        : base
+
+    return isDefault ? { ...withEffort, isDefault: true } : withEffort
+  })
+
+/** Keeps only well-formed models from an agent's own list. */
+export function parseVendorModels(value: { readonly models: readonly unknown[] }): VendorModel[] {
+  return value.models.flatMap((entry) => {
+    const model = VendorModelSchema.safeParse(entry)
+
+    return model.success ? [model.data] : []
   })
 }
+
+const StoredCatalogueSchema = z.object({
+  models: z.array(z.unknown()).catch([]),
+  fetchedAt: z.number(),
+})
 
 type ModelStorage = Pick<DurableObjectStorage, 'get' | 'put'>
 
@@ -185,17 +218,17 @@ export async function readVendorModelChoice(
   storage: Pick<DurableObjectStorage, 'get'>,
   harness: VendorHarnessId,
 ): Promise<VendorModelChoice | null> {
-  return parseVendorModelChoice(await storage.get(choiceKey(harness)))
+  return VendorModelChoiceSchema.safeParse(await storage.get(choiceKey(harness))).data ?? null
 }
 
 export async function writeVendorModelChoice(
   storage: ModelStorage,
   harness: VendorHarnessId,
-  value: unknown,
+  value: VendorModelChoiceInput | null,
 ): Promise<VendorModelChoice> {
   const choice = parseVendorModelChoice(value)
 
-  if (!choice) {
+  if (choice === null) {
     throw new Error('invalid model choice')
   }
 
@@ -212,12 +245,15 @@ export async function readVendorCatalogue(
   storage: Pick<DurableObjectStorage, 'get'>,
   harness: VendorHarnessId,
 ): Promise<VendorCatalogue | null> {
-  const stored = await storage.get<{ models?: unknown; fetchedAt?: unknown }>(catalogueKey(harness))
-  const models = parseVendorModels(stored)
+  const stored = StoredCatalogueSchema.safeParse(await storage.get(catalogueKey(harness)))
 
-  return models.length > 0 && typeof stored?.fetchedAt === 'number'
-    ? { models, fetchedAt: stored.fetchedAt }
-    : null
+  if (!stored.success) {
+    return null
+  }
+
+  const models = parseVendorModels(stored.data)
+
+  return models.length > 0 ? { models, fetchedAt: stored.data.fetchedAt } : null
 }
 
 export async function writeVendorCatalogue(

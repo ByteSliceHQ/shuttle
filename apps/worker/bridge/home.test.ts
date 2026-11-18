@@ -8,12 +8,11 @@ import { collectHomeFiles, resolveHomePath, seedHomeFiles } from './home'
 describe('home files', () => {
   test('seeds files owner-only and collects them back', () => {
     const home = mkdtempSync(join(tmpdir(), 'shuttle-home-'))
-    const auth = Buffer.from('{"token":"abc"}').toString('base64')
+    const auth = btoa('{"token":"abc"}')
 
     seedHomeFiles(home, { '.codex/auth.json': auth })
 
     expect(readFileSync(join(home, '.codex/auth.json'), 'utf8')).toBe('{"token":"abc"}')
-    // eslint-disable-next-line no-bitwise -- file mode bits
     expect(statSync(join(home, '.codex/auth.json')).mode & 0o777).toBe(0o600)
 
     expect(collectHomeFiles(home, ['.codex/auth.json', '.codex/missing.json'])).toEqual({

@@ -14,6 +14,11 @@ export interface FillSecretsResult {
   readonly filled: readonly SecretKey[]
 }
 
+export interface FillGithubTokenResult {
+  readonly text: string
+  readonly filled: boolean
+}
+
 /** Pull the trycloudflare URL out of a cloudflared log line. */
 export function parseTunnelUrl(line: string): string | null {
   const match = line.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i)
@@ -99,10 +104,7 @@ export function fillEmptySecrets(
  * Set `GITHUB_TOKEN` when the key is missing or empty and a token is available
  * (typically from `gh auth token`). Never overwrites a non-empty value.
  */
-export function fillEmptyGithubToken(
-  text: string,
-  token: string | null,
-): { readonly text: string; readonly filled: boolean } {
+export function fillEmptyGithubToken(text: string, token: string | null): FillGithubTokenResult {
   if (!token?.trim()) {
     return { text, filled: false }
   }

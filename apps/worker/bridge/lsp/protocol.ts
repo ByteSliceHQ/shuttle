@@ -1,7 +1,18 @@
 /**
  * What `shuttle-lsp` and the Worker say to each other. Nothing here touches Node, so the Worker
- * can import it.
+ * can import it. It decodes with hand-written guards from `json.ts`, not a schema library,
+ * because the daemon runs in sandboxes where no `node_modules` exist.
  */
+import {
+  arrayField,
+  decodeEach,
+  field,
+  isJsonObject,
+  numberField,
+  parseJson,
+  stringField,
+  type JsonValue,
+} from './json.ts'
 
 /** Path of the `shuttle-lsp` entry point inside the sandbox. */
 export const LSP_CLI_PATH = '/opt/shuttle-bridge/lsp/cli.ts'
@@ -12,7 +23,14 @@ export const LSP_DEFAULT_WAIT_MS = 8000
 /** Most problems a tool result carries. A file with more says how many were left out. */
 export const LSP_MAX_TOOL_DIAGNOSTICS = 20
 
-export type LspSeverity = 'error' | 'warning' | 'info' | 'hint'
+/** LSP's severities in the order its numbers 1 to 4 give them. */
+export const LSP_SEVERITIES = ['error', 'warning', 'info', 'hint'] as const
+
+export type LspSeverity = (typeof LSP_SEVERITIES)[number]
+
+function isLspSeverity(value: string | undefined): value is LspSeverity {
+  return LSP_SEVERITIES.some((severity) => severity === value)
+}
 
 export interface LspDiagnostic {
   /** 1-based, as an editor shows it. */
@@ -57,14 +75,161 @@ export type LspRequest =
   | { readonly op: 'status' }
   | { readonly op: 'stop' }
 
+export interface LspServerStatus {
+  readonly id: string
+  readonly root: string
+  readonly files: number
+}
+
 export interface LspStatusReply {
   readonly status: 'ok'
   readonly pid: number
-  readonly servers: readonly {
-    readonly id: string
-    readonly root: string
-    readonly files: number
-  }[]
+  readonly servers: readonly LspServerStatus[]
+}
+
+export interface LspStopReply {
+  readonly status: 'ok'
+}
+
+/** Whatever the daemon answers a request with. */
+export type LspReply = LspDiagnosticsReply | LspStatusReply | LspStopReply
+
+function decodeDiagnostic(value: JsonValue): LspDiagnostic | undefined {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  const line = numberField(value, 'line')
+  const column = numberField(value, 'column')
+  const severity = stringField(value, 'severity')
+  const message = stringField(value, 'message')
+
+  if (
+    line === undefined ||
+    column === undefined ||
+    !isLspSeverity(severity) ||
+    message === undefined
+  ) {
+    return undefined
+  }
+
+  return {
+    line,
+    column,
+    endLine: numberField(value, 'endLine') ?? line,
+    endColumn: numberField(value, 'endColumn') ?? column,
+    severity,
+    message,
+    code: stringField(value, 'code'),
+    source: stringField(value, 'source'),
+  }
+}
+
+/** A reply to a diagnostics request, or undefined when `value` is not one. */
+export function decodeDiagnosticsReply(
+  value: JsonValue | undefined,
+): LspDiagnosticsReply | undefined {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  const server = stringField(value, 'server') ?? ''
+  const reason = stringField(value, 'reason') ?? ''
+
+  switch (stringField(value, 'status')) {
+    case 'ok': {
+      const diagnostics = arrayField(value, 'diagnostics')
+
+      return diagnostics === undefined
+        ? undefined
+        : { status: 'ok', server, diagnostics: decodeEach(diagnostics, decodeDiagnostic) }
+    }
+
+    case 'pending': {
+      return { status: 'pending', server }
+    }
+
+    case 'unsupported': {
+      return { status: 'unsupported' }
+    }
+
+    case 'unavailable': {
+      return { status: 'unavailable', reason }
+    }
+
+    case 'error': {
+      return { status: 'error', reason }
+    }
+
+    case undefined:
+
+    default: {
+      return undefined
+    }
+  }
+}
+
+function decodeServerStatus(value: JsonValue): LspServerStatus | undefined {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  const id = stringField(value, 'id')
+  const root = stringField(value, 'root')
+  const files = numberField(value, 'files')
+
+  return id === undefined || root === undefined || files === undefined
+    ? undefined
+    : { id, root, files }
+}
+
+/** A reply to a status request, or undefined when `value` is not one. */
+export function decodeStatusReply(value: JsonValue | undefined): LspStatusReply | undefined {
+  if (!isJsonObject(value) || stringField(value, 'status') !== 'ok') {
+    return undefined
+  }
+
+  const pid = numberField(value, 'pid')
+
+  return pid === undefined
+    ? undefined
+    : { status: 'ok', pid, servers: decodeEach(field(value, 'servers'), decodeServerStatus) }
+}
+
+/** A request on the daemon's socket, or undefined when `value` is not one. */
+export function decodeLspRequest(value: JsonValue | undefined): LspRequest | undefined {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  const file = stringField(value, 'file')
+
+  switch (stringField(value, 'op')) {
+    case 'diagnostics': {
+      return file === undefined
+        ? undefined
+        : {
+            op: 'diagnostics',
+            file,
+            waitMs: numberField(value, 'waitMs'),
+            text: stringField(value, 'text'),
+          }
+    }
+
+    case 'status': {
+      return { op: 'status' }
+    }
+
+    case 'stop': {
+      return { op: 'stop' }
+    }
+
+    case undefined:
+
+    default: {
+      return undefined
+    }
+  }
 }
 
 /** What a write or edit tool adds to its result about the file it just changed. */
@@ -91,15 +256,9 @@ export function formatDiagnostic(diagnostic: LspDiagnostic): string {
  * or output that is not a reply at all.
  */
 export function toolDiagnostics(stdout: string): ToolDiagnostics {
-  let reply: LspDiagnosticsReply
+  const reply = decodeDiagnosticsReply(parseJson(stdout.trim()))
 
-  try {
-    reply = JSON.parse(stdout.trim()) as LspDiagnosticsReply
-  } catch {
-    return {}
-  }
-
-  if (typeof reply !== 'object' || reply === null) {
+  if (reply === undefined) {
     return {}
   }
 
@@ -107,7 +266,7 @@ export function toolDiagnostics(stdout: string): ToolDiagnostics {
     return { diagnostics_pending: true }
   }
 
-  if (reply.status !== 'ok' || !Array.isArray(reply.diagnostics)) {
+  if (reply.status !== 'ok') {
     return {}
   }
 
@@ -117,11 +276,11 @@ export function toolDiagnostics(stdout: string): ToolDiagnostics {
   )
 
   const shown = problems.slice(0, LSP_MAX_TOOL_DIAGNOSTICS)
+  const lines = shown.map(formatDiagnostic)
 
-  return {
-    diagnostics: shown.map(formatDiagnostic),
-    ...(problems.length > shown.length
-      ? { diagnostics_omitted: problems.length - shown.length }
-      : {}),
+  if (problems.length > shown.length) {
+    return { diagnostics: lines, diagnostics_omitted: problems.length - shown.length }
   }
+
+  return { diagnostics: lines }
 }

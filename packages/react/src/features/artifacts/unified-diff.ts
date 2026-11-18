@@ -1,3 +1,4 @@
+import { hasText } from '../../lib/text'
 export type DiffLineKind = 'ctx' | 'add' | 'del' | 'hunk' | 'meta'
 
 export interface DiffLine {
@@ -17,7 +18,7 @@ export interface DiffFile {
 
 /** Parse a unified diff into per-file line rows with optional old/new line numbers. */
 export function parseUnifiedDiff(diff: string, repo: string): DiffFile[] {
-  if (!diff.trim()) {
+  if (diff.trim() === '') {
     return []
   }
 
@@ -56,7 +57,7 @@ export function parseUnifiedDiff(diff: string, repo: string): DiffFile[] {
     if (raw.startsWith('@@')) {
       const match = raw.match(/@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?/)
 
-      if (match?.[1] && match[2]) {
+      if (hasText(match?.[1]) && hasText(match[2])) {
         oldLine = Number(match[1])
         newLine = Number(match[2])
       }

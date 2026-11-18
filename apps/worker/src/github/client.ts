@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 import type { ShuttleEnv } from '../env'
 import type { LinkedRepo } from '../workspace/scope'
 
@@ -21,26 +23,31 @@ export interface GithubInstallation {
   readonly htmlUrl: string
 }
 
+const GraphqlDataSchema = z.json()
+
+/** The JSON a GraphQL response carries as its `data`. */
+export type GraphqlData = z.infer<typeof GraphqlDataSchema>
+
+/** What a GraphQL document is run with. */
+export type GraphqlVariables = Readonly<Record<string, string | number | null>>
+
 /** GraphQL can answer 200 with errors; keep the error types and any partial data. */
 export class GithubGraphqlError extends Error {
   constructor(
     message: string,
     readonly types: readonly string[],
-    readonly data: unknown,
+    readonly data: GraphqlData,
   ) {
     super(message)
     this.name = 'GithubGraphqlError'
   }
 }
 
-function requireGithubConfig(env: ShuttleEnv): {
-  appId: string
-  privateKey: string
-} {
+function requireGithubConfig(env: Pick<ShuttleEnv, 'GITHUB_APP_ID' | 'GITHUB_APP_PRIVATE_KEY'>) {
   const appId = env.GITHUB_APP_ID
   const privateKey = env.GITHUB_APP_PRIVATE_KEY
 
-  if (!appId || !privateKey) {
+  if (appId === undefined || appId === '' || privateKey === undefined || privateKey === '') {
     throw new Error('GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY are required')
   }
 
@@ -76,7 +83,10 @@ export function base64Url(bytes: ArrayBuffer | Uint8Array): string {
 }
 
 /** Build a short-lived GitHub App JWT (RS256) with WebCrypto. */
-export async function createAppJwt(env: ShuttleEnv, now = Date.now()): Promise<string> {
+export async function createAppJwt(
+  env: Pick<ShuttleEnv, 'GITHUB_APP_ID' | 'GITHUB_APP_PRIVATE_KEY'>,
+  now = Date.now(),
+): Promise<string> {
   const { appId, privateKey } = requireGithubConfig(env)
   const header = { alg: 'RS256', typ: 'JWT' }
   const issuedAt = Math.floor(now / 1000) - 60
@@ -118,7 +128,7 @@ export async function githubFetch(
   headers.set('X-GitHub-Api-Version', init.apiVersion ?? '2022-11-28')
   headers.set('User-Agent', 'shuttle-looms')
 
-  if (init.token) {
+  if (init.token !== undefined && init.token !== '') {
     headers.set('Authorization', `Bearer ${init.token}`)
   } else {
     headers.set('Authorization', `Bearer ${await createAppJwt(env)}`)
@@ -131,7 +141,7 @@ export async function githubFetch(
 /** Optional user/PAT from env — covers PR sync/create when the App lacks scopes. */
 export function githubUserToken(env: ShuttleEnv): string | null {
   const token = env.GITHUB_TOKEN?.trim()
-  return token ? token : null
+  return token === undefined || token === '' ? null : token
 }
 
 function isGithubForbidden(cause: unknown): boolean {
@@ -146,10 +156,17 @@ function isGithubForbidden(cause: unknown): boolean {
   return false
 }
 
+const GraphqlEnvelopeSchema = z.object({
+  data: GraphqlDataSchema.optional(),
+  errors: z.array(z.object({ message: z.string(), type: z.string().optional() })).optional(),
+})
+
+/** Runs a GraphQL document and decodes its `data` with `schema`. */
 export async function githubGraphqlWithToken<T>(
   query: string,
-  variables: Record<string, unknown>,
+  variables: GraphqlVariables,
   token: string,
+  schema: z.ZodType<T>,
 ): Promise<T> {
   const response = await fetch('https://api.github.com/graphql', {
     method: 'POST',
@@ -167,48 +184,54 @@ export async function githubGraphqlWithToken<T>(
     throw new Error(`GitHub GraphQL failed: ${response.status}`)
   }
 
-  const body = (await response.json()) as {
-    data?: T
-    errors?: { message: string; type?: string }[]
-  }
+  const body = GraphqlEnvelopeSchema.parse(await response.json())
 
-  if (body.errors?.length) {
+  if (body.errors !== undefined && body.errors.length > 0) {
     throw new GithubGraphqlError(
       `GitHub GraphQL errors: ${body.errors.map((error) => error.message).join('; ')}`,
-      body.errors.flatMap((error) => (error.type ? [error.type] : [])),
+      body.errors.flatMap((error) =>
+        error.type !== undefined && error.type !== '' ? [error.type] : [],
+      ),
       body.data ?? null,
     )
   }
 
-  if (!body.data) {
+  if (body.data === undefined || body.data === null) {
     throw new Error('GitHub GraphQL response missing data')
   }
 
-  return body.data
+  return schema.parse(body.data)
 }
 
 export async function githubGraphql<T>(
   env: ShuttleEnv,
   query: string,
-  variables: Record<string, unknown>,
+  variables: GraphqlVariables,
   installationId: number,
+  schema: z.ZodType<T>,
 ): Promise<T> {
   try {
     return await githubGraphqlWithToken(
       query,
       variables,
       await getInstallationToken(env, installationId),
+      schema,
     )
   } catch (cause) {
     const user = githubUserToken(env)
 
-    if (!user || !isGithubForbidden(cause)) {
+    if (user === null || !isGithubForbidden(cause)) {
       throw cause
     }
 
-    return await githubGraphqlWithToken(query, variables, user)
+    return githubGraphqlWithToken(query, variables, user, schema)
   }
 }
+
+const InstallationTokenSchema = z.object({
+  token: z.string().optional(),
+  expires_at: z.string().optional(),
+})
 
 export async function getInstallationToken(
   env: ShuttleEnv,
@@ -228,9 +251,14 @@ export async function getInstallationToken(
     throw new Error(`Failed to mint installation token: ${response.status}`)
   }
 
-  const body = (await response.json()) as { token?: string; expires_at?: string }
+  const body = InstallationTokenSchema.parse(await response.json())
 
-  if (!body.token || !body.expires_at) {
+  if (
+    body.token === undefined ||
+    body.token === '' ||
+    body.expires_at === undefined ||
+    body.expires_at === ''
+  ) {
     throw new Error('Installation token response missing token or expires_at')
   }
 
@@ -241,6 +269,19 @@ export async function getInstallationToken(
 
   return body.token
 }
+
+const InstallationSchema = z.object({
+  id: z.number(),
+  account: z
+    .object({
+      login: z.string().optional(),
+      type: z.string().optional(),
+      avatar_url: z.string().optional(),
+    })
+    .optional(),
+  permissions: z.record(z.string(), z.string()).optional(),
+  html_url: z.string().optional(),
+})
 
 export async function getInstallation(
   env: ShuttleEnv,
@@ -256,12 +297,7 @@ export async function getInstallation(
     throw new Error(`Failed to load installation: ${response.status}`)
   }
 
-  const body = (await response.json()) as {
-    id: number
-    account?: { login?: string; type?: string; avatar_url?: string }
-    permissions?: Record<string, string>
-    html_url?: string
-  }
+  const body = InstallationSchema.parse(await response.json())
 
   return {
     id: body.id,
@@ -274,6 +310,20 @@ export async function getInstallation(
     htmlUrl: body.html_url ?? '',
   }
 }
+
+const InstallationReposSchema = z.object({
+  repositories: z
+    .array(
+      z.object({
+        name: z.string(),
+        full_name: z.string(),
+        private: z.boolean(),
+        default_branch: z.string().optional(),
+        owner: z.object({ login: z.string().optional() }).optional(),
+      }),
+    )
+    .optional(),
+})
 
 export async function listInstallationRepos(
   env: ShuttleEnv,
@@ -294,15 +344,7 @@ export async function listInstallationRepos(
       throw new Error(`Failed to list installation repositories: ${response.status}`)
     }
 
-    const body = (await response.json()) as {
-      repositories?: {
-        name: string
-        full_name: string
-        private: boolean
-        default_branch?: string
-        owner?: { login?: string }
-      }[]
-    }
+    const body = InstallationReposSchema.parse(await response.json())
 
     const batch = body.repositories ?? []
 
@@ -348,6 +390,9 @@ export async function fetchRepoTarball(
   return response.arrayBuffer()
 }
 
+/** A GitHub response that names an object by its `sha`. */
+export const ShaBodySchema = z.object({ sha: z.string().optional() })
+
 /** Resolve the commit SHA for a branch or tag. */
 export async function resolveRefSha(
   env: ShuttleEnv,
@@ -365,9 +410,9 @@ export async function resolveRefSha(
     throw new Error(`Failed to resolve ref ${ref} for ${repo.fullName}: ${response.status}`)
   }
 
-  const body = (await response.json()) as { sha?: string }
+  const body = ShaBodySchema.parse(await response.json())
 
-  if (!body.sha) {
+  if (body.sha === undefined || body.sha === '') {
     throw new Error(`Ref ${ref} for ${repo.fullName} missing sha`)
   }
 
@@ -377,7 +422,7 @@ export async function resolveRefSha(
 export async function signState(env: ShuttleEnv, payload: string): Promise<string> {
   const secret = env.GITHUB_STATE_SECRET ?? env.GITHUB_APP_PRIVATE_KEY
 
-  if (!secret) {
+  if (secret === undefined || secret === '') {
     throw new Error('GITHUB_STATE_SECRET is required')
   }
 

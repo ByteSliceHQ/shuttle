@@ -24,7 +24,7 @@ export function withTeamChange(team: Team, change: Partial<Team>): Team {
  * sign-in there cannot be checked from here, being signed in anywhere is enough.
  */
 export function canRunAt(connection: Connection, place?: SignInPlace | null): boolean {
-  const there = place ? signedInAt(connection, place) : null
+  const there = place !== null && place !== undefined ? signedInAt(connection, place) : null
 
   return there ?? connection.connected
 }

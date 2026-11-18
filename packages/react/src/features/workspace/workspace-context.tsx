@@ -11,7 +11,6 @@ import {
   sessionTabs,
   workspaceTree,
   type SessionTabsState,
-  type WorkspaceSession,
   type WorkspaceSnapshot,
   type WorkspaceTree,
 } from './workspace'
@@ -66,7 +65,7 @@ function mergeLiveSessions(
   }
 
   let changed = false
-  const sessions: Record<string, WorkspaceSession> = { ...tree.sessions }
+  const sessions = { ...tree.sessions }
 
   for (const [sessionRunId, live] of entries) {
     const existing = sessions[sessionRunId]
@@ -322,7 +321,7 @@ function WorkspaceSubscription({
     let changed = false
 
     for (const event of events) {
-      if (event.ephemeral || event.seq <= cursor) {
+      if (event.ephemeral === true || event.seq <= cursor) {
         continue
       }
 

@@ -29,7 +29,7 @@ export async function ensureContainerRunning(
 export function reapplyInactivityTimeout(ctx: DurableObjectState): void {
   const container = ctx.container
 
-  if (container?.running) {
+  if (container?.running === true) {
     void ctx.blockConcurrencyWhile(() => container.setInactivityTimeout(INACTIVITY_TIMEOUT_MS))
   }
 }

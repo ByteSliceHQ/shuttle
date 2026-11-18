@@ -1,6 +1,8 @@
 import { accessSync, constants, existsSync, readFileSync, realpathSync } from 'node:fs'
 import { delimiter, dirname, extname, join } from 'node:path'
 
+import { isJsonObject, parseJson, stringField } from './json.ts'
+
 /**
  * The language servers `shuttle-lsp` knows how to run. Adding a language is adding an entry
  * here: which files it covers, how to find the project a file belongs to, and how to start it.
@@ -76,9 +78,8 @@ export function onPath(command: string): string | null {
 /** The major version of the TypeScript package in `packageDir`. Zero when it cannot be read. */
 function typescriptMajor(packageDir: string): number {
   try {
-    const version = (
-      JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as { version?: string }
-    ).version
+    const manifest = parseJson(readFileSync(join(packageDir, 'package.json'), 'utf8'))
+    const version = isJsonObject(manifest) ? stringField(manifest, 'version') : undefined
 
     return Number(version?.split('.')[0] ?? 0) || 0
   } catch {

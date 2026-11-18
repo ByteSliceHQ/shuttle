@@ -1,3 +1,7 @@
+import { z } from 'zod'
+
+const ShellUpdated = z.object({ type: z.literal('shuttle:shell-updated') })
+
 /**
  * Registers the service worker that keeps Shuttle's page and scripts on the device (see
  * `public/sw.js`). Only a built app has one: in development Vite serves modules that change
@@ -17,14 +21,7 @@ export function registerServiceWorker(): void {
   let stale = false
 
   navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => {
-    const data: unknown = event.data
-
-    if (
-      data &&
-      typeof data === 'object' &&
-      'type' in data &&
-      data.type === 'shuttle:shell-updated'
-    ) {
+    if (ShellUpdated.safeParse(event.data).success) {
       stale = true
     }
   })

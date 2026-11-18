@@ -1,8 +1,8 @@
 import { Schema } from 'effect'
 
-import type { EventEnvelope } from '@swirls/looms/core'
+import { isJsonObject, isJsonString } from '@swirls/looms/core'
+import type { EventEnvelope, JsonObject, JsonValue } from '@swirls/looms/core'
 
-import { isRecord } from '../json'
 import { shuttleModule } from './scope'
 
 const WorkStatusSchema = Schema.Union([
@@ -71,6 +71,8 @@ export const workShape = Schema.Struct({
 export type WorkProjectionState = typeof workShape.Type
 
 type WorkEntry = (typeof WorkEntrySchema)['Type']
+type RecentToolCall = (typeof RecentToolCallSchema)['Type']
+type ToolCallMeta = (typeof ToolCallMetaSchema)['Type']
 type WorkStatus = (typeof WorkStatusSchema)['Type']
 
 export const workInitialState: WorkProjectionState = {
@@ -79,20 +81,25 @@ export const workInitialState: WorkProjectionState = {
   openToolCalls: {},
 }
 
-function asRecord(value: unknown): { readonly [key: string]: unknown } {
-  return isRecord(value) ? value : {}
+function asRecord(value: JsonValue | undefined): JsonObject {
+  return isJsonObject(value) ? value : {}
 }
 
-function asString(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined
+function asString(value: JsonValue | undefined): string | undefined {
+  return isJsonString(value) ? value : undefined
 }
 
-function shortArgs(value: unknown): string {
+/** True for a string that is neither missing nor empty. */
+function isPresent(value: string | undefined | null): value is string {
+  return value !== undefined && value !== null && value !== ''
+}
+
+function shortArgs(value: JsonValue | undefined): string {
   if (value === null || value === undefined) {
     return ''
   }
 
-  if (typeof value === 'string') {
+  if (isJsonString(value)) {
     return value.length > 120 ? `${value.slice(0, 117)}...` : value
   }
 
@@ -100,7 +107,7 @@ function shortArgs(value: unknown): string {
     const text = JSON.stringify(value)
     return text.length > 120 ? `${text.slice(0, 117)}...` : text
   } catch {
-    return String(value)
+    return '[unserializable]'
   }
 }
 
@@ -123,17 +130,17 @@ function argsNearlySame(left: string, right: string): boolean {
   return false
 }
 
-function taskFromDelegateArgs(args: Record<string, unknown>): string | undefined {
+function taskFromDelegateArgs(args: JsonObject): string | undefined {
   const text = asString(args.text) ?? asString(args.task)
 
-  if (text) {
+  if (isPresent(text)) {
     return text
   }
 
   return undefined
 }
 
-function pathFromToolResult(name: string, result: unknown): string | undefined {
+function pathFromToolResult(name: string, result: JsonValue | undefined): string | undefined {
   if (name !== 'write_file' && name !== 'edit_file') {
     return undefined
   }
@@ -199,7 +206,7 @@ function patchEntry(
 ): WorkProjectionState {
   const existing = state.entries.find((entry) => entry.threadId === threadId)
 
-  if (!existing) {
+  if (existing === undefined) {
     return state
   }
 
@@ -251,7 +258,7 @@ function childStatusForParent(state: WorkProjectionState, entry: WorkEntry): Wor
     ([, info]) => info.threadId === entry.threadId,
   )
 
-  if (openForThread) {
+  if (openForThread !== undefined) {
     const [, info] = openForThread
     return {
       kind: 'tool',
@@ -272,10 +279,16 @@ function childStatusForParent(state: WorkProjectionState, entry: WorkEntry): Wor
   return { kind: 'thinking' }
 }
 
+type DefinitionLabel = {
+  readonly label: string
+  readonly role: WorkEntry['role']
+  readonly nextWorkerIndex: number
+}
+
 function labelForDefinition(
   definitionName: string | undefined,
   state: WorkProjectionState,
-): { label: string; role: WorkEntry['role']; nextWorkerIndex: number } {
+): DefinitionLabel {
   if (definitionName === 'conductor') {
     return { label: 'conductor', role: 'conductor', nextWorkerIndex: state.nextWorkerIndex }
   }
@@ -304,7 +317,7 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
     case 'runtime.thread.started': {
       const startedThreadId = asString(payload.threadId) ?? threadId
 
-      if (!startedThreadId) {
+      if (!isPresent(startedThreadId)) {
         return state
       }
 
@@ -334,11 +347,14 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
       const task = asString(input.text) ?? asString(input.goal)
       const existing = state.entries.find((entry) => entry.threadId === startedThreadId)
 
-      if (existing) {
-        return upsertEntry(state, startedThreadId, () => ({
-          ...existing,
-          ...(task && !existing.task ? { task } : {}),
-        }))
+      if (existing !== undefined) {
+        return upsertEntry(state, startedThreadId, () => {
+          if (isPresent(task) && !isPresent(existing.task)) {
+            return { ...existing, task }
+          }
+
+          return { ...existing }
+        })
       }
 
       const { label, role, nextWorkerIndex } = labelForDefinition(definitionName, state)
@@ -352,7 +368,7 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
     }
 
     case 'agent.turn.started': {
-      if (!threadId) {
+      if (!isPresent(threadId)) {
         return state
       }
 
@@ -366,7 +382,7 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
     case 'agent.turn.settled':
 
     case 'agent.turn.completed': {
-      if (!threadId) {
+      if (!isPresent(threadId)) {
         return state
       }
 
@@ -382,7 +398,7 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
     }
 
     case 'agent.turn.stopped': {
-      if (!threadId) {
+      if (!isPresent(threadId)) {
         return state
       }
 
@@ -393,13 +409,13 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
     }
 
     case 'shuttle.turn.thought': {
-      if (!threadId) {
+      if (!isPresent(threadId)) {
         return state
       }
 
       const text = asString(payload.text)?.trim()
 
-      if (!text) {
+      if (!isPresent(text)) {
         return state
       }
 
@@ -410,7 +426,7 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
     }
 
     case 'agent.tool_call.requested': {
-      if (!threadId) {
+      if (!isPresent(threadId)) {
         return state
       }
 
@@ -424,15 +440,13 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
       // delegate, delegate_codex and delegate_claude all hand a task to a team member.
       const taskText = name.startsWith('delegate') ? taskFromDelegateArgs(argsRecord) : undefined
 
+      const openCall: ToolCallMeta = isPresent(taskText)
+        ? { threadId, name, shortArgs: summary, startedAt, taskText }
+        : { threadId, name, shortArgs: summary, startedAt }
+
       const openToolCalls = {
         ...state.openToolCalls,
-        [toolCallId]: {
-          threadId,
-          name,
-          shortArgs: summary,
-          startedAt,
-          ...(taskText ? { taskText } : {}),
-        },
+        [toolCallId]: openCall,
       }
 
       return {
@@ -455,11 +469,11 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
       const childThreadId = asString(payload.childThreadId)
       const toolCallId = asString(payload.toolCallId)
 
-      if (!parentThreadId || !childThreadId) {
+      if (!isPresent(parentThreadId) || !isPresent(childThreadId)) {
         return state
       }
 
-      const meta = toolCallId ? state.openToolCalls[toolCallId] : undefined
+      const meta = isPresent(toolCallId) ? state.openToolCalls[toolCallId] : undefined
       const childTask = meta?.taskText
       const hadChild = state.entries.some((entry) => entry.threadId === childThreadId)
 
@@ -474,7 +488,9 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
 
       next = upsertEntry(next, childThreadId, (existing) => {
         if (existing) {
-          return childTask && !existing.task ? { ...existing, task: childTask } : existing
+          return isPresent(childTask) && !isPresent(existing.task)
+            ? { ...existing, task: childTask }
+            : existing
         }
 
         const workerIndex = next.nextWorkerIndex
@@ -497,31 +513,30 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
       const name = asString(payload.name) ?? 'tool'
       const error = asString(payload.error)
       const result = payload.result
-      const meta = toolCallId ? state.openToolCalls[toolCallId] : undefined
+      const meta = isPresent(toolCallId) ? state.openToolCalls[toolCallId] : undefined
       const startedAt = meta?.startedAt ?? event.ts
       const durationMs = Math.max(0, event.ts - startedAt)
 
       const openToolCalls = { ...state.openToolCalls }
 
-      if (toolCallId) {
+      if (isPresent(toolCallId)) {
         delete openToolCalls[toolCallId]
       }
 
-      if (!parentThreadId) {
+      if (!isPresent(parentThreadId)) {
         return { ...state, openToolCalls }
       }
 
-      const path = !error ? pathFromToolResult(name, result) : undefined
+      const path = !isPresent(error) ? pathFromToolResult(name, result) : undefined
 
       return patchEntry({ ...state, openToolCalls }, parentThreadId, (entry) => {
-        let next = appendRecentToolCall(entry, {
-          name,
-          exit: error ? 'error' : 'ok',
-          ...(error ? { error } : {}),
-          durationMs,
-        })
+        const call: RecentToolCall = isPresent(error)
+          ? { name, exit: 'error', error, durationMs }
+          : { name, exit: 'ok', durationMs }
 
-        if (path && name === 'write_file') {
+        let next = appendRecentToolCall(entry, call)
+
+        if (isPresent(path) && name === 'write_file') {
           next = {
             ...next,
             filesWritten: [...new Set([...next.filesWritten, path])],
@@ -530,7 +545,7 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
           }
         }
 
-        if (path && name === 'edit_file') {
+        if (isPresent(path) && name === 'edit_file') {
           next = {
             ...next,
             filesEdited: [...new Set([...next.filesEdited, path])],
@@ -549,7 +564,7 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
     case 'runtime.thread.completed': {
       const finishedId = asString(payload.threadId) ?? threadId
 
-      if (!finishedId) {
+      if (!isPresent(finishedId)) {
         return state
       }
 
@@ -584,17 +599,17 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
     case 'runtime.thread.failed': {
       const failedId = asString(payload.threadId) ?? threadId
 
-      if (!failedId) {
+      if (!isPresent(failedId)) {
         return state
       }
 
       const error = asString(payload.error)
 
-      let next = patchEntry(state, failedId, (entry) => ({
-        ...entry,
-        status: { kind: 'failed', ...(error ? { error } : {}) },
-        waitingChildren: [],
-      }))
+      let next = patchEntry(state, failedId, (entry) => {
+        const status: WorkStatus = isPresent(error) ? { kind: 'failed', error } : { kind: 'failed' }
+
+        return { ...entry, status, waitingChildren: [] }
+      })
 
       for (const entry of next.entries) {
         if (!entry.waitingChildren.includes(failedId)) {
@@ -619,7 +634,7 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
     case 'runtime.thread.cancelled': {
       const cancelledId = asString(payload.threadId) ?? threadId
 
-      if (!cancelledId) {
+      if (!isPresent(cancelledId)) {
         return state
       }
 
@@ -648,9 +663,10 @@ function reduceWork(state: WorkProjectionState, event: EventEnvelope): WorkProje
 
       return next
     }
-  }
 
-  return state
+    default:
+      return state
+  }
 }
 
 /** Public entries omit internal bookkeeping used only by the reducer. */
@@ -677,12 +693,16 @@ export function workAgentsForRead(state: WorkProjectionState, now: number): Work
       }
     }
 
-    return {
-      ...rest,
-      status,
-      stuckSignals: signals,
-      ...(status.kind === 'tool' ? { toolElapsedMs: Math.max(0, now - status.startedAt) } : {}),
+    if (status.kind === 'tool') {
+      return {
+        ...rest,
+        status,
+        stuckSignals: signals,
+        toolElapsedMs: Math.max(0, now - status.startedAt),
+      }
     }
+
+    return { ...rest, status, stuckSignals: signals }
   })
 }
 

@@ -62,7 +62,7 @@ export function workspaceTree(
       const status = statuses.get(path)
       let cursor = root
 
-      if (status) {
+      if (status !== undefined) {
         root.changed += 1
       }
 
@@ -76,11 +76,11 @@ export function workspaceTree(
           cursor.children.push(child)
         }
 
-        if (status) {
+        if (status !== undefined) {
           child.changed += 1
         }
 
-        if (isFile && status) {
+        if (isFile && status !== undefined) {
           child.status = status
         }
 

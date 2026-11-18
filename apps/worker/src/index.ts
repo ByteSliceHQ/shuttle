@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 import {
   durableObjectLauncher,
   LoomsDurableObject,
@@ -63,7 +65,7 @@ import {
 } from './session/handoff'
 import { readSessionStacks } from './session/session-stacks'
 import type { SessionStacks } from './session/stack-state'
-import { DEFAULT_TEAM, readPinnedTeam, writeStoredTeam, type Team } from './team'
+import { DEFAULT_TEAM, readPinnedTeam, writeStoredTeam, type Team, type TeamInput } from './team'
 import { readSessionAccess, writeSessionAccess, type SessionAccess } from './tenancy/access'
 import { authorizeLoomsRoute, authorizeRun, runIdOfPath } from './tenancy/gate'
 import { runOfPreviewKey } from './tenancy/previews'
@@ -78,6 +80,7 @@ import {
   type VendorCatalogue,
   type VendorModel,
   type VendorModelChoice,
+  type VendorModelChoiceInput,
   type VendorModelChoices,
 } from './vendor/models'
 import { isWebAppRequest } from './web-app'
@@ -87,11 +90,13 @@ import { sandboxNameFor } from './workspace/thread'
 
 export { EventFirehose, SessionSandbox }
 
+const TailRowSchema = z.object({ tail: z.number() })
+
 export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
   override configure(env: ShuttleEnv): LoomsDurableObjectConfig {
     const runId = this.ctx.id.name
 
-    if (!runId) {
+    if (runId === undefined || runId === '') {
       throw new Error('LoomsRun requires a named Durable Object id')
     }
 
@@ -126,7 +131,7 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
     return readSessionAccess(this.ctx.storage)
   }
 
-  async setAccess(access: unknown): Promise<SessionAccess> {
+  async setAccess(access: SessionAccess): Promise<SessionAccess> {
     return writeSessionAccess(this.ctx.storage, access)
   }
 
@@ -224,7 +229,7 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
     const workspace = this.workspaceRun()
 
     // A session that has not run a turn yet will take the workspace default when it does.
-    if (pinned || this.ctx.id.name === workspace) {
+    if (pinned !== null || this.ctx.id.name === workspace) {
       return { harness: pinned ?? DEFAULT_HARNESS }
     }
 
@@ -240,14 +245,14 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
     const pinned = await readPinnedTeam(this.ctx.storage)
     const workspace = this.workspaceRun()
 
-    if (pinned || this.ctx.id.name === workspace) {
+    if (pinned !== null || this.ctx.id.name === workspace) {
       return { team: pinned ?? DEFAULT_TEAM }
     }
 
     return loomsStub(this.env.LOOMS_RUN, workspace).getTeam()
   }
 
-  async setTeam(team: unknown): Promise<{ team: Team }> {
+  async setTeam(team: TeamInput | null): Promise<{ team: Team }> {
     return { team: await writeStoredTeam(this.ctx.storage, team) }
   }
 
@@ -271,7 +276,7 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
 
   async setVendorModelChoice(
     harness: VendorHarnessId,
-    choice: unknown,
+    choice: VendorModelChoiceInput | null,
   ): Promise<{ choice: VendorModelChoice }> {
     return { choice: await writeVendorModelChoice(this.ctx.storage, harness, choice) }
   }
@@ -323,7 +328,7 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
   async getStreamTail(): Promise<number> {
     const runId = this.ctx.id.name
 
-    if (!runId) {
+    if (runId === undefined || runId === '') {
       return 0
     }
 
@@ -331,7 +336,7 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
       ...this.ctx.storage.sql.exec('SELECT tail FROM looms_streams WHERE run_id = ?', runId),
     ]
 
-    return row && typeof row.tail === 'number' && Number.isFinite(row.tail) ? row.tail : 0
+    return TailRowSchema.safeParse(row).data?.tail ?? 0
   }
 
   /** Authoritative session activity + committed log tail for workspace reconciliation. */
@@ -341,13 +346,13 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
   } | null> {
     const runId = this.ctx.id.name
 
-    if (!runId) {
+    if (runId === undefined || runId === '') {
       return null
     }
 
     const run = await this.getRun()
 
-    if (!run.rootThreadId) {
+    if (run.rootThreadId === null || run.rootThreadId === '') {
       return null
     }
 
@@ -490,7 +495,7 @@ async function handlePreviewHost(request: Request, env: ShuttleEnv): Promise<Res
   // right now, whoever's that is.
   const runId = env.AUTH_DB ? await runOfPreviewKey(env.AUTH_DB, parsed.folderId) : null
 
-  if (runId) {
+  if (runId !== null) {
     const sandboxName = (await loomsStub(env.LOOMS_RUN, runId).getSandboxName()) ?? runId
 
     return sandboxStub(env, sandboxName).fetch(request)

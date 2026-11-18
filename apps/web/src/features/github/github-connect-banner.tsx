@@ -46,12 +46,12 @@ export function GithubConnectBanner() {
 
   // The answer is shown once. Left in the address, a reload or a shared link would show it again.
   useEffect(() => {
-    if (github) {
+    if (github !== undefined) {
       void navigate({ to: '.', search: (prev) => ({ ...prev, github: undefined }), replace: true })
     }
   }, [github, navigate])
 
-  if (!result) {
+  if (result === null) {
     return null
   }
 

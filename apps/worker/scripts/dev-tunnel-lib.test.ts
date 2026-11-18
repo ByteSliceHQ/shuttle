@@ -132,6 +132,7 @@ describe('signWebhookBody', () => {
     const body = JSON.stringify({ zen: 'Design for failure.', hook_id: 1 })
     const signature = await signWebhookBody(secret, body)
 
+    // SAFETY: `verifyWebhookSignature` reads only GITHUB_WEBHOOK_SECRET from its env argument.
     const ok = await verifyWebhookSignature(
       { GITHUB_WEBHOOK_SECRET: secret } as never,
       body,

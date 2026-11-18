@@ -1,18 +1,26 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { AnyEventEnvelope } from '@swirls/looms/core'
+import type { AnyEventEnvelope, JsonValue } from '@swirls/looms/core'
 
 import { emptySessionTabs, emptyWorkspaceTree, sessionTabs, workspaceTree } from './workspace'
 
-function event(type: string, payload: object, idempotencyKey?: string): AnyEventEnvelope {
-  return {
+function event(type: string, payload: JsonValue, idempotencyKey?: string): AnyEventEnvelope {
+  const envelope: AnyEventEnvelope = {
     type,
     payload,
     seq: 1,
     id: 'e1',
+    runId: 'run_test',
     ts: 1,
-    ...(idempotencyKey ? { idempotencyKey } : {}),
-  } as AnyEventEnvelope
+    threadId: null,
+    origin: { type: 'system' },
+  }
+
+  if (idempotencyKey !== undefined && idempotencyKey !== '') {
+    envelope.idempotencyKey = idempotencyKey
+  }
+
+  return envelope
 }
 
 describe('workspaceTree reducer', () => {

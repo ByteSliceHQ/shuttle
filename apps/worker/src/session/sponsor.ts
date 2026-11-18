@@ -20,7 +20,9 @@ type SponsorStorage = Pick<DurableObjectStorage, 'get' | 'put'>
 
 /** The author of the latest message in `messages` that asked for work, if any did. */
 export function sponsorOfMessages(messages: LlmCompleteArgs['messages']): string | null {
-  const asked = messages.toReversed().find((message) => message.role === 'user' && message.name)
+  const asked = messages
+    .toReversed()
+    .find((message) => message.role === 'user' && message.name !== undefined && message.name !== '')
 
   return asked?.name ?? null
 }
@@ -39,7 +41,7 @@ export async function resolveSponsor(
 ): Promise<string | null> {
   const asked = sponsorOfMessages(messages)
 
-  if (!asked) {
+  if (asked === null) {
     return readSponsor(storage)
   }
 

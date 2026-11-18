@@ -1,93 +1,107 @@
 import { describe, expect, test } from 'bun:test'
 
+import { createEvent } from '@swirls/looms/core'
+
 import { pullInbox, withLinkedSession } from './projections'
-import { pullKey } from './scope'
+import { pullKey, pullsModule } from './scope'
 import { reviewerLinked } from './signals'
 
 describe('pullInbox projection', () => {
   test('upserts pulls and drops stale updates', () => {
     let state = pullInbox.initialState
 
-    state = pullInbox.reduce(state, {
-      type: 'pulls.pull.upserted',
-      payload: {
-        installationId: 1,
-        fullName: 'acme/api',
-        number: 7,
-        action: 'opened',
-        title: 'First',
-        body: '',
-        url: 'https://github.com/acme/api/pull/7',
-        draft: false,
-        author: { login: 'dylan', avatarUrl: '' },
-        headRef: 'feature',
-        headSha: 'aaa',
-        baseRef: 'main',
-        baseSha: 'bbb',
-        additions: 1,
-        deletions: 0,
-        reviewDecision: 'none',
-        checkRollup: 'pending',
-        updatedAt: 100,
-        isFork: false,
-        state: 'open',
-      },
-    } as never)
+    state = pullInbox.reduce(
+      state,
+      createEvent(
+        'run_test',
+        pullsModule.input('pull.upserted', {
+          installationId: 1,
+          fullName: 'acme/api',
+          number: 7,
+          action: 'opened',
+          title: 'First',
+          body: '',
+          url: 'https://github.com/acme/api/pull/7',
+          draft: false,
+          author: { login: 'dylan', avatarUrl: '' },
+          headRef: 'feature',
+          headSha: 'aaa',
+          baseRef: 'main',
+          baseSha: 'bbb',
+          additions: 1,
+          deletions: 0,
+          reviewDecision: 'none',
+          checkRollup: 'pending',
+          updatedAt: 100,
+          isFork: false,
+          state: 'open',
+        }),
+      ),
+    )
 
     expect(state.pulls[pullKey('acme/api', 7)]?.title).toBe('First')
 
-    state = pullInbox.reduce(state, {
-      type: 'pulls.pull.upserted',
-      payload: {
-        installationId: 1,
-        fullName: 'acme/api',
-        number: 7,
-        action: 'edited',
-        title: 'Stale',
-        body: '',
-        url: 'https://github.com/acme/api/pull/7',
-        draft: false,
-        author: { login: 'dylan', avatarUrl: '' },
-        headRef: 'feature',
-        headSha: 'aaa',
-        baseRef: 'main',
-        baseSha: 'bbb',
-        additions: 1,
-        deletions: 0,
-        reviewDecision: 'none',
-        checkRollup: 'pending',
-        updatedAt: 50,
-        isFork: false,
-        state: 'open',
-      },
-    } as never)
+    state = pullInbox.reduce(
+      state,
+      createEvent(
+        'run_test',
+        pullsModule.input('pull.upserted', {
+          installationId: 1,
+          fullName: 'acme/api',
+          number: 7,
+          action: 'edited',
+          title: 'Stale',
+          body: '',
+          url: 'https://github.com/acme/api/pull/7',
+          draft: false,
+          author: { login: 'dylan', avatarUrl: '' },
+          headRef: 'feature',
+          headSha: 'aaa',
+          baseRef: 'main',
+          baseSha: 'bbb',
+          additions: 1,
+          deletions: 0,
+          reviewDecision: 'none',
+          checkRollup: 'pending',
+          updatedAt: 50,
+          isFork: false,
+          state: 'open',
+        }),
+      ),
+    )
 
     expect(state.pulls[pullKey('acme/api', 7)]?.title).toBe('First')
 
-    state = pullInbox.reduce(state, {
-      type: 'pulls.pull.linked',
-      payload: {
-        fullName: 'acme/api',
-        number: 7,
-        runId: 'run_1',
-        role: 'author',
-      },
-    } as never)
+    state = pullInbox.reduce(
+      state,
+      createEvent(
+        'run_test',
+        pullsModule.input('pull.linked', {
+          fullName: 'acme/api',
+          number: 7,
+          runId: 'run_1',
+          role: 'author',
+        }),
+      ),
+    )
 
     expect(state.pulls[pullKey('acme/api', 7)]?.linkedSessions).toEqual([
       { runId: 'run_1', role: 'author' },
     ])
 
-    state = pullInbox.reduce(state, {
-      type: 'pulls.pull.linked',
-      payload: {
-        fullName: 'acme/api',
-        number: 7,
-        runId: 'run_1',
-        role: 'author',
-        threadId: 'thread_coder',
-      },
-    } as never)
+    state = pullInbox.reduce(
+      state,
+      createEvent(
+        'run_test',
+        pullsModule.input('pull.linked', {
+          fullName: 'acme/api',
+          number: 7,
+          runId: 'run_1',
+          role: 'author',
+          threadId: 'thread_coder',
+        }),
+      ),
+    )
 
     expect(state.pulls[pullKey('acme/api', 7)]?.linkedSessions).toEqual([
       { runId: 'run_1', role: 'author', threadId: 'thread_coder' },

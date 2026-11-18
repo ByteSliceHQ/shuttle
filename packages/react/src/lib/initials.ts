@@ -3,7 +3,7 @@ const EMOJI = /\p{Extended_Pictographic}/u
 
 /** The first user-perceived character of a word, so an emoji or accented letter stays whole. */
 function firstGrapheme(word: string): string {
-  if (typeof Intl.Segmenter === 'function') {
+  if ('Segmenter' in Intl) {
     const [first] = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(word)
 
     return first?.segment ?? ''
@@ -29,7 +29,7 @@ export function initials(name: string | undefined): string {
   const first = meaningful[0]
   const last = meaningful.length > 1 ? meaningful.at(-1) : undefined
 
-  if (!first) {
+  if (first === undefined || first === '') {
     return ''
   }
 
@@ -39,5 +39,5 @@ export function initials(name: string | undefined): string {
     return lead
   }
 
-  return `${lead}${last ? firstGrapheme(last) : ''}`.toLocaleUpperCase()
+  return `${lead}${last !== undefined && last !== '' ? firstGrapheme(last) : ''}`.toLocaleUpperCase()
 }

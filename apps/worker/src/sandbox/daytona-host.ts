@@ -20,8 +20,8 @@ export interface DaytonaSandboxLike {
     ): Promise<{ exitCode: number; result: string }>
   }
   readonly fs: {
-    uploadFile(file: Buffer, remotePath: string): Promise<void>
-    downloadFile(remotePath: string): Promise<Buffer>
+    uploadFile(file: Uint8Array, remotePath: string): Promise<void>
+    downloadFile(remotePath: string): Promise<Uint8Array>
   }
 }
 
@@ -36,8 +36,8 @@ function bytes(text: string): ArrayBuffer {
   return encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength)
 }
 
-async function readAll(stream: ReadableStream): Promise<Buffer> {
-  return Buffer.from(await new Response(stream).arrayBuffer())
+async function readAll(stream: ReadableStream): Promise<Uint8Array> {
+  return new Uint8Array(await new Response(stream).arrayBuffer())
 }
 
 /**
@@ -49,8 +49,11 @@ export function wrappedCommand(
   files: { readonly marker: string; readonly stderr: string; readonly stdin?: string },
 ): string {
   const command = argv.map(shellQuote).join(' ')
-  const input = files.stdin ? ` < ${shellQuote(files.stdin)}` : ' < /dev/null'
-  const cleanup = [files.stderr, ...(files.stdin ? [files.stdin] : [])].map(shellQuote).join(' ')
+  const input = files.stdin === undefined ? ' < /dev/null' : ` < ${shellQuote(files.stdin)}`
+
+  const cleanup = [files.stderr, ...(files.stdin === undefined ? [] : [files.stdin])]
+    .map(shellQuote)
+    .join(' ')
 
   return [
     `${command}${input} 2> ${shellQuote(files.stderr)}`,
@@ -88,16 +91,16 @@ export function daytonaHost(sandbox: DaytonaSandboxLike): SandboxHost {
     const id = crypto.randomUUID()
     const marker = `__shuttle_${id}__`
     const stderr = `/tmp/.shuttle-${id}.err`
-    const stdin = options?.stdin ? `/tmp/.shuttle-${id}.in` : undefined
+    const stdin = options?.stdin === undefined ? undefined : `/tmp/.shuttle-${id}.in`
 
-    if (options?.stdin && stdin) {
+    if (options?.stdin !== undefined && stdin !== undefined) {
       await sandbox.fs.uploadFile(await readAll(options.stdin), stdin)
     }
 
     const response = await sandbox.process.executeCommand(
-      `bash -c ${shellQuote(wrappedCommand(argv, { marker, stderr, ...(stdin ? { stdin } : {}) }))}`,
+      `bash -c ${shellQuote(wrappedCommand(argv, { marker, stderr, stdin }))}`,
       options?.cwd,
-      options?.env ? { ...options.env } : undefined,
+      options?.env === undefined ? undefined : { ...options.env },
       COMMAND_TIMEOUT_SECONDS,
     )
 
@@ -125,7 +128,9 @@ export function daytonaHost(sandbox: DaytonaSandboxLike): SandboxHost {
 
     async readFile(path) {
       try {
-        return (await sandbox.fs.downloadFile(path)).toString('utf8')
+        return new TextDecoder('utf-8', { ignoreBOM: true }).decode(
+          await sandbox.fs.downloadFile(path),
+        )
       } catch (cause) {
         // Callers tell a missing file from other failures by this prefix.
         throw new Error(`ENOENT: no such file or directory, open '${path}'`, { cause })
@@ -133,7 +138,7 @@ export function daytonaHost(sandbox: DaytonaSandboxLike): SandboxHost {
     },
 
     async writeFile(path, content) {
-      await sandbox.fs.uploadFile(Buffer.from(content, 'utf8'), path)
+      await sandbox.fs.uploadFile(encoder.encode(content), path)
     },
 
     async readBytes(path) {
@@ -145,7 +150,7 @@ export function daytonaHost(sandbox: DaytonaSandboxLike): SandboxHost {
     },
 
     async writeBytes(path, content) {
-      await sandbox.fs.uploadFile(Buffer.from(content), path)
+      await sandbox.fs.uploadFile(content, path)
     },
 
     async mkdir(path) {

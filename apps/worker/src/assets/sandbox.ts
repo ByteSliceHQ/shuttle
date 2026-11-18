@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 import type { SessionSandboxStub } from '../env'
 import { shellQuote } from '../sandbox/exec-argv'
 import {
@@ -57,7 +59,12 @@ export function withAttachmentManifest(
 }
 
 type StagingSandbox = Pick<SessionSandboxStub, 'writeBytes'>
-type StagingStorage = Pick<DurableObjectStorage, 'get' | 'put'>
+interface StagingStorage {
+  get<T>(key: string): Promise<T | undefined>
+  put(key: string, value: string[]): Promise<void>
+}
+
+const StagedIdsSchema = z.array(z.string())
 
 /**
  * Copies attached files into the sandbox, once per file and sandbox. A file that cannot be
@@ -76,7 +83,8 @@ export async function stageAttachments(input: {
   }
 
   const key = `shuttle:staged-assets:${input.sandboxName}`
-  const staged = new Set((await input.storage.get<string[]>(key)) ?? [])
+  const stored = StagedIdsSchema.safeParse(await input.storage.get(key))
+  const staged = new Set(stored.success ? stored.data : [])
   let changed = false
 
   for (const attachment of input.attachments) {

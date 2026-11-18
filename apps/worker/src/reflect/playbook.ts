@@ -129,7 +129,60 @@ export function createPlaybookThread(): ThreadDefinition<PlaybookState> {
           }
         }
 
-        default:
+        case 'agent.context.compacted':
+        case 'agent.effects.requested':
+        case 'agent.lineage':
+        case 'agent.message':
+        case 'agent.message.received':
+        case 'agent.session.cancel.requested':
+        case 'agent.session.message.submitted':
+        case 'agent.session.steer.delivered':
+        case 'agent.session.turn.closed':
+        case 'agent.session.turn.started':
+        case 'agent.spawn.requested':
+        case 'agent.steered':
+        case 'agent.tool.result':
+        case 'agent.tool_call.requested':
+        case 'agent.turn.settled':
+        case 'agent.turn.started':
+        case 'agent.turn.stopped':
+        case 'agent.turn.text_delta':
+        case 'agent.turn.usage':
+        case 'approval.requested':
+        case 'approval.timed_out':
+        case 'reflect.friction.recorded':
+        case 'runtime.child.close.requested':
+        case 'runtime.child.settled':
+        case 'runtime.effect.ambiguous':
+        case 'runtime.effect.attempt.started':
+        case 'runtime.effect.cancel.requested':
+        case 'runtime.effect.cancelled':
+        case 'runtime.effect.completed':
+        case 'runtime.effect.dispatch.deferred':
+        case 'runtime.effect.dispatched':
+        case 'runtime.effect.failed':
+        case 'runtime.effect.heartbeat':
+        case 'runtime.effect.queued':
+        case 'runtime.effect.retry.scheduled':
+        case 'runtime.effect.timed_out':
+        case 'runtime.effect.worker.started':
+        case 'runtime.fork.elided':
+        case 'runtime.run.cancelled':
+        case 'runtime.run.completed':
+        case 'runtime.run.forked':
+        case 'runtime.run.launched':
+        case 'runtime.run.started':
+        case 'runtime.signal.received':
+        case 'runtime.snapshot.taken':
+        case 'runtime.thread.cancel.requested':
+        case 'runtime.thread.cancelled':
+        case 'runtime.thread.completed':
+        case 'runtime.thread.failed':
+        case 'runtime.thread.started':
+        case 'runtime.timer.fired':
+        case 'runtime.timer.set':
+        case 'runtime.wait.registered':
+        case 'runtime.wait.satisfied':
           return state
       }
     },
@@ -153,7 +206,7 @@ export function createPlaybookThread(): ThreadDefinition<PlaybookState> {
       }
 
       for (const lesson of state.lessons) {
-        if (lesson.mirrored) {
+        if (lesson.mirrored === true) {
           continue
         }
 

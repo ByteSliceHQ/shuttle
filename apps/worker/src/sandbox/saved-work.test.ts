@@ -30,7 +30,7 @@ const glue = {
 const MIRROR = codeStorageRepoName(ORG, glue.fullName)
 const SCRATCH = scratchRepoName(ORG, RUN)
 
-const notFound = () => Object.assign(Object.create(NotFoundError.prototype), { message: '404' })
+const notFound = () => new NotFoundError(404, { message: '404' })
 
 /** Code Storage holding `files` (path to text) on the session's branch in each named repository. */
 function storage(repos: Record<string, Record<string, string>>, withBase = true): SavedWorkClient {

@@ -79,7 +79,10 @@ export function SessionShare({ runId }: { runId: string }) {
   const { data: access } = useQuery({ ...accessQuery, enabled: !fixture })
 
   // Only the open popover lists the organization.
-  const members = useQuery({ ...peopleQuery(tenant.org.id, identity.listPeople), enabled: open })
+  const members = useQuery({
+    ...peopleQuery(tenant.org.id, () => identity.listPeople()),
+    enabled: open,
+  })
 
   /** Shows the change at once and puts the old state back if the Worker refuses it. */
   const update = useMutation(
@@ -92,8 +95,8 @@ export function SessionShare({ runId }: { runId: string }) {
         if (previous) {
           queryClient.setQueryData(accessKey, {
             ...previous,
-            ...(memberIds ? { memberIds } : {}),
-            ...(visibility ? { visibility } : {}),
+            memberIds: memberIds ?? previous.memberIds,
+            visibility: visibility ?? previous.visibility,
           })
         }
 
@@ -144,7 +147,7 @@ export function SessionShare({ runId }: { runId: string }) {
   const me = tenant.user.id
 
   const here = [
-    ...new Set([me, ...(current.ownerId ? [current.ownerId] : []), ...current.memberIds]),
+    ...new Set([me, ...(current.ownerId !== null ? [current.ownerId] : []), ...current.memberIds]),
   ]
 
   const shown = here.slice(0, MAX_AVATARS)
@@ -158,12 +161,16 @@ export function SessionShare({ runId }: { runId: string }) {
             aria-label={`Sharing: ${label}`}
             className="focus-visible:ring-ring/50 ease-snappy mx-1 flex h-6 shrink-0 items-center rounded-full transition-transform duration-150 outline-none focus-visible:ring-[3px] active:scale-[0.97]"
           >
-            {shown.map((userId, index) => (
-              // Where the title bar is narrow only the first person shows, with a count.
-              <Avatar key={userId} className={index > 0 ? '-ml-1.5 hidden @sm:flex' : undefined}>
-                {initials(people.get(userId)) || <UserRound className="size-3" />}
-              </Avatar>
-            ))}
+            {shown.map((userId, index) => {
+              const letters = initials(people.get(userId))
+
+              return (
+                // Where the title bar is narrow only the first person shows, with a count.
+                <Avatar key={userId} className={index > 0 ? '-ml-1.5 hidden @sm:flex' : undefined}>
+                  {letters === '' ? <UserRound className="size-3" /> : letters}
+                </Avatar>
+              )
+            })}
             {extra > 0 ? (
               <Avatar className="text-muted-foreground -ml-1.5 hidden text-[9px] tabular-nums @sm:flex">
                 {countLabel(extra)}
@@ -252,7 +259,7 @@ export function SessionShare({ runId }: { runId: string }) {
           </>
         )}
 
-        {error ? (
+        {error !== undefined && error !== '' ? (
           <p role="alert" className="text-destructive px-2 pt-2 text-[12px]">
             {error}
           </p>
@@ -319,13 +326,15 @@ function MemberRow({
     <>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-[12.5px]">
-          {member.name || member.email}
+          {member.name === '' ? member.email : member.name}
           {you ? <span className="text-muted-foreground"> (you)</span> : null}
         </span>
         <span className="text-muted-foreground truncate text-[11px]">{member.email}</span>
       </span>
-      {note ? <span className="text-muted-foreground text-[11px]">{note}</span> : null}
-      {checked ? <Check className="text-brand size-3.5 shrink-0" /> : null}
+      {note !== undefined && note !== '' ? (
+        <span className="text-muted-foreground text-[11px]">{note}</span>
+      ) : null}
+      {checked === true ? <Check className="text-brand size-3.5 shrink-0" /> : null}
     </>
   )
 

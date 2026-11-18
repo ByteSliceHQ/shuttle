@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
+import type { JsonValue } from '../json.ts'
+
 /**
  * A stand-in for the Cursor Agent CLI that prints just enough of its output for the bridge tests.
  * FAKE_CURSOR_MODE picks the behaviour: `turn` (default), `hang`, `unauthenticated`, `reject-login`,
@@ -12,7 +14,7 @@ import { join } from 'node:path'
 
 const mode = process.env.FAKE_CURSOR_MODE ?? 'turn'
 const args = process.argv.slice(2)
-const print = (line: unknown) => process.stdout.write(`${JSON.stringify(line)}\n`)
+const print = (line: JsonValue) => process.stdout.write(`${JSON.stringify(line)}\n`)
 const signedInMarker = join(homedir(), '.fake-cursor-signed-in')
 const authFile = join(homedir(), '.config', 'cursor', 'auth.json')
 
@@ -102,7 +104,7 @@ if (args[0] === 'login') {
   }
 
   if (mode === 'echo-prompt') {
-    print({ type: 'result', subtype: 'success', is_error: false, result: args.at(-1) })
+    print({ type: 'result', subtype: 'success', is_error: false, result: args.at(-1) ?? '' })
   } else if (mode === 'background-shell') {
     print({
       type: 'assistant',

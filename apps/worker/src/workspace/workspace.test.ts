@@ -80,6 +80,10 @@ const stubReflector = defineAgent({
   }),
 })
 
+const EventsBodySchema = z.object({
+  events: z.array(z.object({ type: z.string(), payload: z.json().optional() })),
+})
+
 describe('workspace module', () => {
   test('creates folders, links repos, and launches a session once', async () => {
     const looms = createLooms({
@@ -150,7 +154,7 @@ describe('workspace module', () => {
       expect(session.status).toBeTruthy()
 
       const response = await looms.fetch(new Request('http://shuttle.test/runs/session_1/events'))
-      const body = (await response?.json()) as { events: { type: string; payload: unknown }[] }
+      const body = EventsBodySchema.parse(await response?.json())
 
       expect(
         body.events.find((event) => event.type === 'runtime.thread.started')?.payload,
@@ -248,7 +252,10 @@ describe('workspace module', () => {
         new Request('http://shuttle.test/runs/session_private/events'),
       )
 
-      const body = (await events?.json()) as { events: { type: string; payload: unknown }[] }
+      const body = z
+        .object({ events: z.array(z.object({ type: z.string(), payload: z.unknown() })) })
+        .parse(await events?.json())
+
       const started = body.events.find((event) => event.type === 'runtime.run.started')
 
       expect(JSON.stringify(started?.payload)).toContain('byteslicehq/shuttle')

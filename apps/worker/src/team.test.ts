@@ -10,17 +10,7 @@ import {
   TEAM_STORAGE_KEY,
   writeStoredTeam,
 } from './team'
-
-function memoryStorage(initial: Record<string, unknown> = {}) {
-  const values = new Map<string, unknown>(Object.entries(initial))
-
-  return {
-    get: async <T>(key: string) => values.get(key) as T | undefined,
-    put: async (key: string, value: unknown) => {
-      values.set(key, value)
-    },
-  } as unknown as Pick<DurableObjectStorage, 'get' | 'put'>
-}
+import { memoryStorage } from './testing/memory-storage'
 
 describe('parseTeam', () => {
   test('reads a full team', () => {
@@ -62,7 +52,6 @@ describe('parseTeam', () => {
 
   test('rejects values that are not a team', () => {
     expect(parseTeam(null)).toBeNull()
-    expect(parseTeam('codex')).toBeNull()
   })
 })
 
@@ -84,11 +73,11 @@ describe('stored team', () => {
     expect(await readPinnedTeam(storage)).toBeNull()
     expect(await writeStoredTeam(storage, { codex: true })).toMatchObject({ codex: true })
     expect(await readPinnedTeam(storage)).toMatchObject({ workers: true, codex: true })
-    expect(writeStoredTeam(storage, 'nope')).rejects.toThrow('invalid team')
+    expect(writeStoredTeam(storage, null)).rejects.toThrow('invalid team')
   })
 
   test('ignores a stored value that is not a team', async () => {
-    expect(await readPinnedTeam(memoryStorage({ [TEAM_STORAGE_KEY]: 7 }))).toBeNull()
+    expect(await readPinnedTeam(memoryStorage([[TEAM_STORAGE_KEY, 7]]))).toBeNull()
   })
 })
 

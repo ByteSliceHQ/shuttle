@@ -99,9 +99,9 @@ export function useSessionTabs(
         : undefined
 
       // One of the host's kinds says for itself whether it has one tab, and what to call it.
-      const singleton = type?.single ? input.kind : singletonTabId(input.kind)
+      const singleton = type?.single === true ? input.kind : singletonTabId(input.kind)
 
-      if (singleton && current.tabs[singleton]) {
+      if (singleton !== null && current.tabs[singleton] !== undefined) {
         setActiveTabId(singleton)
         return singleton
       }

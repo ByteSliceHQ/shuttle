@@ -58,10 +58,10 @@ export function parseLayerBranch(
     return null
   }
 
-  const stack = match[1] ? Number(match[1]) : 1
+  const stack = match[1] === undefined ? 1 : Number(match[1])
   const layer = Number(match[2])
 
-  if ((stack === 1 && (match[1] || layer < 2)) || !Number.isSafeInteger(layer)) {
+  if ((stack === 1 && (match[1] !== undefined || layer < 2)) || !Number.isSafeInteger(layer)) {
     return null
   }
 

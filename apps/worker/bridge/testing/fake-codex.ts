@@ -1,14 +1,24 @@
 #!/usr/bin/env bun
 import { createInterface } from 'node:readline'
 
+import {
+  definedFields,
+  isJsonObject,
+  numberField,
+  objectField,
+  parseJson,
+  stringField,
+  type JsonValue,
+} from '../json.ts'
+
 /**
  * A stand-in for `codex app-server` that speaks just enough of the protocol for the bridge tests.
  * FAKE_CODEX_MODE picks the behaviour: `turn` (default), `hang`, `crash` or `login`.
  */
 
 const mode = process.env.FAKE_CODEX_MODE ?? 'turn'
-const send = (message: unknown) => process.stdout.write(`${JSON.stringify(message)}\n`)
-const note = (method: string, params: unknown) => send({ method, params })
+const send = (message: JsonValue) => process.stdout.write(`${JSON.stringify(message)}\n`)
+const note = (method: string, params: JsonValue) => send({ method, params })
 
 const turn = (status: string) => ({ id: 'turn_1', status, error: null, items: [] })
 
@@ -58,10 +68,17 @@ function playTurn(): void {
 }
 
 createInterface({ input: process.stdin }).on('line', (line) => {
-  const message = JSON.parse(line) as { id?: number; method: string; params?: any }
-  const reply = (result: unknown) => send({ id: message.id, result })
+  const message = parseJson(line)
 
-  switch (message.method) {
+  if (!isJsonObject(message)) {
+    return
+  }
+
+  const id = numberField(message, 'id')
+  const params = objectField(message, 'params') ?? {}
+  const reply = (result: JsonValue) => send(definedFields({ id, result }))
+
+  switch (stringField(message, 'method')) {
     case 'initialize': {
       reply({ userAgent: 'fake-codex' })
       break
@@ -73,7 +90,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     }
 
     case 'thread/resume': {
-      reply({ thread: { id: message.params.threadId } })
+      reply({ thread: { id: stringField(params, 'threadId') ?? null } })
       break
     }
 
@@ -134,6 +151,8 @@ createInterface({ input: process.stdin }).on('line', (line) => {
 
       break
     }
+
+    case undefined:
 
     default: {
       break

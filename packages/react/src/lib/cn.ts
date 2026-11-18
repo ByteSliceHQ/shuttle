@@ -16,10 +16,6 @@ export function shortId(id: string): string {
 export function compactJson(value: JsonValue, limit = 96): string {
   const text = JSON.stringify(value)
 
-  if (text === undefined) {
-    return ''
-  }
-
   return text.length > limit ? `${text.slice(0, limit - 1)}…` : text
 }
 

@@ -117,23 +117,23 @@ describe('claude turn', () => {
   })
 })
 
+async function login(code: string): Promise<{ events: BridgeEventBody[]; signedIn: boolean }> {
+  const events: BridgeEventBody[] = []
+  const home = mkdtempSync(join(tmpdir(), 'shuttle-claude-home-'))
+
+  return withEnv({ HOME: home }, async () => {
+    await runClaudeLogin(
+      (event) => events.push(event),
+      new AbortController().signal,
+      async () => code,
+      { bin },
+    )
+
+    return { events, signedIn: await claudeSignedIn({ bin }) }
+  })
+}
+
 describe('claude login', () => {
-  async function login(code: string): Promise<{ events: BridgeEventBody[]; signedIn: boolean }> {
-    const events: BridgeEventBody[] = []
-    const home = mkdtempSync(join(tmpdir(), 'shuttle-claude-home-'))
-
-    return withEnv({ HOME: home }, async () => {
-      await runClaudeLogin(
-        (event) => events.push(event),
-        new AbortController().signal,
-        async () => code,
-        { bin },
-      )
-
-      return { events, signedIn: await claudeSignedIn({ bin }) }
-    })
-  }
-
   test('shows the link, passes the pasted code to Claude Code, and reports success', async () => {
     const { events, signedIn } = await login(' good-code ')
 

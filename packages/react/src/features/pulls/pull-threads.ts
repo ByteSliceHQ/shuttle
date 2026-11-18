@@ -1,9 +1,11 @@
 import { ORPCError } from '@orpc/client'
+import { z } from 'zod'
 
 import type { PullComment, PullThread, PullThreadsState } from '@shuttle/core/pulls'
 import { defineProjection } from '@swirls/looms/core'
 
 import { type ShuttleHost } from '../../shuttle'
+import { isNamespaceEvent } from '../events/namespace-events'
 import type { PullsEvent } from '../events/shuttle-events'
 import { pullKey } from './pulls'
 
@@ -14,8 +16,11 @@ import { pullKey } from './pulls'
 
 export type { PullComment, PullThread, PullThreadsState }
 
-const byAge = (a: PullComment, b: PullComment) =>
-  a.createdAt - b.createdAt || a.commentId - b.commentId
+function byAge(a: PullComment, b: PullComment): number {
+  const byTime = a.createdAt - b.createdAt
+
+  return byTime === 0 ? a.commentId - b.commentId : byTime
+}
 
 function withComment(threads: readonly PullThread[], comment: PullComment): readonly PullThread[] {
   const thread = threads.find((item) => item.rootId === comment.rootId)
@@ -58,6 +63,10 @@ export const pullThreads = defineProjection<PullThreadsState, PullsEvent>({
   name: 'pullThreads',
   initialState: { pulls: {} },
   reduce(state, event): PullThreadsState {
+    if (!isNamespaceEvent(event, 'pulls')) {
+      return state
+    }
+
     switch (event.type) {
       case 'pulls.comment.upserted': {
         const key = pullKey(event.payload.fullName, event.payload.number)
@@ -111,7 +120,13 @@ export const pullThreads = defineProjection<PullThreadsState, PullsEvent>({
         }
       }
 
-      default:
+      case 'pulls.pull.upserted':
+      case 'pulls.pull.closed':
+      case 'pulls.pull.linked':
+      case 'pulls.checks.updated':
+      case 'pulls.review.requested':
+      case 'pulls.review.submitted':
+      case 'pulls.repo.policy.set':
         return state
     }
   },
@@ -138,15 +153,12 @@ export class GithubNotConnectedError extends Error {
 /** The reason the Worker gives when it refuses to act as a person who has not connected GitHub. */
 const GITHUB_NOT_CONNECTED = 'github_not_connected'
 
-function textAt(value: unknown, key: string): string | undefined {
-  if (typeof value !== 'object' || value === null || !(key in value)) {
-    return undefined
-  }
-
-  const found: unknown = Reflect.get(value, key)
-
-  return typeof found === 'string' ? found : undefined
-}
+/** The parts of a refusal's data that can carry the reason or the sentence for people. */
+const RefusalData = z.object({
+  error: z.string().optional().catch(undefined),
+  code: z.string().optional().catch(undefined),
+  message: z.string().optional().catch(undefined),
+})
 
 /**
  * Turns the Worker's "GitHub is not connected" refusal into the error the comment box knows how
@@ -154,21 +166,24 @@ function textAt(value: unknown, key: string): string | undefined {
  * sentence for people in its data. An answer that carries the reason in its data instead, as
  * `error` or `code`, is read the same way. Anything else is handed back as it came.
  */
-export function asGithubNotConnected(cause: unknown): unknown {
+export function asGithubNotConnected<Cause>(cause: Cause): Cause | GithubNotConnectedError {
   if (!(cause instanceof ORPCError) || cause.status !== 409) {
     return cause
   }
 
-  const reasons = [cause.message, textAt(cause.data, 'error'), textAt(cause.data, 'code')]
+  const found = RefusalData.safeParse(cause.data).data
+  const reasons = [cause.message, found?.error, found?.code]
 
   if (!reasons.includes(GITHUB_NOT_CONNECTED)) {
     return cause
   }
 
-  const sentence = textAt(cause.data, 'message')
+  const sentence = found?.message
 
   return new GithubNotConnectedError(
-    sentence && sentence !== GITHUB_NOT_CONNECTED ? sentence : undefined,
+    sentence !== undefined && sentence !== '' && sentence !== GITHUB_NOT_CONNECTED
+      ? sentence
+      : undefined,
   )
 }
 

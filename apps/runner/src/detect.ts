@@ -3,6 +3,7 @@ import type { RunnerIsolation } from '@shuttle/runner-protocol'
 import type { LocalBackend, SandboxSpec } from './backend'
 import { findMicrosandbox, MicrosandboxBackend } from './backends/microsandbox'
 import { OciBackend } from './backends/oci'
+import { nonEmpty } from './text'
 
 /**
  * Picks how this machine keeps its sandbox.
@@ -52,7 +53,7 @@ function ociEngine(bin: string, fallbackLabel: string): Candidate {
           id: bin,
           label: /Docker Desktop|OrbStack|Colima|Rancher/i.test(os) ? os : fallbackLabel,
           isolation,
-          ...(version ? { version } : {}),
+          version: nonEmpty(version),
         },
         spec,
       )
@@ -66,7 +67,7 @@ const microsandbox: Candidate = {
   async probe(spec) {
     const runtime = findMicrosandbox()
 
-    if (!runtime) {
+    if (runtime === null) {
       return null
     }
 
@@ -84,7 +85,7 @@ const microsandbox: Candidate = {
         id: 'microsandbox',
         label: 'Built-in sandbox',
         isolation: 'vm',
-        ...(number ? { version: number } : {}),
+        version: nonEmpty(number),
       },
       spec,
     )
@@ -98,19 +99,21 @@ const CANDIDATES: readonly Candidate[] = [
 ]
 
 export async function detectBackend(spec: SandboxSpec): Promise<LocalBackend> {
-  const wanted = process.env.SHUTTLE_LOCAL_BACKEND?.trim()
-  const candidates = wanted ? CANDIDATES.filter((candidate) => candidate.id === wanted) : CANDIDATES
+  const wanted = nonEmpty(process.env.SHUTTLE_LOCAL_BACKEND?.trim())
+
+  const candidates =
+    wanted === undefined ? CANDIDATES : CANDIDATES.filter((candidate) => candidate.id === wanted)
 
   for (const candidate of candidates) {
     const backend = await candidate.probe(spec)
 
-    if (backend) {
+    if (backend !== null) {
       return backend
     }
   }
 
   throw new Error(
-    wanted
+    wanted !== undefined
       ? `The ${wanted} sandbox backend is not available on this machine.`
       : 'No sandbox backend is available on this machine. The built-in sandbox needs an Apple Silicon Mac; otherwise start Docker Desktop, OrbStack or Podman and try again.',
   )

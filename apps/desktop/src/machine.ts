@@ -1,4 +1,5 @@
 import { safeStorage } from 'electron'
+import { z } from 'zod'
 
 import type { Store } from './store'
 
@@ -10,6 +11,14 @@ import type { Store } from './store'
  * can do nothing but connect this machine's runner, and is stored encrypted with the operating
  * system's keychain. The app ships with no secrets of its own.
  */
+
+/** Who `/me` says is signed in to the window. */
+const whoSchema = z.object({
+  user: z.object({ id: z.string() }),
+  org: z.object({ id: z.string() }),
+})
+
+const registrationSchema = z.object({ token: z.string() })
 
 export interface MachineIdentity {
   readonly deviceId: string
@@ -55,7 +64,7 @@ export async function machineToken(
   cookie: string,
   machine: MachineIdentity,
 ): Promise<string | null> {
-  if (!cookie) {
+  if (cookie === '') {
     return null
   }
 
@@ -63,11 +72,11 @@ export async function machineToken(
   const headers = { cookie, origin, 'content-type': 'application/json' }
   const me = await fetch(`${appUrl}/me`, { headers }).catch(() => null)
 
-  if (!me?.ok) {
+  if (me?.ok !== true) {
     return null
   }
 
-  const who = (await me.json()) as { user: { id: string }; org: { id: string } }
+  const who = whoSchema.parse(await me.json())
   const saved = store.get('machines')?.[origin]
 
   // A token belongs to the person and organization it was made for, and to no one else who
@@ -97,11 +106,11 @@ export async function machineToken(
     }),
   }).catch(() => null)
 
-  if (!registered?.ok) {
+  if (registered?.ok !== true) {
     return null
   }
 
-  const { token } = (await registered.json()) as { token: string }
+  const { token } = registrationSchema.parse(await registered.json())
 
   store.set('machines', {
     ...store.get('machines'),

@@ -1,4 +1,4 @@
-import { queryOptions, type QueryKey } from '@tanstack/react-query'
+import { queryOptions } from '@tanstack/react-query'
 
 import type { ShuttleClient, ShuttleHost } from '../../shuttle'
 
@@ -13,7 +13,7 @@ export type PlaybookAnswer = Awaited<ReturnType<ShuttleClient['playbook']['get']
 export function playbookQuery({ api, client }: ShuttleHost) {
   // The key's type is given, not inferred: inferred, it carries a tag from the query library
   // that a declaration file cannot name.
-  return queryOptions<PlaybookAnswer, Error, PlaybookAnswer, QueryKey>({
+  return queryOptions<PlaybookAnswer, Error, PlaybookAnswer>({
     queryKey: api.playbook.get.queryKey(),
     queryFn: async ({ signal }) => {
       await client.playbook.ensure(undefined, { signal })

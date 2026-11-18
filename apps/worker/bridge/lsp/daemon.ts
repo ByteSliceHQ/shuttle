@@ -4,7 +4,8 @@ import { tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 
-import type { LspRequest, LspStatusReply } from './protocol.ts'
+import { parseJson } from './json.ts'
+import { decodeLspRequest, type LspReply, type LspRequest } from './protocol.ts'
 import { ServerPool } from './servers.ts'
 
 /**
@@ -67,21 +68,21 @@ export async function runDaemon(): Promise<void> {
     idle = setTimeout(shutdown, IDLE_EXIT_MS)
   }
 
-  const answer = async (request: LspRequest): Promise<unknown> => {
-    if (request.op === 'diagnostics') {
-      return await pool.diagnostics(request.file, request.waitMs, request.text)
-    }
+  const answer = async (request: LspRequest): Promise<LspReply> => {
+    switch (request.op) {
+      case 'diagnostics': {
+        return pool.diagnostics(request.file, request.waitMs, request.text)
+      }
 
-    if (request.op === 'status') {
-      return { status: 'ok', pid: process.pid, servers: pool.status() } satisfies LspStatusReply
-    }
+      case 'status': {
+        return { status: 'ok', pid: process.pid, servers: pool.status() }
+      }
 
-    if (request.op === 'stop') {
-      setImmediate(shutdown)
-      return { status: 'ok' }
+      case 'stop': {
+        setImmediate(shutdown)
+        return { status: 'ok' }
+      }
     }
-
-    return { status: 'error', reason: 'unknown request' }
   }
 
   const server = createServer((socket: Socket) => {
@@ -91,10 +92,15 @@ export async function runDaemon(): Promise<void> {
       touch()
 
       void (async () => {
-        let reply: unknown
+        let reply: LspReply
 
         try {
-          reply = await answer(JSON.parse(line) as LspRequest)
+          const request = decodeLspRequest(parseJson(line))
+
+          reply =
+            request === undefined
+              ? { status: 'error', reason: 'unknown request' }
+              : await answer(request)
         } catch (cause) {
           reply = {
             status: 'error',

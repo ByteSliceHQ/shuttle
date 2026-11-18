@@ -26,7 +26,7 @@ export function describeSandbox(status: DesktopRunnerStatus | null): Shown | nul
 
   if (GETTING_READY.has(status.status)) {
     // The runner only narrates the steps of a first setup. A plain start has no message.
-    return status.status === 'preparing' && status.message
+    return status.status === 'preparing' && status.message !== undefined && status.message !== ''
       ? {
           kind: 'setup',
           title: 'Setting up your sandbox',

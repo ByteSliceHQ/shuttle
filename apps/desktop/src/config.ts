@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { z } from 'zod'
+
+import { nonEmpty } from './text'
+
 /**
  * What a packaged app is built to use: the Shuttle deployment its window opens, and the sandbox
  * image its runner pulls. Written beside the app's resources when it is packaged (see
@@ -14,25 +18,23 @@ export interface PackagedConfig {
 
 export const PACKAGED_CONFIG_FILE = 'desktop.config.json'
 
-function text(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined
-}
+/** A string, trimmed. Anything else counts as not given. */
+const textSchema = z.string().trim().catch('')
+
+const packagedConfigSchema = z.object({
+  autoUpdate: z.boolean().catch(false),
+  url: textSchema,
+  image: textSchema,
+})
 
 /** Empty when the app is run from the repository, where no such file exists. */
 export function readPackagedConfig(resourcesPath: string): PackagedConfig {
   try {
-    const parsed = JSON.parse(
-      readFileSync(join(resourcesPath, PACKAGED_CONFIG_FILE), 'utf8'),
-    ) as Record<string, unknown>
+    const { autoUpdate, url, image } = packagedConfigSchema.parse(
+      JSON.parse(readFileSync(join(resourcesPath, PACKAGED_CONFIG_FILE), 'utf8')),
+    )
 
-    const url = text(parsed.url)
-    const image = text(parsed.image)
-
-    return {
-      autoUpdate: parsed.autoUpdate === true,
-      ...(url ? { url } : {}),
-      ...(image ? { image } : {}),
-    }
+    return { autoUpdate, url: nonEmpty(url), image: nonEmpty(image) }
   } catch {
     return {}
   }

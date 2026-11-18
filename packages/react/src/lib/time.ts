@@ -1,8 +1,10 @@
+import { hasText } from './text'
+
 /** Run ids start with a base36 millisecond timestamp (`run_<ms36>_<counter>_<entropy>`). */
 export function runCreatedAt(runId: string): number | undefined {
   const stamp = runId.split('_')[1]
 
-  if (!stamp) {
+  if (!hasText(stamp)) {
     return undefined
   }
 

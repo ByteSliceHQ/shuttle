@@ -2,7 +2,32 @@ import { Database } from 'bun:sqlite'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { z } from 'zod'
+
 type Binding = string | number | bigint | boolean | null | Uint8Array
+
+const RowsSchema = z.array(
+  z.record(
+    z.string(),
+    z.union([z.string(), z.number(), z.bigint(), z.null(), z.instanceof(Uint8Array)]),
+  ),
+)
+
+const ChangeSchema = z.object({ changes: z.number(), id: z.number() })
+
+interface FakeResult {
+  readonly results: z.infer<typeof RowsSchema>
+  readonly success: boolean
+  readonly meta: {
+    readonly changes: number
+    readonly last_row_id: number
+    readonly duration: number
+  }
+}
+
+interface FakeStatement {
+  all(): Promise<FakeResult>
+}
 
 /**
  * A D1 database for unit tests, backed by an in-memory SQLite database. It covers the part of
@@ -12,10 +37,11 @@ export function fakeD1(sqlite = new Database(':memory:')): D1Database {
   const statement = (sql: string, bindings: readonly Binding[] = []) => {
     const all = () => {
       const query = sqlite.query(sql)
-      const results = query.all(...bindings)
-      const changed = sqlite.query('select changes() as changes, last_insert_rowid() as id').get()
+      const results = RowsSchema.parse(query.all(...bindings))
 
-      const meta = changed as { changes: number; id: number }
+      const meta = ChangeSchema.parse(
+        sqlite.query('select changes() as changes, last_insert_rowid() as id').get(),
+      )
 
       return {
         results,
@@ -29,22 +55,22 @@ export function fakeD1(sqlite = new Database(':memory:')): D1Database {
       all: async () => all(),
       run: async () => all(),
       first: async (column?: string) => {
-        const row = all().results[0] as Record<string, unknown> | undefined
+        const row = all().results[0]
 
-        if (!row) {
+        if (row === undefined) {
           return null
         }
 
-        return column ? (row[column] ?? null) : row
+        return column === undefined ? row : (row[column] ?? null)
       },
-      raw: async () => all().results.map((row) => Object.values(row as object)),
+      raw: async () => all().results.map((row) => Object.values(row)),
     }
   }
 
   const database = {
     prepare: (sql: string) => statement(sql),
-    batch: async (statements: readonly { all(): Promise<unknown> }[]) => {
-      const results = []
+    batch: async (statements: readonly FakeStatement[]) => {
+      const results: FakeResult[] = []
 
       for (const item of statements) {
         results.push(await item.all())
@@ -58,6 +84,7 @@ export function fakeD1(sqlite = new Database(':memory:')): D1Database {
     },
   }
 
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions, typescript/no-unsafe-type-assertion -- SAFETY: the fake answers prepare, batch and exec, the whole D1 surface Shuttle and Better Auth call; D1's generic row types cannot be implemented without naming the caller's type.
   return database as unknown as D1Database
 }
 

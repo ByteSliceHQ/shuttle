@@ -12,9 +12,9 @@ export interface StackGitFixture {
   readonly baseSha: string
   readonly ops: StackWorkspaceOps
   /** Run a shell command in the session worktree; throws on failure. */
-  git(command: string): string
-  write(path: string, content: string): void
-  cleanup(): void
+  readonly git: (command: string) => string
+  readonly write: (path: string, content: string) => void
+  readonly cleanup: () => void
 }
 
 /**
@@ -44,7 +44,7 @@ export function createStackGitFixture(runId = 'session_1', repoName = 'glue'): S
     const result = exec(command, { cwd: worktreeRepoPath(runId, repoName) })
 
     if (result.exitCode !== 0) {
-      throw new Error(`${command}\n${result.stderr || result.stdout}`)
+      throw new Error(`${command}\n${result.stderr !== '' ? result.stderr : result.stdout}`)
     }
 
     return result.stdout.trim()

@@ -22,6 +22,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/pop
 import { ScrollArea } from '../../components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../components/ui/tooltip'
 import { cn } from '../../lib/cn'
+import { hasText, hasNode } from '../../lib/text'
 import { fullDateTime, relativeTime } from '../../lib/time'
 import { useNow } from '../../lib/use-now'
 import { useApi, useOrgPeople, useTenant } from '../../shuttle'
@@ -246,25 +247,27 @@ function SourceState({ workspace }: { workspace: SandboxWorkspace }) {
   const now = useNow()
   const me = useTenant().user.id
   const people = useOrgPeople()
-  const holder = workspace.holderId && workspace.holderId !== me ? workspace.holderId : null
+
+  const holder =
+    hasText(workspace.holderId) && workspace.holderId !== me ? workspace.holderId : null
 
   const state =
     workspace.source === 'saved'
-      ? workspace.savedAt
+      ? workspace.savedAt !== null && workspace.savedAt !== undefined
         ? `Saved ${relativeTime(workspace.savedAt, now)}`
         : 'Saved copy'
       : workspace.source === 'asleep'
         ? 'Asleep'
-        : holder
+        : holder !== null
           ? `Live · ${people.get(holder) ?? 'a teammate'}`
           : 'Live'
 
   const explained =
     workspace.source === 'saved'
-      ? `The sandbox is asleep. This is the work as it was last saved${workspace.savedAt ? `, ${fullDateTime(workspace.savedAt)}` : ''}.`
+      ? `The sandbox is asleep. This is the work as it was last saved${workspace.savedAt !== null && workspace.savedAt !== undefined ? `, ${fullDateTime(workspace.savedAt)}` : ''}.`
       : workspace.source === 'asleep'
         ? 'The sandbox is asleep and nothing has been saved yet.'
-        : holder
+        : holder !== null
           ? `Read live from ${people.get(holder) ?? 'a teammate'}'s sandbox, where the session is working.`
           : 'Read live from the sandbox the session is working in.'
 
@@ -354,7 +357,7 @@ export function RepoTabs({
         {repos.map((repo) => {
           const on = repo.name === active.name
           const against = repo.comparison?.against ?? SESSION
-          const Icon = repo.fullName ? GitBranch : Package
+          const Icon = hasText(repo.fullName) ? GitBranch : Package
 
           return (
             <button
@@ -425,7 +428,7 @@ function Choice({
       </span>
       <span className="truncate text-[12.5px]">{title}</span>
       <span className="text-muted-foreground text-[11px] tabular-nums">{aside}</span>
-      {detail ? (
+      {hasNode(detail) ? (
         <span className="text-muted-foreground col-start-2 col-end-4 truncate text-[11px]">
           {detail}
         </span>
@@ -538,7 +541,10 @@ function ComparisonPicker({
   const against = repo.comparison?.against ?? SESSION
 
   const ownPulls = pulls.filter(
-    (run) => run.role === 'author' && run.pull.state === 'open' && repoOfPull([repo], run.pull),
+    (run) =>
+      run.role === 'author' &&
+      run.pull.state === 'open' &&
+      repoOfPull([repo], run.pull) !== undefined,
   )
 
   const pick = (next: string) => {
@@ -598,7 +604,7 @@ function ComparisonPicker({
                 <Choice
                   key={commit.sha}
                   icon={<GitCommitHorizontal />}
-                  title={commit.subject || shortSha(commit.sha)}
+                  title={commit.subject !== '' ? commit.subject : shortSha(commit.sha)}
                   detail={shortSha(commit.sha)}
                   selected={against === `ref:${commit.sha}`}
                   disabled={!live}
@@ -651,7 +657,7 @@ function ComparisonSentence({ repo, shown }: { repo: WorkspaceRepo; shown: RunPu
     </b>
   )
 
-  const base = comparison?.baseSha ? <Code>{shortSha(comparison.baseSha)}</Code> : null
+  const base = hasText(comparison?.baseSha) ? <Code>{shortSha(comparison.baseSha)}</Code> : null
 
   const split =
     comparison?.baseMode === 'tip'
@@ -679,7 +685,7 @@ function ComparisonSentence({ repo, shown }: { repo: WorkspaceRepo; shown: RunPu
     text = (
       <>
         {files} changed since the last commit
-        {repo.head?.branch ? (
+        {hasText(repo.head?.branch) ? (
           <>
             {' '}
             on <Ref name={repo.head.branch} />
@@ -748,11 +754,22 @@ function RailTip({
       <TooltipTrigger asChild>{children}</TooltipTrigger>
       <TooltipContent side={side} className="grid max-w-64 gap-0.5 px-2.5 py-1.5">
         <span className="text-[11.5px] font-medium text-pretty">{heading}</span>
-        {facts ? <span className="text-muted-foreground tabular-nums">{facts}</span> : null}
-        {action ? <span className="text-muted-foreground/80 pt-0.5">{action}</span> : null}
+        {hasNode(facts) ? (
+          <span className="text-muted-foreground tabular-nums">{facts}</span>
+        ) : null}
+        {hasText(action) ? <span className="text-muted-foreground/80 pt-0.5">{action}</span> : null}
       </TooltipContent>
     </Tooltip>
   )
+}
+
+/** What a stop on the line says about itself. */
+interface StopDescription {
+  name: ReactNode
+  heading: ReactNode
+  facts?: ReactNode
+  action: string
+  said: string
 }
 
 /**
@@ -783,21 +800,15 @@ function Rail({
   const [aimed, setAimed] = useState<number | null>(null)
 
   const otherBase =
-    parsed?.kind === 'ref' && !repo.commits?.some((c) => c.sha.startsWith(parsed.ref)) && !shown
+    parsed?.kind === 'ref' &&
+    repo.commits?.some((c) => c.sha.startsWith(parsed.ref)) !== true &&
+    shown === undefined
       ? parsed.ref
       : null
 
-  const describe = (
-    point: RailPoint,
-  ): {
-    name: ReactNode
-    heading: ReactNode
-    facts?: ReactNode
-    action: string
-    said: string
-  } => {
+  const describe = (point: RailPoint): StopDescription => {
     if (point.kind === 'base') {
-      return otherBase
+      return otherBase !== null
         ? {
             name: <RefName name={otherBase} />,
             heading: otherBase,
@@ -822,7 +833,7 @@ function Rail({
 
       return {
         name: shortSha(point.sha),
-        heading: commit.subject || shortSha(point.sha),
+        heading: commit.subject !== '' ? commit.subject : shortSha(point.sha),
         facts: [shortSha(point.sha), relativeTime(commit.at, now), ...commit.branches.map(shortRef)]
           .filter(Boolean)
           .join(' · '),
@@ -834,7 +845,7 @@ function Rail({
     return {
       name: point.dirty ? 'Uncommitted' : 'Working tree',
       heading: point.dirty ? 'The working tree has uncommitted work' : 'The working tree is clean',
-      facts: repo.head?.branch ? `On ${shortRef(repo.head.branch)}` : undefined,
+      facts: hasText(repo.head?.branch) ? `On ${shortRef(repo.head.branch)}` : undefined,
       action: 'Press to compare only changes not committed yet.',
       said: point.dirty ? 'Working tree, with uncommitted work' : 'Working tree, clean',
     }
@@ -1081,7 +1092,7 @@ export function ComparisonBar({
           </button>
         ) : null}
         {/* Unfolded, the sentence below gives the count, so it is only said here when it is not there. */}
-        {pending || folded || error ? (
+        {pending || folded || hasText(error) ? (
           <span className="text-muted-foreground px-0.5 text-[11.5px] tabular-nums">
             {pending
               ? 'Measuring…'
@@ -1116,7 +1127,7 @@ export function ComparisonBar({
           </button>
         </span>
       </div>
-      {error ? (
+      {hasText(error) ? (
         <p
           role="alert"
           className="bg-destructive/10 text-destructive flex items-start gap-1.5 rounded-md px-2 py-1.5 text-[11.5px]"
@@ -1126,7 +1137,7 @@ export function ComparisonBar({
         </p>
       ) : null}
       {/* With nothing measured, the error says all there is to say. */}
-      {folded || error ? null : (
+      {folded || hasText(error) ? null : (
         <>
           <ComparisonSentence repo={repo} shown={shown} />
           {shown && pullSync(shown.pull, repo) === 'unpushed' ? (

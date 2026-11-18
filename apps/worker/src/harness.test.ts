@@ -7,18 +7,7 @@ import {
   readStoredHarness,
   writeStoredHarness,
 } from './harness'
-
-function memoryStorage(initial: Record<string, unknown> = {}) {
-  const values = new Map<string, unknown>(Object.entries(initial))
-
-  return {
-    values,
-    get: async <T>(key: string) => values.get(key) as T | undefined,
-    put: async (key: string, value: unknown) => {
-      values.set(key, value)
-    },
-  } as unknown as Pick<DurableObjectStorage, 'get' | 'put'> & { values: Map<string, unknown> }
-}
+import { memoryStorage } from './testing/memory-storage'
 
 describe('parseHarness', () => {
   test('accepts built-in harnesses and named ACP agents', () => {
@@ -34,7 +23,7 @@ describe('parseHarness', () => {
     expect(parseHarness('acp:')).toBeNull()
     expect(parseHarness('acp:Bad Name')).toBeNull()
     expect(parseHarness('acp:../etc')).toBeNull()
-    expect(parseHarness(42)).toBeNull()
+    expect(parseHarness(undefined)).toBeNull()
   })
 })
 
@@ -50,9 +39,7 @@ describe('stored harness', () => {
   test('defaults to shuttle when nothing valid is stored', async () => {
     expect(await readStoredHarness(memoryStorage())).toBe('shuttle')
 
-    expect(await readStoredHarness(memoryStorage({ [HARNESS_STORAGE_KEY]: 'nope' }))).toBe(
-      'shuttle',
-    )
+    expect(await readStoredHarness(memoryStorage([[HARNESS_STORAGE_KEY, 'nope']]))).toBe('shuttle')
   })
 
   test('round-trips a valid harness and refuses an invalid one', async () => {

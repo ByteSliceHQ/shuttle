@@ -48,7 +48,7 @@ export function useComposerAttachments(runId: string) {
       for (const attachment of live.current) {
         attachment.cancel()
 
-        if (attachment.previewUrl) {
+        if (attachment.previewUrl !== undefined) {
           URL.revokeObjectURL(attachment.previewUrl)
         }
       }
@@ -107,15 +107,17 @@ export function useComposerAttachments(runId: string) {
           },
         )
 
-        accepted.push({
+        const pending: PendingAttachment = {
           key,
           file,
-          ...(file.type.startsWith('image/') ? { previewUrl: URL.createObjectURL(file) } : {}),
+          previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
           status: 'uploading',
           progress: 0,
           uploaded,
           cancel: () => controller.abort(),
-        })
+        }
+
+        accepted.push(pending)
       }
 
       setRejection(refused)
@@ -133,7 +135,7 @@ export function useComposerAttachments(runId: string) {
 
       removed?.cancel()
 
-      if (removed?.previewUrl) {
+      if (removed?.previewUrl !== undefined) {
         URL.revokeObjectURL(removed.previewUrl)
       }
 
@@ -164,7 +166,7 @@ export function useComposerAttachments(runId: string) {
 /** Releases the previews of files whose message has been sent. */
 export function releaseAttachments(attachments: readonly PendingAttachment[]) {
   for (const attachment of attachments) {
-    if (attachment.previewUrl) {
+    if (attachment.previewUrl !== undefined) {
       URL.revokeObjectURL(attachment.previewUrl)
     }
   }
@@ -219,7 +221,7 @@ function AttachmentChip({
       <span className="bg-background text-muted-foreground flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md [&_svg]:size-4">
         {status === 'error' ? (
           <AlertCircle className="text-status-failed" />
-        ) : attachment.previewUrl ? (
+        ) : attachment.previewUrl !== undefined ? (
           <img src={attachment.previewUrl} alt="" className="size-full object-cover" />
         ) : kind === 'video' ? (
           <FileVideo />

@@ -91,7 +91,11 @@ class DaytonaMachine implements SandboxMachine {
       },
       fs: {
         uploadFile: (file, remotePath) =>
-          this.awake((sandbox) => sandbox.fs.uploadFile(file, remotePath)),
+          this.awake((sandbox) =>
+            // The SDK's upload takes a Node Buffer.
+            // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-unsafe-call, typescript/no-unsafe-member-access -- SAFETY: check-types types Buffer.from(Uint8Array) as Buffer; oxlint's type-aware pass cannot resolve Node's Buffer in this package and reports it as any.
+            sandbox.fs.uploadFile(Buffer.from(file), remotePath),
+          ),
         downloadFile: (remotePath) => this.awake((sandbox) => sandbox.fs.downloadFile(remotePath)),
       },
     })
@@ -129,13 +133,13 @@ class DaytonaMachine implements SandboxMachine {
   /** A preview request, sent again after waking the sandbox if it had gone to sleep. */
   async preview(request: Request, port: number): Promise<Response> {
     // Split in case the request has to be sent twice; a body can only be read once.
-    const [body, again] = request.body ? request.body.tee() : [null, null]
+    const [body, again] = request.body === null ? [null, null] : request.body.tee()
     const response = await proxyDaytonaPreview(request, await this.sandbox(), port, body)
 
     // Daytona answers for a sleeping sandbox with a 400 of its own, in JSON.
     if (
       response.status !== 400 ||
-      !response.headers.get('content-type')?.includes('json') ||
+      response.headers.get('content-type')?.includes('json') !== true ||
       !sandboxNotRunning(await response.clone().text())
     ) {
       void again?.cancel().catch(() => {})

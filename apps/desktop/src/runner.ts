@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 
-import type { RunnerStatus } from './channels'
+import { runnerStatusSchema, type RunnerStatus } from './channels'
 
 /**
  * Keeps a `shuttle-runner` going beside the app: the process that holds this machine's sandbox
@@ -34,9 +34,11 @@ function runnerCommand(resourcesPath: string, repoRoot: string | null): string[]
     return [packaged, '--stdin']
   }
 
-  const source = repoRoot ? join(repoRoot, 'apps/runner/src/main.ts') : null
+  const source = repoRoot === null ? null : join(repoRoot, 'apps/runner/src/main.ts')
 
-  return source && existsSync(source) ? [process.env.SHUTTLE_BUN ?? 'bun', source, '--stdin'] : null
+  return source !== null && existsSync(source)
+    ? [process.env.SHUTTLE_BUN ?? 'bun', source, '--stdin']
+    : null
 }
 
 export class RunnerSupervisor {
@@ -110,21 +112,19 @@ export class RunnerSupervisor {
     this.report({ status: 'starting' })
 
     // Kept open: the runner stops when this pipe closes, so it never outlives the app.
-    child.stdin?.write(`${JSON.stringify(settings)}\n`)
+    child.stdin.write(`${JSON.stringify(settings)}\n`)
 
-    if (child.stdout) {
-      createInterface({ input: child.stdout }).on('line', (line) => {
-        try {
-          this.report(JSON.parse(line) as RunnerStatus)
+    createInterface({ input: child.stdout }).on('line', (line) => {
+      try {
+        this.report(runnerStatusSchema.parse(JSON.parse(line)))
 
-          if (this.last.status === 'online') {
-            this.delay = RESTART_MIN_MS
-          }
-        } catch {
-          // Not a status line.
+        if (this.last.status === 'online') {
+          this.delay = RESTART_MIN_MS
         }
-      })
-    }
+      } catch {
+        // Not a status line.
+      }
+    })
 
     child.on('error', (cause) => {
       this.report({

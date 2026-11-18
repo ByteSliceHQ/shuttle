@@ -23,7 +23,7 @@ function event(type: string, payload: JsonValue, threadId = 'thr_conductor'): Se
 }
 
 const fold = (events: readonly SessionEvent[]) =>
-  events.reduce(sessionFeed.reduce, sessionFeed.initialState)
+  events.reduce((state, next) => sessionFeed.reduce(state, next), sessionFeed.initialState)
 
 const gate = event('approval.requested', { approvalId: 'pr_publish_1', title: 'Publish?' })
 

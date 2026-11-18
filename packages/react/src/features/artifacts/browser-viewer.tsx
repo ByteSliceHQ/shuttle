@@ -29,7 +29,7 @@ export function BrowserViewer({
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [draft, setDraft] = useState(target)
   const [syncedTarget, setSyncedTarget] = useState(target)
-  const [history, setHistory] = useState<string[]>(() => (target ? [target] : []))
+  const [history, setHistory] = useState<string[]>(() => (target !== '' ? [target] : []))
   const [index, setIndex] = useState(0)
   const [blocked, setBlocked] = useState(false)
 
@@ -47,7 +47,7 @@ export function BrowserViewer({
   function navigate(next: string) {
     const resolved = next.trim()
 
-    if (!resolved) {
+    if (resolved === '') {
       return
     }
 
@@ -61,7 +61,7 @@ export function BrowserViewer({
     const nextIndex = index + delta
     const entry = history[nextIndex]
 
-    if (!entry) {
+    if (entry === undefined) {
       return
     }
 
@@ -97,7 +97,7 @@ export function BrowserViewer({
           onClick={() => {
             const frame = iframeRef.current
 
-            if (frame && src) {
+            if (frame !== null && src !== '') {
               frame.src = src
             }
           }}
@@ -120,7 +120,7 @@ export function BrowserViewer({
             className="h-7 w-full rounded-md font-mono text-[11px]"
           />
         </form>
-        {src ? (
+        {src !== '' ? (
           <Button variant="ghost" size="icon-sm" asChild aria-label="Open externally">
             <a href={src} target="_blank" rel="noreferrer">
               <ExternalLink />
@@ -129,7 +129,7 @@ export function BrowserViewer({
         ) : null}
       </div>
 
-      {!src ? (
+      {src === '' ? (
         <EmptyState icon={<Globe />} title="Open a preview">
           Enter a port (e.g. <code className="font-mono">3000</code> or{' '}
           <code className="font-mono">localhost:3000</code>). Both proxy through the sandbox

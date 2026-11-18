@@ -12,7 +12,7 @@ import { prepareSessionSandbox } from './handoff'
 import { githubMirror, mirrorRepoStack, type MirroredStack } from './mirror-stack'
 import { shuttleModule } from './scope'
 import { writeSessionStacks } from './session-stacks'
-import { stackKey, type SessionRepoStack, type SessionStacks } from './stack-state'
+import { stackKey, type SessionStacks } from './stack-state'
 
 const StackLayerSchema = Schema.Struct({
   layer: Schema.Finite,
@@ -55,6 +55,11 @@ const PublishPullSchema = Schema.Struct({
   ),
 })
 
+/** True for a string that is neither missing nor empty. */
+function isPresent(value: string | undefined | null): value is string {
+  return value !== undefined && value !== null && value !== ''
+}
+
 export function createPublishPullRequestEffect(env: ShuttleEnv, storage?: DurableObjectStorage) {
   return shuttleModule.effect({
     type: 'shuttle.publishPullRequest',
@@ -72,7 +77,7 @@ export function createPublishPullRequestEffect(env: ShuttleEnv, storage?: Durabl
         await sandboxNameForSession(env, storage, ctx.runId, binding.sandboxName),
       )
 
-      const selected = input.repo
+      const selected = isPresent(input.repo)
         ? binding.repos.filter((repo) => repo.name === input.repo || repo.fullName === input.repo)
         : input.repos.length > 0
           ? binding.repos.filter(
@@ -89,7 +94,7 @@ export function createPublishPullRequestEffect(env: ShuttleEnv, storage?: Durabl
 
         const github = githubMirror(env)
         const priorStacks: SessionStacks = { ...input.stacks }
-        const nextStacks: Record<string, SessionRepoStack> = { ...priorStacks }
+        const nextStacks = { ...priorStacks }
         const mirrored: { repo: LinkedSandboxRepo; result: MirroredStack }[] = []
 
         for (const repo of selected) {
@@ -135,7 +140,7 @@ export function createPublishPullRequestEffect(env: ShuttleEnv, storage?: Durabl
             continue
           }
 
-          const signals = recordPublished({
+          const published = {
             installationId: pull.installationId,
             fullName: pull.fullName,
             number: pull.number,
@@ -153,8 +158,11 @@ export function createPublishPullRequestEffect(env: ShuttleEnv, storage?: Durabl
             updatedAt: pull.updatedAt,
             isFork: pull.isFork,
             runId: ctx.runId,
-            ...(input.threadId ? { threadId: input.threadId } : {}),
-          })
+          }
+
+          const signals = recordPublished(
+            isPresent(input.threadId) ? { ...published, threadId: input.threadId } : published,
+          )
 
           await pullsStub.signal(Array.isArray(signals) ? signals : [signals])
         }
@@ -186,7 +194,7 @@ export function createPublishPullRequestEffect(env: ShuttleEnv, storage?: Durabl
                 remoteSha: layer.remoteSha,
                 publishedTree: layer.publishedTree,
               })),
-              ...(result.stack.native ? { stack: result.stack.native } : {}),
+              stack: result.stack.native ?? undefined,
             }),
           ]
         })

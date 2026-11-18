@@ -28,7 +28,9 @@ export function groupSessionPulls(pulls: readonly PublishedPull[]): SessionPullG
   const stacked = new Set<PublishedPull>()
 
   for (const [key, layers] of byStack) {
-    if (layers.length < 2) {
+    const [first] = layers
+
+    if (first === undefined || layers.length < 2) {
       continue
     }
 
@@ -38,7 +40,7 @@ export function groupSessionPulls(pulls: readonly PublishedPull[]): SessionPullG
 
     stacks.push({
       key,
-      fullName: layers[0]!.fullName,
+      fullName: first.fullName,
       layers: layers.toSorted((a, b) => (b.stack?.layer ?? 0) - (a.stack?.layer ?? 0)),
     })
   }

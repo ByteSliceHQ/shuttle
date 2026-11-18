@@ -8,6 +8,7 @@ import type {
 import { defineProjection } from '@swirls/looms/core'
 
 import { type ShuttleHost } from '../../shuttle'
+import { isNamespaceEvent } from '../events/namespace-events'
 import type { WorkspaceEvent } from '../events/shuttle-events'
 import { mutateSessionTabs } from '../sessions/tab-set'
 
@@ -36,15 +37,24 @@ export const emptyWorkspaceTree: WorkspaceTree = {
 
 export const emptySessionTabs: SessionTabsState = {}
 
+/** The event's own timestamp when it carries a usable one, else now. */
+function eventTime(ts: number | undefined): number {
+  return ts !== undefined && Number.isFinite(ts) ? ts : Date.now()
+}
+
 function activityEventSeq(
   payloadSeq: number | undefined,
   idempotencyKey: string | null | undefined,
 ): number | undefined {
-  if (typeof payloadSeq === 'number' && Number.isFinite(payloadSeq)) {
+  if (payloadSeq !== undefined && Number.isFinite(payloadSeq)) {
     return payloadSeq
   }
 
-  if (typeof idempotencyKey === 'string' && idempotencyKey.startsWith('activity:')) {
+  if (
+    idempotencyKey !== null &&
+    idempotencyKey !== undefined &&
+    idempotencyKey.startsWith('activity:')
+  ) {
     const tail = Number(idempotencyKey.slice(idempotencyKey.lastIndexOf(':') + 1))
 
     if (Number.isFinite(tail)) {
@@ -77,7 +87,9 @@ function activityEventAt(
   at: number,
   idempotencyKey: string | null | undefined,
 ): number {
-  return typeof idempotencyKey === 'string' && idempotencyKey.startsWith('reconcile:')
+  return idempotencyKey !== null &&
+    idempotencyKey !== undefined &&
+    idempotencyKey.startsWith('reconcile:')
     ? Math.min(at, session.updatedAt)
     : at
 }
@@ -86,6 +98,40 @@ export const workspaceTree = defineProjection<WorkspaceTree, WorkspaceEvent>({
   name: 'workspaceTree',
   initialState: emptyWorkspaceTree,
   reduce(state, event) {
+    if (event.type === 'runtime.child.settled') {
+      const payload = event.payload
+
+      if (payload.runId === '') {
+        return state
+      }
+
+      const session = state.sessions[payload.runId]
+
+      if (!session) {
+        return state
+      }
+
+      const nextStatus = payload.status
+      const at = eventTime(event.ts)
+
+      const nextSession: WorkspaceSession = {
+        ...session,
+        status: nextStatus,
+        activity: nextStatus === 'failed' ? 'error' : 'idle',
+        updatedAt: at,
+      }
+
+      if (nextStatus === 'completed') {
+        nextSession.lastCompletedAt = at
+      }
+
+      return { ...state, sessions: { ...state.sessions, [payload.runId]: nextSession } }
+    }
+
+    if (!isNamespaceEvent(event, 'workspace')) {
+      return state
+    }
+
     switch (event.type) {
       case 'workspace.folder.created': {
         const payload = event.payload
@@ -244,8 +290,7 @@ export const workspaceTree = defineProjection<WorkspaceTree, WorkspaceEvent>({
           return state
         }
 
-        const now =
-          typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
+        const now = eventTime(event.ts)
 
         return {
           ...state,
@@ -293,7 +338,7 @@ export const workspaceTree = defineProjection<WorkspaceTree, WorkspaceEvent>({
           return state
         }
 
-        const at = typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
+        const at = eventTime(event.ts)
 
         return {
           ...state,
@@ -317,7 +362,7 @@ export const workspaceTree = defineProjection<WorkspaceTree, WorkspaceEvent>({
           return state
         }
 
-        const at = typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
+        const at = eventTime(event.ts)
 
         return {
           ...state,
@@ -340,7 +385,7 @@ export const workspaceTree = defineProjection<WorkspaceTree, WorkspaceEvent>({
           return state
         }
 
-        const at = typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
+        const at = eventTime(event.ts)
 
         return {
           ...state,
@@ -373,57 +418,33 @@ export const workspaceTree = defineProjection<WorkspaceTree, WorkspaceEvent>({
 
         const finishedWork = session.activity === 'working' && payload.activity === 'idle'
 
-        return {
-          ...state,
-          sessions: {
-            ...state.sessions,
-            [payload.runId]: {
-              ...session,
-              activity: payload.activity,
-              activityAt: Math.max(session.activityAt ?? 0, at),
-              ...(seq !== undefined
-                ? { activitySeq: Math.max(session.activitySeq ?? 0, seq) }
-                : {}),
-              updatedAt: Math.max(session.updatedAt, at),
-              ...(finishedWork ? { lastCompletedAt: at } : {}),
-            },
-          },
-        }
-      }
-
-      case 'runtime.child.settled': {
-        const payload = event.payload
-        const runId = typeof payload.runId === 'string' ? payload.runId : null
-
-        if (!runId) {
-          return state
+        const nextSession: WorkspaceSession = {
+          ...session,
+          activity: payload.activity,
+          activityAt: Math.max(session.activityAt ?? 0, at),
+          updatedAt: Math.max(session.updatedAt, at),
         }
 
-        const session = state.sessions[runId]
-
-        if (!session) {
-          return state
+        if (seq !== undefined) {
+          nextSession.activitySeq = Math.max(session.activitySeq ?? 0, seq)
         }
 
-        const nextStatus = payload.status ?? session.status
-        const at = typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
+        if (finishedWork) {
+          nextSession.lastCompletedAt = at
+        }
 
         return {
           ...state,
-          sessions: {
-            ...state.sessions,
-            [runId]: {
-              ...session,
-              status: nextStatus,
-              activity: nextStatus === 'failed' ? 'error' : 'idle',
-              updatedAt: at,
-              ...(nextStatus === 'completed' ? { lastCompletedAt: at } : {}),
-            },
-          },
+          sessions: { ...state.sessions, [payload.runId]: nextSession },
         }
       }
 
-      default:
+      case 'workspace.session.listed':
+      case 'workspace.session.unlisted':
+      case 'workspace.tab.opened':
+      case 'workspace.tab.closed':
+      case 'workspace.tab.reordered':
+      case 'workspace.tab.retargeted':
         return state
     }
   },
@@ -433,6 +454,10 @@ export const sessionTabs = defineProjection<SessionTabsState, WorkspaceEvent>({
   name: 'sessionTabs',
   initialState: emptySessionTabs,
   reduce(state, event) {
+    if (!isNamespaceEvent(event, 'workspace')) {
+      return state
+    }
+
     switch (event.type) {
       case 'workspace.tab.opened': {
         const { runId, tabId, kind, title, target, at } = event.payload
@@ -463,7 +488,23 @@ export const sessionTabs = defineProjection<SessionTabsState, WorkspaceEvent>({
         return mutateSessionTabs(state, runId, { type: 'retarget', tabId, title, target })
       }
 
-      default:
+      case 'workspace.folder.created':
+      case 'workspace.folder.renamed':
+      case 'workspace.folder.auto_review.set':
+      case 'workspace.folder.archived':
+      case 'workspace.folder.reordered':
+      case 'workspace.github.connected':
+      case 'workspace.github.disconnected':
+      case 'workspace.repo.linked':
+      case 'workspace.repo.unlinked':
+      case 'workspace.session.requested':
+      case 'workspace.session.shared':
+      case 'workspace.session.launched':
+      case 'workspace.session.renamed':
+      case 'workspace.session.archived':
+      case 'workspace.session.activity':
+      case 'workspace.session.listed':
+      case 'workspace.session.unlisted':
         return state
     }
   },
@@ -500,7 +541,7 @@ export async function startWorkspaceSession(
 
   return host.client.workspace.createSession({
     ...fields,
-    ...(files.length > 0 ? { files: [...files] } : {}),
+    files: files.length > 0 ? [...files] : undefined,
     ...(await startsOnThisMachine(host)),
   })
 }
@@ -595,7 +636,8 @@ export function sessionsForFolder(
 ): WorkspaceSession[] {
   return Object.values(tree.sessions)
     .filter(
-      (session) => session.folderId === folderId && (options?.includeArchived || !session.archived),
+      (session) =>
+        session.folderId === folderId && (options?.includeArchived === true || !session.archived),
     )
     .toSorted((left, right) => right.updatedAt - left.updatedAt)
 }
@@ -607,19 +649,19 @@ export function orderedFolders(
   return tree.folderOrder
     .map((id) => tree.folders[id])
     .filter((folder): folder is WorkspaceFolder => Boolean(folder))
-    .filter((folder) => options?.includeArchived || !folder.archived)
+    .filter((folder) => options?.includeArchived === true || !folder.archived)
 }
 
-const SESSION_STATUS_LABELS: Record<string, string> = {
-  requested: 'Starting',
-  running: 'Running',
-  completed: 'Completed',
-  failed: 'Failed',
-  cancelled: 'Cancelled',
-}
+const SESSION_STATUS_LABELS = new Map([
+  ['requested', 'Starting'],
+  ['running', 'Running'],
+  ['completed', 'Completed'],
+  ['failed', 'Failed'],
+  ['cancelled', 'Cancelled'],
+])
 
 export function sessionStatusLabel(status: string): string {
-  return SESSION_STATUS_LABELS[status] ?? status
+  return SESSION_STATUS_LABELS.get(status) ?? status
 }
 
 export function repoCountLabel(count: number): string {
@@ -640,7 +682,9 @@ export function lastFolderId(): string | null {
 export function preferredFolderId(tree: WorkspaceTree): string | null {
   const remembered = lastFolderId()
 
-  if (remembered && tree.folders[remembered] && !tree.folders[remembered]?.archived) {
+  const folder = remembered === null ? undefined : tree.folders[remembered]
+
+  if (remembered !== null && folder !== undefined && !folder.archived) {
     return remembered
   }
 

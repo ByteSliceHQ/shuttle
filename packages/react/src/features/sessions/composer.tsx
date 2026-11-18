@@ -13,6 +13,7 @@ import {
 } from 'react'
 
 import type { HarnessId, Team, VendorHarnessId, VendorModelChoice } from '@shuttle/api'
+import { cleanUndefined } from '@swirls/looms/core'
 import { useRunStore } from '@swirls/looms/react'
 
 import { Button } from '../../components/ui/button'
@@ -187,7 +188,8 @@ export function Composer({
   const activeTeam = connections ? effectiveTeam(team, connections, runsAt.place) : team
   const mentions = harness === 'shuttle' ? teamMentions(activeTeam) : []
   const hybrid = mentions.some((member) => member !== 'worker')
-  const activeMention = mention && hybrid && mentions.includes(mention) ? mention : null
+
+  const activeMention = mention !== null && hybrid && mentions.includes(mention) ? mention : null
 
   const targets = [...identities.values()].filter((identity) =>
     STEERABLE.has(identity.definitionName),
@@ -212,7 +214,7 @@ export function Composer({
     const typed = text.trim()
 
     // A message may be files alone.
-    if (!typed && files.attachments.length === 0) {
+    if (typed === '' && files.attachments.length === 0) {
       inputRef.current?.focus()
       return
     }
@@ -223,7 +225,7 @@ export function Composer({
     }
 
     const sending = files.take()
-    const message = activeMention && typed ? `@${activeMention} ${typed}` : typed
+    const message = activeMention !== null && typed !== '' ? `@${activeMention} ${typed}` : typed
     // A message addressed to an agent is work for it, so it must not be answered as a question.
     const addressed = activeMention !== null || (hybrid && ADDRESSED.test(typed))
     const forceKind = addressed ? 'task' : kind === AUTO ? undefined : kind
@@ -247,16 +249,16 @@ export function Composer({
           .commit(
             {
               type: 'shuttle.user.said',
-              payload: {
+              // Fields that are not set are left out of the event.
+              payload: cleanUndefined({
                 messageId,
                 text: message,
-                ...(forceKind ? { forceKind } : {}),
-                ...(targetThread ? { targetThreadId: targetThread } : {}),
-                author: { id: me.id, name: me.name || me.email },
-                ...(uploaded.length > 0
-                  ? { attachments: uploaded.map((asset) => ({ ...asset })) }
-                  : {}),
-              },
+                forceKind,
+                targetThreadId: targetThread,
+                author: { id: me.id, name: me.name === '' ? me.email : me.name },
+                attachments:
+                  uploaded.length > 0 ? uploaded.map((asset) => ({ ...asset })) : undefined,
+              }),
             },
             {
               optimistic: true,
@@ -268,8 +270,8 @@ export function Composer({
                     id: runId,
                     messageId,
                     text: message,
-                    ...(forceKind ? { forceKind } : {}),
-                    ...(targetThread ? { targetThreadId: targetThread } : {}),
+                    forceKind,
+                    targetThreadId: targetThread,
                     attachments: uploaded.map((asset) => asset.id),
                   })
                   .then(
@@ -290,7 +292,7 @@ export function Composer({
       })
       .catch((cause: unknown) => {
         // Hand the message back unless something new has been written since.
-        setText((current) => (current.trim() ? current : typed))
+        setText((current) => (current.trim() === '' ? typed : current))
         files.restore(sending)
         setError(errorMessage(cause))
       })
@@ -431,7 +433,7 @@ export function Composer({
               inputRef.current?.focus()
             }}
           />
-          {gate.blocked && gate.connection && runsAt.place ? (
+          {gate.blocked && gate.connection && runsAt.place !== null ? (
             <SignInGate
               connection={gate.connection}
               place={runsAt.place}
@@ -486,7 +488,7 @@ export function Composer({
                 onMentionChange={setMention}
                 disabled={disabled}
               />
-              {activeMention ? (
+              {activeMention !== null ? (
                 <OverridePill
                   label={`@${activeMention}`}
                   icon={<Target className="size-3 shrink-0 opacity-75" />}
@@ -537,7 +539,7 @@ export function Composer({
             </div>
           </div>
         </form>
-        {error || files.rejection ? (
+        {error !== null || files.rejection !== null ? (
           <p role="alert" className="text-status-failed mt-2 text-xs">
             {error ?? files.rejection}
           </p>
@@ -629,7 +631,7 @@ function StarterSuggestions({
         <div
           ref={scrollerRef}
           onScroll={syncEdges}
-          style={maskImage ? { maskImage } : undefined}
+          style={maskImage === undefined ? undefined : { maskImage }}
           className="flex [scrollbar-width:none] items-center gap-1.5 overflow-x-auto pb-0.5 [&::-webkit-scrollbar]:hidden"
         >
           {STARTER_KINDS.map((example) => {

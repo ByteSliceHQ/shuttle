@@ -19,7 +19,7 @@ export function resolveColor(value: string, fallback: string): string {
 
     const context = document.createElement('canvas').getContext('2d', { willReadFrequently: true })
 
-    if (!context || !computed) {
+    if (context === null || computed === '') {
       return fallback
     }
 
@@ -38,7 +38,7 @@ export function resolveColor(value: string, fallback: string): string {
 export function terminalFontFamily(): string {
   const declared = getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim()
 
-  return declared || 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+  return declared !== '' ? declared : 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
 }
 
 /** The terminal's colours: the app's surface and text, and sixteen ANSI colours tuned to sit on it. */

@@ -1,6 +1,10 @@
+import { z } from 'zod'
+
 import { localRunName } from '../tenancy/run-id'
 
 export const RUN_KINDS = ['session', 'workspace', 'playbook', 'pulls'] as const
+
+export const RunKindSchema = z.enum(RUN_KINDS)
 
 export type RunKind = (typeof RUN_KINDS)[number]
 

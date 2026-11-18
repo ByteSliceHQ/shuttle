@@ -53,7 +53,7 @@ function lineage(threadId: string, parents: ReadonlyMap<string, string | null>):
   const chain: string[] = []
   let current: string | null | undefined = threadId
 
-  while (current && !chain.includes(current)) {
+  while (current !== null && current !== undefined && !chain.includes(current)) {
     chain.push(current)
     current = parents.get(current)
   }
@@ -149,7 +149,7 @@ export function projectTimeline(
 
     const delegate = speaker > 0 ? chain[speaker - 1] : undefined
 
-    if (!delegate) {
+    if (delegate === undefined) {
       continue
     }
 
@@ -179,18 +179,22 @@ export function projectTimeline(
       continue
     }
 
-    rows[fold.index] = {
-      ...row,
-      agents: fold.threads.size,
-      ...(item.kind === 'tools'
-        ? {
-            toolCalls: row.toolCalls + item.calls.length,
-            failed: row.failed + item.calls.filter((call) => call.status === 'error').length,
-            changedFiles: row.changedFiles + changedPaths(item.calls).length,
-          }
-        : {}),
-      ...(item.kind === 'agent' && threadId === delegate ? { lastText: item.text } : {}),
+    let next: DelegationRow = { ...row, agents: fold.threads.size }
+
+    if (item.kind === 'tools') {
+      next = {
+        ...next,
+        toolCalls: row.toolCalls + item.calls.length,
+        failed: row.failed + item.calls.filter((call) => call.status === 'error').length,
+        changedFiles: row.changedFiles + changedPaths(item.calls).length,
+      }
     }
+
+    if (item.kind === 'agent' && threadId === delegate) {
+      next = { ...next, lastText: item.text }
+    }
+
+    rows[fold.index] = next
   }
 
   return rows

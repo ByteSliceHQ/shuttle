@@ -1,5 +1,7 @@
 import { useMutation, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query'
 
+import type { VendorModelChoice } from '@shuttle/api'
+
 import { type ShuttleHost, useApi, useShuttleHost } from '../../shuttle'
 
 /**
@@ -108,6 +110,18 @@ export function useSetSessionTeam(runId: string, onRefused?: (cause: Error) => v
   )
 }
 
+/** A vendor agent's choice, naming only what was set. */
+function vendorChoice(model: string | undefined, effort: string | undefined): VendorModelChoice {
+  const named = model !== undefined && model !== ''
+  const reasoned = effort !== undefined && effort !== ''
+
+  if (named) {
+    return reasoned ? { model, effort } : { model }
+  }
+
+  return reasoned ? { effort } : {}
+}
+
 /** Changes the model or effort one vendor agent runs on. Applies from that agent's next turn. */
 export function useSetSessionVendorModel(runId: string, onRefused?: (cause: Error) => void) {
   const api = useApi()
@@ -123,7 +137,7 @@ export function useSetSessionVendorModel(runId: string, onRefused?: (cause: Erro
         ({ harness, model, effort }, current) => ({
           choices: {
             ...current?.choices,
-            [harness]: { ...(model ? { model } : {}), ...(effort ? { effort } : {}) },
+            [harness]: vendorChoice(model, effort),
           },
         }),
         onRefused,

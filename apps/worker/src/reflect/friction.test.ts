@@ -17,7 +17,7 @@ describe('friction projection', () => {
       },
       origin: { type: 'external' },
       threadId: 'worker_1',
-    } as any)
+    })
 
     expect(next.entries).toHaveLength(1)
     expect(next.entries[0]?.kind).toBe('correction')

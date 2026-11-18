@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
+import type { JsonObject } from '@swirls/looms/core'
+
 import type { SessionEvent } from '../events/event-catalog'
 import {
   deriveRouteWaitFallback,
@@ -12,7 +14,7 @@ let seq = 0
 
 function event(
   type: string,
-  payload: Record<string, unknown>,
+  payload: JsonObject,
   threadId: string | null = 'thr_worker',
 ): SessionEvent {
   seq += 1
@@ -42,7 +44,7 @@ describe('route wait fallback', () => {
         turn: 1,
         toolCall: { id: 'c1', name: 'bash', arguments: { command: 'sleep 9' } },
       }),
-    ].reduce(sessionFeed.reduce, sessionFeed.initialState)
+    ].reduce((state, next) => sessionFeed.reduce(state, next), sessionFeed.initialState)
 
     const fallback = deriveRouteWaitFallback({
       messageTs: 10_001,

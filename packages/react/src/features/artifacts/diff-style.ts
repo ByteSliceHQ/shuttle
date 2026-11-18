@@ -1,5 +1,14 @@
 import type { CSSProperties } from 'react'
 
+declare module 'react' {
+  interface CSSProperties {
+    '--diffs-font-family'?: string
+    '--diffs-font-size'?: string
+    '--diffs-line-height'?: string
+    '--diffs-tab-size'?: string
+  }
+}
+
 /** How Pierre's Diffs is drawn wherever the app shows code: the file pane and the review tab. */
 
 const THEME = 'github-dark-default'
@@ -19,9 +28,9 @@ export const FILE_OPTIONS = {
 } as const
 
 /** Diffs draws inside a shadow root, so it is styled through its own variables, not classes. */
-export const SURFACE_STYLE = {
+export const SURFACE_STYLE: CSSProperties = {
   '--diffs-font-family': 'var(--font-mono)',
   '--diffs-font-size': '12px',
   '--diffs-line-height': '19px',
   '--diffs-tab-size': '2',
-} as CSSProperties
+}

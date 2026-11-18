@@ -23,7 +23,7 @@ export function isLocalSandbox(sandboxName: string): boolean {
 export function deviceOfSandbox(sandboxName: string): string | null {
   const [kind, , , deviceId] = sandboxName.split(':')
 
-  return kind === 'local' && deviceId ? deviceId : null
+  return kind === 'local' && deviceId !== undefined && deviceId !== '' ? deviceId : null
 }
 
 /**
@@ -44,6 +44,7 @@ export function providerIdForSandbox(
       return 'cloudflare'
     case 'daytona':
       return 'daytona'
+    case undefined:
     default:
       return 'memory'
   }
@@ -77,14 +78,26 @@ export function userSandboxName(orgId: string, userId: string): string {
 export function orgOfSandbox(sandboxName: string): string | null {
   const [kind, orgId, userId] = sandboxName.split(':')
 
-  return (kind === 'user' || kind === 'local') && orgId && userId ? orgId : null
+  return (kind === 'user' || kind === 'local') &&
+    orgId !== undefined &&
+    orgId !== '' &&
+    userId !== undefined &&
+    userId !== ''
+    ? orgId
+    : null
 }
 
 /** The person a sandbox belongs to. Null for a sandbox that is not a person's. */
 export function userOfSandbox(sandboxName: string): string | null {
   const [kind, orgId, userId] = sandboxName.split(':')
 
-  return (kind === 'user' || kind === 'local') && orgId && userId ? userId : null
+  return (kind === 'user' || kind === 'local') &&
+    orgId !== undefined &&
+    orgId !== '' &&
+    userId !== undefined &&
+    userId !== ''
+    ? userId
+    : null
 }
 
 /** Whether the deployment's own sandboxes are per person, which they are on Daytona. */

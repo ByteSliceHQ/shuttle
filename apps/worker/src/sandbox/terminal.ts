@@ -1,4 +1,18 @@
 import { ensureContainerRunning, type DurableContainer } from './container-runtime'
+import { terminalInput } from './terminal-input'
+import { nonEmpty } from './text'
+
+/** Sends everything the stream produces to the browser until the stream or the socket ends. */
+function forward(stream: ReadableStream, server: WebSocket): Promise<void> {
+  const sink = new WritableStream<Uint8Array>({
+    write(chunk) {
+      server.send(chunk)
+    },
+  })
+
+  // Socket or stream closed: nothing more to send.
+  return stream.pipeTo(sink, { preventCancel: true }).catch(() => {})
+}
 
 /** Upgrade an HTTP request into a container PTY WebSocket. */
 export async function openContainerTerminal(
@@ -13,7 +27,7 @@ export async function openContainerTerminal(
 
   const running = await ensureContainerRunning(container)
   const url = new URL(request.url)
-  const cwd = url.searchParams.get('cwd') || '/workspace'
+  const cwd = nonEmpty(url.searchParams.get('cwd')) ?? '/workspace'
   const cols = Number(url.searchParams.get('cols') ?? 80)
   const rows = Number(url.searchParams.get('rows') ?? 24)
 
@@ -32,56 +46,21 @@ export async function openContainerTerminal(
   })
 
   const stdout = process.stdout
+  const stderr = process.stderr
   const stdin = process.stdin
 
   if (stdout) {
-    void (async () => {
-      const reader = stdout.getReader()
-
+    void forward(stdout, server).finally(() => {
       try {
-        for (;;) {
-          const { done, value } = await reader.read()
-
-          if (done) {
-            break
-          }
-
-          if (value) {
-            server.send(value)
-          }
-        }
+        server.close(1000, 'process exited')
       } catch {
-        // Socket or stream closed.
-      } finally {
-        try {
-          server.close(1000, 'process exited')
-        } catch {
-          // Already closed.
-        }
+        // Already closed.
       }
-    })()
+    })
   }
 
-  if (process.stderr) {
-    void (async () => {
-      const reader = process.stderr!.getReader()
-
-      try {
-        for (;;) {
-          const { done, value } = await reader.read()
-
-          if (done) {
-            break
-          }
-
-          if (value) {
-            server.send(value)
-          }
-        }
-      } catch {
-        // Closed.
-      }
-    })()
+  if (stderr) {
+    void forward(stderr, server)
   }
 
   const writer = stdin?.getWriter()
@@ -89,30 +68,22 @@ export async function openContainerTerminal(
   server.addEventListener('message', (event: MessageEvent) => {
     void (async () => {
       try {
-        if (typeof event.data === 'string') {
-          if (event.data.startsWith('{')) {
-            const message = JSON.parse(event.data) as {
-              type?: string
-              cols?: number
-              rows?: number
-            }
+        const input = terminalInput(event)
 
-            if (
-              message.type === 'resize' &&
-              typeof message.cols === 'number' &&
-              typeof message.rows === 'number'
-            ) {
-              process.resize(message.cols, message.rows)
-              return
-            }
-          }
-
-          await writer?.write(new TextEncoder().encode(event.data))
+        if (input === null) {
           return
         }
 
-        if (event.data instanceof ArrayBuffer) {
-          await writer?.write(new Uint8Array(event.data))
+        switch (input.kind) {
+          case 'resize':
+            process.resize(input.cols, input.rows)
+            return
+          case 'text':
+            await writer?.write(new TextEncoder().encode(input.text))
+            return
+          case 'bytes':
+            await writer?.write(input.bytes)
+            return
         }
       } catch {
         // Ignore write failures after close.

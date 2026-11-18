@@ -36,8 +36,11 @@ function setup(packaged = true, automatic = true) {
   })
 
   const service = startUpdates(
-    app as unknown as Parameters<typeof startUpdates>[0],
-    updater as unknown as Parameters<typeof startUpdates>[1],
+    // SAFETY: `startUpdates` uses only `isPackaged`, `getVersion` and `on` of the app, which the
+    // fake has.
+    app as never,
+    // SAFETY: `startUpdates` uses only the methods and properties of the updater that the fake has.
+    updater as never,
     () => {},
     automatic,
   )

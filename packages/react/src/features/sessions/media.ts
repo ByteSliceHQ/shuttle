@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import type { JsonValue } from '@swirls/looms/core'
+import { isJsonString, type JsonValue } from '@swirls/looms/core'
 
 import { jsonFields, jsonNumber, jsonText } from '../../lib/json'
 import { type ShuttleHost } from '../../shuttle'
@@ -72,7 +72,7 @@ export function mediaAssetOf(value: JsonValue | undefined): MediaAsset | undefin
   const id = jsonText(fields.id)
   const mediaType = jsonText(fields.mediaType)
 
-  if (!id || !mediaType) {
+  if (id === undefined || id === '' || mediaType === undefined || mediaType === '') {
     return undefined
   }
 
@@ -101,9 +101,9 @@ export function mediaAssetsOf(value: JsonValue | undefined): MediaAsset[] {
 export function sharedAssetOf(result: JsonValue | undefined): MediaAsset | undefined {
   let parsed = result
 
-  if (typeof result === 'string') {
+  if (isJsonString(result)) {
     try {
-      parsed = JSON.parse(result) as JsonValue
+      parsed = z.json().parse(JSON.parse(result))
     } catch {
       return undefined
     }
@@ -147,7 +147,8 @@ export function uploadAsset(
       ),
     )
 
-    request.setRequestHeader('content-type', file.type || 'application/octet-stream')
+    const contentType = file.type === '' ? 'application/octet-stream' : file.type
+    request.setRequestHeader('content-type', contentType)
     request.responseType = 'json'
 
     request.upload.addEventListener('progress', (event) => {
@@ -161,7 +162,7 @@ export function uploadAsset(
       const answer = UploadAnswer.safeParse(request.response).data ?? {}
       const stored = request.status === 201 ? answer.asset : undefined
 
-      if (stored) {
+      if (stored !== undefined) {
         resolve({
           id: stored.id,
           name: stored.name ?? stored.id,

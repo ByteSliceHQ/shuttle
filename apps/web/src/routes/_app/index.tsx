@@ -60,10 +60,10 @@ function HomePage() {
   const agent = useDefaultHarness()
   const startPlace = useStartPlace()
   const gate = useAgentGate(agent.harness, startPlace)
-  const selectedFolderId = folderId || preferredFolderId(tree) || ''
+  const selectedFolderId = folderId !== '' ? folderId : (preferredFolderId(tree) ?? '')
 
   async function ensureFolder(): Promise<string> {
-    if (selectedFolderId) {
+    if (selectedFolderId !== '') {
       return selectedFolderId
     }
 
@@ -97,7 +97,7 @@ function HomePage() {
   function start() {
     const trimmed = goal.trim()
 
-    if (!trimmed || busy || gate.blocked) {
+    if (trimmed === '' || busy || gate.blocked) {
       return
     }
 
@@ -146,7 +146,7 @@ function HomePage() {
             <div className="flex flex-wrap items-center gap-2 px-1.5 pb-0.5">
               {folders.length > 0 ? (
                 <Select
-                  value={selectedFolderId || undefined}
+                  value={selectedFolderId !== '' ? selectedFolderId : undefined}
                   onValueChange={(value) => setFolderId(value)}
                 >
                   <SelectTrigger
@@ -188,14 +188,14 @@ function HomePage() {
               <Button
                 variant="brand"
                 onClick={start}
-                disabled={busy || !goal.trim() || gate.blocked}
+                disabled={busy || goal.trim() === '' || gate.blocked}
               >
                 {busy ? <LoaderCircle className="animate-spin" /> : <ArrowRight />}
                 {busy ? 'Starting' : 'Start session'}
               </Button>
             </div>
           </div>
-          {attachments.error ? (
+          {attachments.error !== null ? (
             <p role="alert" className="text-status-failed mt-3 text-xs">
               {attachments.error}
             </p>

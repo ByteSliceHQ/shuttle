@@ -210,7 +210,8 @@ describe('stacksOf', () => {
 
 describe('reviewedPullForSession', () => {
   test('finds the pull request a session is linked to as reviewer, and no other', () => {
-    const inbox = {
+    const inbox: PullInboxState = {
+      policies: {},
       pulls: {
         'acme/glue#7': pull('acme/glue', 7, {
           linkedSessions: [{ runId: 'run_a', role: 'author' }],
@@ -219,7 +220,7 @@ describe('reviewedPullForSession', () => {
           linkedSessions: [{ runId: 'run_a', role: 'reviewer' }],
         }),
       },
-    } as unknown as PullInboxState
+    }
 
     expect(reviewedPullForSession(inbox, 'run_a')?.number).toBe(8)
     expect(reviewedPullForSession(inbox, 'run_b')).toBeUndefined()

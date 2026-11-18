@@ -8,6 +8,7 @@ import {
   sandboxNotRunning,
   type StartableSandbox,
 } from './daytona'
+import { failureOf } from './test-failure'
 
 /** A sandbox that moves through `states` each time it is looked at, and records what is asked. */
 function sandboxIn(states: readonly string[], startFailures = 0) {
@@ -97,13 +98,13 @@ describe('ensureStarted', () => {
       throw new Error('no capacity')
     }
 
-    await expect(ensureStarted(broken.sandbox, quick)).rejects.toThrow('no capacity')
+    expect(await failureOf(ensureStarted(broken.sandbox, quick))).toContain('no capacity')
 
     const stuck = sandboxIn(['stopped'], 99)
 
-    await expect(ensureStarted(stuck.sandbox, { pauseMs: 0, timeoutSeconds: 0 })).rejects.toThrow(
-      'state change in progress',
-    )
+    expect(
+      await failureOf(ensureStarted(stuck.sandbox, { pauseMs: 0, timeoutSeconds: 0 })),
+    ).toContain('state change in progress')
   })
 })
 

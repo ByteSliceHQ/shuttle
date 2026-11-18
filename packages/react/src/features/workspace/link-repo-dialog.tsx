@@ -147,7 +147,7 @@ export function LinkRepoDialog({
                 <li className="text-muted-foreground flex h-full items-center justify-center px-3 text-center text-xs">
                   {loading
                     ? 'Searching…'
-                    : query
+                    : query !== ''
                       ? `No repositories match “${query}”.`
                       : 'No repositories found.'}
                 </li>

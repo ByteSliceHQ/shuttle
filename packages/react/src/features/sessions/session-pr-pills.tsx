@@ -62,7 +62,10 @@ export function SessionPrPills({
   const allDraft = pulls.every((pull) => pull.draft)
   const repos = [...new Set(pulls.map((pull) => pull.fullName))]
   const multiRepo = repos.length > 1
-  const openers = [...new Set(pulls.flatMap((pull) => (pull.threadId ? [pull.threadId] : [])))]
+
+  const openers = [
+    ...new Set(pulls.flatMap((pull) => (pull.threadId !== undefined ? [pull.threadId] : []))),
+  ]
 
   return (
     <DropdownMenu>

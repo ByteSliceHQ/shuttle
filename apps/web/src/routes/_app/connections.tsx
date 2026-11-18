@@ -52,7 +52,7 @@ function ConnectionsPage() {
 
         const before = queryClient.getQueryData(listKey)
 
-        if (before && harness) {
+        if (before !== undefined && harness !== undefined) {
           queryClient.setQueryData(listKey, { ...before, defaultHarness: harness })
         }
 

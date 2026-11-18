@@ -166,7 +166,7 @@ export function insideSessionWorktree(runId: string, path: string, cwd?: string)
   for (const part of resolvePath(path, cwd).split('/')) {
     if (part === '..') {
       parts.pop()
-    } else if (part && part !== '.') {
+    } else if (part !== '' && part !== '.') {
       parts.push(part)
     }
   }

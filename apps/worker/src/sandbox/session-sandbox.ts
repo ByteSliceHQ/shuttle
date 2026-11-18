@@ -163,7 +163,7 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
 
   /** @deprecated Prefer ensureRepos. */
   async ensureRepo(repoUrl: string | null): Promise<{ root: string }> {
-    if (!repoUrl) {
+    if (repoUrl === null || repoUrl === '') {
       return this.ensureRepos([])
     }
 
@@ -366,9 +366,11 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
       await this.workspace()
     ).exec(adoptStrayScript(stray, worktreeRepoPath(runId, repoName)))
 
+    const reason = result.stderr.trim()
+
     return result.exitCode === 0
       ? { ok: true }
-      : { ok: false, error: result.stderr.trim() || 'Could not move it' }
+      : { ok: false, error: reason === '' ? 'Could not move it' : reason }
   }
 
   async gitDiff(cwd?: string): Promise<{ diff: string }> {

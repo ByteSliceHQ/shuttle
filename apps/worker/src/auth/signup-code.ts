@@ -40,7 +40,11 @@ export function refuseSignUp(
 ): Response | null {
   const code = env.SHUTTLE_SIGNUP_CODE?.trim()
 
-  if (!code || !new URL(request.url).pathname.startsWith(`${AUTH_BASE_PATH}/sign-up`)) {
+  if (
+    code === undefined ||
+    code === '' ||
+    !new URL(request.url).pathname.startsWith(`${AUTH_BASE_PATH}/sign-up`)
+  ) {
     return null
   }
 

@@ -17,7 +17,7 @@ function HostLink({ to, ...rest }: ShuttleLinkProps) {
           {...rest}
           to="/sessions/$sessionId"
           params={{ sessionId: to.sessionId }}
-          search={to.thread ? { thread: to.thread } : {}}
+          search={to.thread !== undefined && to.thread !== '' ? { thread: to.thread } : {}}
         />
       )
     case 'folder':
@@ -43,7 +43,7 @@ function useHostNavigate(): (to: ShuttleDestination) => void {
           return void navigate({
             to: '/sessions/$sessionId',
             params: { sessionId: to.sessionId },
-            search: to.thread ? { thread: to.thread } : {},
+            search: to.thread !== undefined && to.thread !== '' ? { thread: to.thread } : {},
           })
         case 'folder':
           return void navigate({ to: '/folders/$folderId', params: { folderId: to.folderId } })
@@ -59,23 +59,23 @@ function useHostNavigate(): (to: ShuttleDestination) => void {
   )
 }
 
-const PAGES: Record<string, ShuttleDestination> = {
-  '/': { page: 'home' },
-  '/playbook': { page: 'playbook' },
-  '/events': { page: 'events' },
-  '/connections': { page: 'connections' },
-}
+const PAGES = new Map<string, ShuttleDestination>([
+  ['/', { page: 'home' }],
+  ['/playbook', { page: 'playbook' }],
+  ['/events', { page: 'events' }],
+  ['/connections', { page: 'connections' }],
+])
 
 function destinationAt(pathname: string): ShuttleDestination | null {
-  const page = PAGES[pathname]
+  const page = PAGES.get(pathname)
 
-  if (page) {
+  if (page !== undefined) {
     return page
   }
 
   const [, kind, id, more] = pathname.split('/')
 
-  if (!id || more !== undefined) {
+  if (id === undefined || id === '' || more !== undefined) {
     return null
   }
 

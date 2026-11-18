@@ -154,7 +154,9 @@ function PaletteBody({
                   {command.icon}
                 </span>
                 <span className="min-w-0 flex-1 truncate">{command.label}</span>
-                {command.shortcut ? <Kbd>{command.shortcut}</Kbd> : null}
+                {command.shortcut !== undefined && command.shortcut !== '' ? (
+                  <Kbd>{command.shortcut}</Kbd>
+                ) : null}
               </li>
             ))}
           </ul>

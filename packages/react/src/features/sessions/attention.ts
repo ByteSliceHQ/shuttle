@@ -56,10 +56,14 @@ export function activitySnapshot(
   )
 }
 
-const ARRIVED: Record<string, AttentionKind> = {
+const ARRIVED = {
   needs_input: 'needs_input',
   idle: 'finished',
   error: 'failed',
+} satisfies Record<string, AttentionKind>
+
+function isArrivedActivity(activity: string): activity is keyof typeof ARRIVED {
+  return Object.hasOwn(ARRIVED, activity)
 }
 
 /**
@@ -72,11 +76,11 @@ export function attentionChanges(
   userId: string,
 ): AttentionChange[] {
   return watched(sessions, userId).flatMap((session) => {
-    const kind = ARRIVED[session.activity]
+    if (previous[session.runId] !== 'working' || !isArrivedActivity(session.activity)) {
+      return []
+    }
 
-    return previous[session.runId] === 'working' && kind
-      ? [{ runId: session.runId, title: session.title, kind }]
-      : []
+    return [{ runId: session.runId, title: session.title, kind: ARRIVED[session.activity] }]
   })
 }
 

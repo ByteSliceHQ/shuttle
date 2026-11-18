@@ -151,7 +151,7 @@ function latestThoughtLine(text: string): string {
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const cleaned = cleanSnippet(lines[index] ?? '')
 
-    if (cleaned) {
+    if (cleaned !== '') {
       return cleaned
     }
   }
@@ -256,7 +256,10 @@ export function Conversation({
 
     for (const [threadId, turn] of Object.entries(streaming)) {
       // A thread that is folded away or outside this view has no bubble of its own.
-      if (feed.narrators[threadId] || !threadSpeaks(threadId, parents, openThreadId)) {
+      if (
+        feed.narrators[threadId] !== undefined ||
+        !threadSpeaks(threadId, parents, openThreadId)
+      ) {
         continue
       }
 
@@ -290,7 +293,7 @@ export function Conversation({
     const narratorRepliesByMessageId = new Map<string, Extract<FeedItem, { kind: 'agent' }>[]>()
 
     for (const item of feed.items) {
-      if (item.kind === 'agent' && item.replyTo) {
+      if (item.kind === 'agent' && item.replyTo !== undefined) {
         const list = narratorRepliesByMessageId.get(item.replyTo) ?? []
         list.push(item)
         narratorRepliesByMessageId.set(item.replyTo, list)
@@ -551,7 +554,7 @@ function UserMessage({
           </span>
           <span className="message-time tabular-nums">{clockTime(item.ts)}</span>
         </div>
-        {item.text ? (
+        {item.text !== '' ? (
           <div
             className={cn(
               'max-w-[85%] rounded-2xl rounded-tr-md px-3.5 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap',
@@ -601,7 +604,9 @@ function InlineNarratorReplies({
 }) {
   const narratorThreadId = context.feed.narratorFor[messageId]
   const settled = context.inlineNarratorByMessageId.get(messageId) ?? []
-  const streamTurn = narratorThreadId ? context.streaming[narratorThreadId] : undefined
+
+  const streamTurn =
+    narratorThreadId === undefined ? undefined : context.streaming[narratorThreadId]
 
   const hasStream =
     streamTurn !== undefined &&
@@ -629,7 +634,7 @@ function InlineNarratorReplies({
           onInspect={context.onInspect}
         />
       ))}
-      {hasStream && narratorThreadId && streamTurn ? (
+      {hasStream && narratorThreadId !== undefined ? (
         <AgentBubble
           identity={context.identities.get(narratorThreadId)}
           threadId={narratorThreadId}
@@ -950,7 +955,7 @@ function ThinkingTrace({
         >
           {label}
         </span>
-        {liveSnippet ? (
+        {liveSnippet !== '' ? (
           <span className="text-muted-foreground/65 min-w-0 truncate pl-1">{liveSnippet}</span>
         ) : null}
       </button>
@@ -1017,7 +1022,7 @@ function AgentBubble({
         ? thoughtKey(threadId, thought.turn)
         : null
 
-  const open = key && context ? Boolean(context.thoughtOpen.get(key)) : false
+  const open = key !== null && context ? Boolean(context.thoughtOpen.get(key)) : false
   // A finished thought of a second or so is routine, and is left out.
   const [repeatShown, setRepeatShown] = useState(false)
   const folded = repeat && !repeatShown
@@ -1040,7 +1045,7 @@ function AgentBubble({
               {clockTime(ts)}
             </span>
           ) : null}
-          {status ? (
+          {status !== null ? (
             <span className="text-status-running shrink-0 whitespace-nowrap">{status}</span>
           ) : null}
         </div>
@@ -1055,13 +1060,13 @@ function AgentBubble({
             <span className="truncate">Same reply as before</span>
           </button>
         ) : null}
-        {replyTo && !folded ? (
+        {replyTo !== undefined && replyTo !== '' && !folded ? (
           <p className="text-muted-foreground mt-1 flex items-center gap-1 truncate text-[11px]">
             <CornerDownRight className="size-3 shrink-0" />
             <span className="truncate italic">{replyTo}</span>
           </p>
         ) : null}
-        {thinkingText && key && context && !folded && !briefThought ? (
+        {thinkingText !== '' && key !== null && context && !folded && !briefThought ? (
           <ThinkingTrace
             text={thinkingText}
             durationMs={activelyThinking ? undefined : durationMs}
@@ -1070,7 +1075,7 @@ function AgentBubble({
             onToggle={() => context.setThoughtOpen(key, !open)}
           />
         ) : null}
-        {replyText && !folded ? (
+        {replyText !== '' && !folded ? (
           <Markdown
             text={text}
             className={cn(
@@ -1079,8 +1084,8 @@ function AgentBubble({
             )}
           />
         ) : null}
-        {replyText && !streaming && !folded && context?.onOpenArtifact ? (
-          <PreviewLinks text={text ?? ''} onOpen={context.onOpenArtifact} />
+        {replyText !== '' && !streaming && !folded && context?.onOpenArtifact ? (
+          <PreviewLinks text={text} onOpen={context.onOpenArtifact} />
         ) : null}
       </div>
     </div>
@@ -1138,7 +1143,7 @@ function AgentMessage({
   context: ConversationContext
   className?: string
 }) {
-  const replyTo = item.replyTo ? context.feed.messageText[item.replyTo] : undefined
+  const replyTo = item.replyTo === undefined ? undefined : context.feed.messageText[item.replyTo]
 
   return (
     <AgentBubble
@@ -1373,12 +1378,12 @@ function ToolActivity({
             <span
               className={cn(
                 'shrink-0 whitespace-nowrap tabular-nums',
-                liveThinking && 'text-status-running breathe',
+                liveThinking !== '' ? 'text-status-running breathe' : undefined,
               )}
             >
-              {liveThinking ? 'Thinking…' : formatThoughtLabel(totalThoughtDurationMs)}
+              {liveThinking !== '' ? 'Thinking…' : formatThoughtLabel(totalThoughtDurationMs)}
             </span>
-            {liveThinking && !thoughtExpanded ? (
+            {liveThinking !== '' && !thoughtExpanded ? (
               <span className="text-muted-foreground/60 min-w-0 truncate pl-1">
                 {latestThoughtLine(liveThinking)}
               </span>
@@ -1395,7 +1400,7 @@ function ToolActivity({
               className="text-muted-foreground text-[12.5px] leading-relaxed"
             />
           ))}
-          {liveThinking ? (
+          {liveThinking !== '' ? (
             <Markdown
               text={liveThinking}
               className="text-muted-foreground text-[12.5px] leading-relaxed"
@@ -1425,7 +1430,7 @@ function ToolActivity({
             </span>
           ) : null}
           <span className="text-muted-foreground min-w-0 truncate">{summary}</span>
-          {collapsedDetail ? (
+          {collapsedDetail !== '' ? (
             <span className="text-muted-foreground/60 min-w-0 truncate font-mono text-[11px]">
               {collapsedDetail}
             </span>
@@ -1532,9 +1537,9 @@ function DelegationCard({
               </span>
             ) : null}
           </span>
-          {row.lastText ? (
+          {row.lastText !== undefined && row.lastText !== '' ? (
             <span className="text-muted-foreground truncate text-[12px]" dir="auto">
-              {cleanSnippet(row.lastText.split('\n').find((line) => line.trim()) ?? '')}
+              {cleanSnippet(row.lastText.split('\n').find((line) => line.trim() !== '') ?? '')}
             </span>
           ) : null}
         </span>
@@ -1588,7 +1593,7 @@ function AskUserCard({
 
   const error = answer.error?.message
   const key = item.thought ? thoughtKey(item.threadId, item.thought.turn) : null
-  const thoughtExpanded = key ? Boolean(context.thoughtOpen.get(key)) : false
+  const thoughtExpanded = key !== null ? Boolean(context.thoughtOpen.get(key)) : false
 
   return (
     <div className={cn('flex gap-3', className)}>
@@ -1617,7 +1622,7 @@ function AskUserCard({
             <span className="text-brand ml-auto shrink-0 whitespace-nowrap">Waiting on you</span>
           )}
         </div>
-        {item.thought && key ? (
+        {item.thought && key !== null ? (
           <ThinkingTrace
             text={item.thought.text}
             durationMs={item.thought.durationMs}
@@ -1644,7 +1649,7 @@ function AskUserCard({
             onSubmit={(event) => {
               event.preventDefault()
 
-              if (draft.trim()) {
+              if (draft.trim() !== '') {
                 answer.mutate(draft.trim())
               }
             }}
@@ -1663,7 +1668,9 @@ function AskUserCard({
               className="max-h-40 min-h-10 resize-none"
             />
             <div className="flex items-center justify-end gap-2">
-              {error ? <span className="text-status-failed mr-auto text-xs">{error}</span> : null}
+              {error !== undefined && error !== '' ? (
+                <span className="text-status-failed mr-auto text-xs">{error}</span>
+              ) : null}
               <Button
                 type="button"
                 variant="ghost"
@@ -1678,7 +1685,7 @@ function AskUserCard({
                 type="submit"
                 variant="brand"
                 size="sm"
-                disabled={pending !== null || !draft.trim()}
+                disabled={pending !== null || draft.trim() === ''}
               >
                 {pending === 'answer' ? <LoaderCircle className="animate-spin" /> : null}
                 Answer
@@ -1704,9 +1711,11 @@ function PullReviewCard({
   const identity = context.identities.get(item.threadId)
   const drafts = context.feed.draftReviewComments
 
-  const [summary, setSummary] = useState(
-    item.title.replace(/^Submit pull request review\?\s*/i, '') || item.title,
-  )
+  const [summary, setSummary] = useState(() => {
+    const stripped = item.title.replace(/^Submit pull request review\?\s*/i, '')
+
+    return stripped === '' ? item.title : stripped
+  })
 
   const [verdict, setVerdict] = useState<'approve' | 'request_changes' | 'comment'>('comment')
 
@@ -1766,7 +1775,7 @@ function PullReviewCard({
         </div>
         {item.decision ? (
           <p className="text-muted-foreground mt-2 text-xs">
-            {item.decision.answer === null ? 'Discarded' : item.decision.answer}
+            {item.decision.answer ?? 'Discarded'}
           </p>
         ) : (
           <div className="mt-3 flex flex-col gap-2">
@@ -1826,7 +1835,9 @@ function PullReviewCard({
               ))}
             </div>
             <div className="flex items-center justify-end gap-2">
-              {error ? <span className="text-status-failed mr-auto text-xs">{error}</span> : null}
+              {error !== undefined && error !== '' ? (
+                <span className="text-status-failed mr-auto text-xs">{error}</span>
+              ) : null}
               <Button
                 type="button"
                 variant="ghost"
@@ -1862,7 +1873,7 @@ function Notice({
   context: ConversationContext
   className?: string
 }) {
-  const identity = item.threadId ? context.identities.get(item.threadId) : undefined
+  const identity = item.threadId === undefined ? undefined : context.identities.get(item.threadId)
 
   return (
     <div className={cn('flex items-center gap-3 py-1 text-[11px]', className)}>
@@ -1873,13 +1884,15 @@ function Notice({
           item.tone === 'error' ? 'text-status-failed' : 'text-muted-foreground',
         )}
       >
-        {item.runId ? <Sparkles className="text-route-constraint size-3 shrink-0" /> : null}
+        {item.runId !== undefined ? (
+          <Sparkles className="text-route-constraint size-3 shrink-0" />
+        ) : null}
         {item.tone === 'error' ? <TriangleAlert className="size-3 shrink-0" /> : null}
         <span className="truncate">
           {identity ? `${identity.label}: ` : ''}
           {humanize(item.text, context.identities)}
         </span>
-        {item.runId ? (
+        {item.runId !== undefined ? (
           <Link
             to={{ page: 'playbook' }}
             className="text-foreground shrink-0 font-medium hover:underline"

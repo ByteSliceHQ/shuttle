@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 import {
   isJsonNumber,
   isJsonObject,
@@ -51,6 +53,17 @@ export function jsonNumber(value: JsonValue | undefined): number | undefined {
   return isJsonNumber(value) ? value : undefined
 }
 
+const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(JsonValueSchema),
+    z.record(z.string(), JsonValueSchema),
+  ]),
+)
+
 /** Parses text that holds a JSON object or array; plain strings and scalars stay text. */
 export function parseStructuredJson(text: string): JsonObject | readonly JsonValue[] | undefined {
   const trimmed = text.trimStart()
@@ -59,13 +72,21 @@ export function parseStructuredJson(text: string): JsonObject | readonly JsonVal
     return undefined
   }
 
-  let value: JsonValue
+  let parsed: unknown
 
   try {
-    value = JSON.parse(text) as JsonValue
+    parsed = JSON.parse(text)
   } catch {
     return undefined
   }
+
+  const result = JsonValueSchema.safeParse(parsed)
+
+  if (!result.success) {
+    return undefined
+  }
+
+  const value = result.data
 
   return Array.isArray(value) || isJsonObject(value) ? value : undefined
 }
@@ -121,19 +142,14 @@ export function jsonPreview(node: JsonNode, budget = 72): string {
 
   for (const [key, value] of entries) {
     const part = node.kind === 'array' ? scalarPreview(value) : `${key}: ${scalarPreview(value)}`
-    const next = text ? `${text}, ${part}` : part
+    const next = text !== '' ? `${text}, ${part}` : part
 
     if (next.length > budget) {
-      return `${open} ${text ? `${text}, ` : ''}… ${close}`
+      return `${open} ${text !== '' ? `${text}, ` : ''}… ${close}`
     }
 
     text = next
   }
 
-  return text ? `${open} ${text} ${close}` : `${open}${close}`
-}
-
-/** True for a plain, non-array object. Its values stay `unknown` until each is checked. */
-export function isRecord(value: unknown): value is { readonly [key: string]: unknown } {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+  return text !== '' ? `${open} ${text} ${close}` : `${open}${close}`
 }

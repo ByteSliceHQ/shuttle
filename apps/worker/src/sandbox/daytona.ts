@@ -1,7 +1,10 @@
 import { Daytona, DaytonaConflictError, DaytonaNotFoundError, type Sandbox } from '@daytona/sdk'
+import { z } from 'zod'
 
 import type { ShuttleEnv } from '../env'
 import { shellQuote } from './exec-argv'
+import { terminalInput } from './terminal-input'
+import { nonEmpty } from './text'
 
 /**
  * Daytona sandboxes: where coding sessions run in the cloud. A sandbox keeps its disk when it
@@ -68,16 +71,17 @@ const STARTING_STATES = new Set(['creating', 'starting', 'restoring', 'pulling_s
 const NOT_RUNNING = 'Is the Sandbox started?'
 
 /** Whether `failure` (an error, or the text of a preview response) says the sandbox is not running. */
-export function sandboxNotRunning(failure: unknown): boolean {
-  if (failure instanceof DaytonaConflictError) {
+export function sandboxNotRunning(cause: unknown): boolean {
+  if (cause instanceof DaytonaConflictError) {
     return true
   }
 
-  const text =
-    failure instanceof Error ? failure.message : typeof failure === 'string' ? failure : ''
+  const text = cause instanceof Error ? cause.message : z.string().catch('').parse(cause)
 
   return text.includes(NOT_RUNNING)
 }
+
+const ownErrorBody = z.object({ source: z.string() })
 
 /** The largest body worth reading to see whether an error is Daytona's own. */
 const OWN_ERROR_MAX_BYTES = 4096
@@ -87,7 +91,9 @@ const OWN_ERROR_MAX_BYTES = 4096
  * when nothing listens on the port. Daytona signs these with a `source` naming itself.
  */
 export async function isDaytonaOwnError(response: Response): Promise<boolean> {
-  if (response.status < 400 || !response.headers.get('content-type')?.includes('json')) {
+  const contentType = response.headers.get('content-type')
+
+  if (response.status < 400 || contentType === null || !contentType.includes('json')) {
     return false
   }
 
@@ -96,9 +102,9 @@ export async function isDaytonaOwnError(response: Response): Promise<boolean> {
   }
 
   try {
-    const body = (await response.clone().json()) as { source?: unknown } | null
+    const body = ownErrorBody.safeParse(await response.clone().json())
 
-    return typeof body?.source === 'string' && body.source.startsWith('DAYTONA')
+    return body.success && body.data.source.startsWith('DAYTONA')
   } catch {
     return false
   }
@@ -154,14 +160,14 @@ export async function ensureStarted(
 function daytonaClient(env: DaytonaEnv): Daytona {
   const apiKey = env.DAYTONA_API_KEY?.trim()
 
-  if (!apiKey) {
+  if (apiKey === undefined || apiKey === '') {
     throw new Error('DAYTONA_API_KEY is not set; Daytona sandboxes are unavailable')
   }
 
   return new Daytona({
     apiKey,
-    ...(env.DAYTONA_API_URL?.trim() ? { apiUrl: env.DAYTONA_API_URL.trim() } : {}),
-    ...(env.DAYTONA_TARGET?.trim() ? { target: env.DAYTONA_TARGET.trim() } : {}),
+    apiUrl: nonEmpty(env.DAYTONA_API_URL?.trim()),
+    target: nonEmpty(env.DAYTONA_TARGET?.trim()),
   })
 }
 
@@ -191,7 +197,7 @@ export async function connectDaytonaSandbox(
       autoStopInterval: AUTO_STOP_MINUTES,
       // The image with the agent CLIs and the bridge. Without one, Daytona's default image is
       // used, which can run commands and edit files but not vendor agents.
-      ...(env.DAYTONA_SNAPSHOT?.trim() ? { snapshot: env.DAYTONA_SNAPSHOT.trim() } : {}),
+      snapshot: nonEmpty(env.DAYTONA_SNAPSHOT?.trim()),
     })
   }
 
@@ -256,7 +262,7 @@ export async function openDaytonaTerminal(request: Request, sandbox: Sandbox): P
     }
   }
 
-  const asked = url.searchParams.get('cwd') || TERMINAL_HOME
+  const asked = nonEmpty(url.searchParams.get('cwd')) ?? TERMINAL_HOME
 
   // A session's files are only in the sandbox it is working in, which may not be this one.
   const there = await sandbox.process.executeCommand(`test -d ${shellQuote(asked)}`)
@@ -290,29 +296,23 @@ export async function openDaytonaTerminal(request: Request, sandbox: Sandbox): P
   )
 
   server.addEventListener('message', (event) => {
-    const { data } = event
+    const input = terminalInput(event)
 
-    if (typeof data === 'string') {
-      try {
-        const message = JSON.parse(data) as { type?: unknown; cols?: unknown; rows?: unknown }
-
-        if (
-          message.type === 'resize' &&
-          typeof message.cols === 'number' &&
-          typeof message.rows === 'number'
-        ) {
-          void pty.resize(message.cols, message.rows).catch(() => {})
-          return
-        }
-      } catch {
-        // Not a control message: it is typed input.
-      }
-
-      void pty.sendInput(data).catch(() => {})
+    if (input === null) {
       return
     }
 
-    void pty.sendInput(new Uint8Array(data)).catch(() => {})
+    switch (input.kind) {
+      case 'resize':
+        void pty.resize(input.cols, input.rows).catch(() => {})
+        return
+      case 'text':
+        void pty.sendInput(input.text).catch(() => {})
+        return
+      case 'bytes':
+        void pty.sendInput(input.bytes).catch(() => {})
+        return
+    }
   })
 
   server.addEventListener('close', () => {

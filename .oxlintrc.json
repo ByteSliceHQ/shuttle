@@ -6,29 +6,119 @@
     "suspicious": "warn"
   },
   "ignorePatterns": [
-    "**/dist/**",
-    "**/node_modules/**",
     "**/.flox/**",
     "**/.turbo/**",
     "**/.wrangler/**",
+    "**/dist/**",
+    "**/node_modules/**",
     "**/routeTree.gen.ts",
     "**/worker-configuration.d.ts",
     ".claude/**",
-    ".cursor/**"
+    ".cursor/**",
+    "tools/oxlint/anti-slop/**"
   ],
   "jsPlugins": [
+    {
+      "name": "anti-slop",
+      "specifier": "./tools/oxlint/anti-slop/index.ts"
+    },
     {
       "name": "@stylistic",
       "specifier": "@stylistic/eslint-plugin"
     }
   ],
+  "overrides": [
+    {
+      "files": ["apps/*/public/**/*.js"],
+      "rules": {
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/no-unsafe-call": "off",
+        "typescript/no-unsafe-argument": "off",
+        "typescript/no-unsafe-return": "off",
+        "typescript/no-unsafe-assignment": "off"
+      }
+    },
+    {
+      "files": ["**/*.test.ts", "**/*.test.tsx"],
+      "rules": {
+        "anti-slop/no-module-mocking": "off"
+      }
+    },
+    {
+      "files": ["**/*.config.ts", "scripts/**/*.ts"],
+      "rules": {
+        "anti-slop/no-object-parameters": "off"
+      }
+    },
+    {
+      "files": ["apps/*/src/**", "packages/*/src/**"],
+      "rules": {
+        "typescript/no-unsafe-type-assertion": "error",
+        "typescript/no-non-null-assertion": "error",
+        "typescript/strict-boolean-expressions": [
+          "error",
+          {
+            "allowString": false,
+            "allowNumber": false,
+            "allowNullableObject": true
+          }
+        ],
+        "typescript/prefer-nullish-coalescing": "error",
+        "typescript/no-unnecessary-condition": "error"
+      }
+    },
+    {
+      "files": [
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/test/**",
+        "**/e2e/**",
+        "**/bench/**",
+        "**/testing.ts"
+      ],
+      "rules": {
+        "typescript/no-unsafe-type-assertion": "off",
+        "typescript/no-non-null-assertion": "off",
+        "typescript/strict-boolean-expressions": "off",
+        "typescript/prefer-nullish-coalescing": "off",
+        "typescript/no-unnecessary-condition": "off"
+      }
+    }
+  ],
   "rules": {
+    "anti-slop/no-chained-type-assertions": "error",
+    "anti-slop/no-conditional-empty-object-spread": "error",
+    "anti-slop/no-known-value-widening": "error",
+    "anti-slop/no-module-mocking": "error",
+    "anti-slop/no-object-parameters": "error",
+    "anti-slop/no-reflect-apply": "error",
+    "anti-slop/no-reflect-get": "error",
+    "anti-slop/no-runtime-typeof": [
+      "error",
+      {
+        "allowInTypeGuards": true
+      }
+    ],
+    "anti-slop/no-shape-in-symbol-names": "off",
+    "anti-slop/no-unknown-parameters": "error",
+    "anti-slop/no-unknown-returns": "error",
+    "anti-slop/no-unknown-type-aliases": "error",
+    "anti-slop/no-unsafe-dictionary-type": "error",
+    "anti-slop/no-widen-then-assert": "error",
+    "anti-slop/require-safety-comment-for-type-assertion": "error",
     "curly": "error",
-    "no-underscore-dangle": ["warn", { "allow": ["_tag"] }],
-    "import/no-unassigned-import": ["warn", { "allow": ["**/*.css"] }],
-    "react/incompatible-library": "off",
-    "react/react-in-jsx-scope": "off",
-    "typescript/consistent-type-imports": ["error", { "disallowTypeAnnotations": true }],
+    "no-underscore-dangle": [
+      "warn",
+      {
+        "allow": ["_tag"]
+      }
+    ],
+    "typescript/consistent-type-imports": [
+      "error",
+      {
+        "disallowTypeAnnotations": true
+      }
+    ],
     "@stylistic/padding-line-between-statements": [
       "error",
       {
@@ -53,6 +143,48 @@
         ],
         "next": "*"
       }
-    ]
+    ],
+    "react/react-in-jsx-scope": "off",
+    "jsx-a11y/prefer-tag-over-role": "off",
+    "import/no-unassigned-import": [
+      "warn",
+      {
+        "allow": ["**/*.css"]
+      }
+    ],
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/await-thenable": "error",
+    "typescript/return-await": ["error", "in-try-catch"],
+    "typescript/prefer-promise-reject-errors": "error",
+    "typescript/only-throw-error": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-unsafe-argument": "error",
+    "typescript/no-unsafe-assignment": "error",
+    "typescript/no-unsafe-call": "error",
+    "typescript/no-unsafe-member-access": "error",
+    "typescript/no-unsafe-return": "error",
+    "typescript/use-unknown-in-catch-callback-variable": "error",
+    "typescript/switch-exhaustiveness-check": [
+      "error",
+      {
+        "considerDefaultExhaustiveForUnions": false,
+        "requireDefaultForNonUnion": true
+      }
+    ],
+    "typescript/restrict-template-expressions": "error",
+    "typescript/restrict-plus-operands": "error",
+    "typescript/no-base-to-string": "error",
+    "typescript/no-unsafe-enum-comparison": "error",
+    "typescript/no-misused-spread": "error",
+    "typescript/no-for-in-array": "error",
+    "typescript/no-array-delete": "error",
+    "typescript/no-implied-eval": "error",
+    "typescript/no-redundant-type-constituents": "error",
+    "typescript/no-unnecessary-type-assertion": "error",
+    "typescript/no-deprecated": "error",
+    "typescript/consistent-return": "off",
+    "anti-slop/require-disable-reason": "error",
+    "react/incompatible-library": "off"
   }
 }

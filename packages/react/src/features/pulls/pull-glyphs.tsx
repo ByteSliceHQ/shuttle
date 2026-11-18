@@ -9,7 +9,7 @@ export function repoShortName(fullName: string): string {
 
 /** Stable per-repo hue so the same repo reads the same color across rows and sessions. */
 export function RepoDot({ fullName, className }: { fullName: string; className?: string }) {
-  const hue = [...fullName].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 360
+  const hue = Array.from(fullName).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 360
 
   return (
     <span

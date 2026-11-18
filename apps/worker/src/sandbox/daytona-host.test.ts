@@ -14,12 +14,13 @@ import { fakeEnv } from '../testing/fake-env'
 import { readAgentEvents, startAgentRun } from './agent-runs'
 import { ContainerWorkspace } from './container-workspace'
 import { daytonaHost, splitOutput, wrappedCommand, type DaytonaSandboxLike } from './daytona-host'
+import { failureOf } from './test-failure'
 
 /**
  * Stands in for a Daytona sandbox on this machine. Like Daytona, it runs a command through a
  * shell and hands back only what the command printed to stdout, as one string.
  */
-function localSandbox(): { sandbox: DaytonaSandboxLike; commands: string[] } {
+function localSandbox() {
   const commands: string[] = []
 
   const sandbox: DaytonaSandboxLike = {
@@ -28,7 +29,7 @@ function localSandbox(): { sandbox: DaytonaSandboxLike; commands: string[] } {
         commands.push(command)
 
         const child = Bun.spawn(['sh', '-c', command], {
-          ...(cwd ? { cwd } : {}),
+          cwd,
           env: { ...process.env, ...env },
           stdin: 'ignore',
           stdout: 'pipe',
@@ -145,7 +146,7 @@ describe('daytonaHost files', () => {
   test('a missing file is reported the way callers look for it', async () => {
     const host = daytonaHost(localSandbox().sandbox)
 
-    await expect(host.readFile('/tmp/shuttle-definitely-missing')).rejects.toThrow(/ENOENT/)
+    expect(await failureOf(host.readFile('/tmp/shuttle-definitely-missing'))).toMatch(/ENOENT/)
   })
 })
 

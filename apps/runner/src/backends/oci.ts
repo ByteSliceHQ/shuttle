@@ -9,7 +9,16 @@ import {
   type SandboxHttpResponse,
   type SandboxSpec,
 } from '../backend'
-import { ANNOUNCE_PID, collect, HTTP_SCRIPT, readAnnouncedPid, text } from './shared'
+import { nonEmpty } from '../text'
+import {
+  ANNOUNCE_PID,
+  collect,
+  HTTP_SCRIPT,
+  readAnnouncedPid,
+  sandboxHttpResponseSchema,
+  stdinOf,
+  text,
+} from './shared'
 
 /**
  * A sandbox in a container, driven through a Docker-compatible command line (`docker`, `podman`).
@@ -42,7 +51,7 @@ export class OciBackend implements LocalBackend {
     options: { readonly stdin?: Uint8Array; readonly env?: Readonly<Record<string, string>> } = {},
   ): Promise<ExecOutput> {
     const child = Bun.spawn([this.bin, ...args], {
-      stdin: options.stdin ? new Blob([options.stdin as Uint8Array<ArrayBuffer>]) : 'ignore',
+      stdin: stdinOf(options.stdin),
       stdout: 'pipe',
       stderr: 'pipe',
       env: { ...process.env, ...options.env },
@@ -62,7 +71,7 @@ export class OciBackend implements LocalBackend {
 
     if (result.exitCode !== 0) {
       throw new Error(
-        `Could not ${what}: ${text(result.stderr).trim() || `exit ${result.exitCode}`}`,
+        `Could not ${what}: ${nonEmpty(text(result.stderr).trim()) ?? `exit ${result.exitCode}`}`,
       )
     }
 
@@ -91,6 +100,10 @@ export class OciBackend implements LocalBackend {
     }
 
     await this.ensureImage()
+
+    const cpus = this.spec.limits?.cpus
+    const memoryMb = this.spec.limits?.memoryMb
+
     this.spec.log(`creating sandbox ${this.container}`)
 
     await this.must(
@@ -107,8 +120,8 @@ export class OciBackend implements LocalBackend {
         '--init',
         '--pids-limit',
         '4096',
-        ...(this.spec.limits?.cpus ? ['--cpus', String(this.spec.limits.cpus)] : []),
-        ...(this.spec.limits?.memoryMb ? ['--memory', `${this.spec.limits.memoryMb}m`] : []),
+        ...(cpus !== undefined && cpus > 0 ? ['--cpus', String(cpus)] : []),
+        ...(memoryMb !== undefined && memoryMb > 0 ? ['--memory', `${memoryMb}m`] : []),
         '--volume',
         `${this.container}-workspace:/workspace`,
         // An agent's sign-in lives in its home directory and stays on this machine.
@@ -144,7 +157,7 @@ export class OciBackend implements LocalBackend {
       return
     }
 
-    if (buildContext) {
+    if (buildContext !== undefined && buildContext !== '') {
       this.spec.log(`building ${image} from ${buildContext}; the first build takes a few minutes`)
       await this.must(['build', '--tag', image, buildContext], `build ${image}`)
 
@@ -186,13 +199,14 @@ export class OciBackend implements LocalBackend {
     await this.ensure()
 
     const env = options.env ?? {}
+    const workdir = nonEmpty(options.cwd)
 
     const child = Bun.spawn(
       [
         this.bin,
         'exec',
         '--interactive',
-        ...(options.cwd ? ['--workdir', options.cwd] : []),
+        ...(workdir === undefined ? [] : ['--workdir', workdir]),
         // Named, not given: the engine takes each value from its own environment, so a secret
         // never appears in a command line another process on this machine could read.
         ...Object.keys(env).flatMap((name) => ['--env', name]),
@@ -204,7 +218,7 @@ export class OciBackend implements LocalBackend {
         ...argv,
       ],
       {
-        stdin: options.stdin ? new Blob([options.stdin as Uint8Array<ArrayBuffer>]) : 'ignore',
+        stdin: stdinOf(options.stdin),
         stdout: 'pipe',
         stderr: 'pipe',
         env: { ...process.env, ...env },
@@ -263,10 +277,12 @@ export class OciBackend implements LocalBackend {
     )
 
     if (result.exitCode !== 0) {
-      throw new Error(text(result.stderr).trim() || `nothing answered on port ${request.port}`)
+      throw new Error(
+        nonEmpty(text(result.stderr).trim()) ?? `nothing answered on port ${request.port}`,
+      )
     }
 
-    return JSON.parse(text(result.stdout)) as SandboxHttpResponse
+    return sandboxHttpResponseSchema.parse(JSON.parse(text(result.stdout)))
   }
 
   async openTerminal(options: {
@@ -277,9 +293,12 @@ export class OciBackend implements LocalBackend {
     readonly exit: () => void
   }): Promise<LocalTerminal> {
     // A session's files are only here once it has worked here.
-    const there = options.cwd
-      ? await this.inSandbox((container) => ['exec', container, 'test', '-d', options.cwd ?? '/'])
-      : null
+    const cwd = nonEmpty(options.cwd)
+
+    const there =
+      cwd === undefined
+        ? null
+        : await this.inSandbox((container) => ['exec', container, 'test', '-d', cwd])
 
     await this.ensure()
 
@@ -290,7 +309,7 @@ export class OciBackend implements LocalBackend {
         '--interactive',
         '--tty',
         '--workdir',
-        there?.exitCode === 0 && options.cwd ? options.cwd : '/workspace',
+        there?.exitCode === 0 && cwd !== undefined ? cwd : '/workspace',
         '--env',
         'TERM=xterm-256color',
         '--env',

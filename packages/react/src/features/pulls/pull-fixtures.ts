@@ -251,11 +251,13 @@ export function emptyPullInboxFixture(): PullInboxState {
   return { pulls: {}, policies: {} }
 }
 
+const HUGE_INBOX_REPOS = ['acme/api', 'acme/web', 'acme/infra', 'acme/docs']
+
 export function hugePullInbox(now = Date.now()): PullInboxState {
   const pulls: Record<string, PullInboxSummary> = {}
 
   for (let index = 0; index < 120; index += 1) {
-    const repo = ['acme/api', 'acme/web', 'acme/infra', 'acme/docs'][index % 4]!
+    const repo = HUGE_INBOX_REPOS[index % HUGE_INBOX_REPOS.length] ?? 'acme/api'
     const number = 10_000 + index
 
     pulls[`${repo}#${number}`] = pull({

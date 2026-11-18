@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
+import { z } from 'zod'
+
 import { orgsOfInstallation } from '../tenancy/installations'
 import { migratedD1 } from '../testing/fake-d1'
 import {
@@ -27,11 +29,13 @@ function cannedFetch(responses: readonly { status?: number; body: unknown }[]) {
   const requests: { url: string; headers: Headers; body: string | null }[] = []
   let next = 0
 
+  // SAFETY: the code under test only calls the fetcher as a function; the extra static members of
+  // `typeof fetch` (such as `preconnect`) are never used.
   const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
     requests.push({
-      url: String(input),
+      url: input instanceof Request ? input.url : input.toString(),
       headers: new Headers(init?.headers),
-      body: typeof init?.body === 'string' ? init.body : null,
+      body: z.string().safeParse(init?.body).data ?? null,
     })
 
     const response = responses[next] ?? { status: 500, body: {} }
@@ -77,7 +81,10 @@ describe('github sign-in for linking', () => {
       { body: { error: 'bad_verification_code', error_description: 'The code has expired.' } },
     ])
 
-    await expect(exchangeGithubCode(env, 'stale', fetcher)).rejects.toThrow('The code has expired.')
+    const failure = await exchangeGithubCode(env, 'stale', fetcher).catch((cause: unknown) => cause)
+
+    expect(failure).toBeInstanceOf(Error)
+    expect(failure).toHaveProperty('message', expect.stringContaining('The code has expired.'))
   })
 })
 
@@ -103,7 +110,12 @@ describe('listAccessibleInstallations', () => {
   test('a refusal from GitHub is an error, not an empty list', async () => {
     const { fetcher } = cannedFetch([{ status: 401, body: {} }])
 
-    await expect(listAccessibleInstallations(env, 'bad', fetcher)).rejects.toThrow('401')
+    const failure = await listAccessibleInstallations(env, 'bad', fetcher).catch(
+      (cause: unknown) => cause,
+    )
+
+    expect(failure).toBeInstanceOf(Error)
+    expect(failure).toHaveProperty('message', expect.stringContaining('401'))
   })
 })
 

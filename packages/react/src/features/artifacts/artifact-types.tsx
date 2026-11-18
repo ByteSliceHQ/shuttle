@@ -151,5 +151,7 @@ export function artifactTypeFor(
 
 /** The types a person can open a tab of by hand, in the order they were registered. */
 export function launchableArtifactTypes(types: readonly ArtifactType[]): readonly ArtifactType[] {
-  return types.filter((type) => type.launcher && artifactTypeFor(types, type.kind) === type)
+  return types.filter(
+    (type) => type.launcher !== undefined && artifactTypeFor(types, type.kind) === type,
+  )
 }

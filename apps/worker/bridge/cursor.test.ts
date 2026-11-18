@@ -141,18 +141,18 @@ describe('cursor turn', () => {
   })
 })
 
+async function login(mode = 'turn'): Promise<{ events: BridgeEventBody[]; signedIn: boolean }> {
+  const events: BridgeEventBody[] = []
+  const home = mkdtempSync(join(tmpdir(), 'shuttle-cursor-home-'))
+
+  return withEnv({ HOME: home, FAKE_CURSOR_MODE: mode }, async () => {
+    await runCursorLogin((event) => events.push(event), new AbortController().signal, { bin })
+
+    return { events, signedIn: await cursorSignedIn({ bin }) }
+  })
+}
+
 describe('cursor login', () => {
-  async function login(mode = 'turn'): Promise<{ events: BridgeEventBody[]; signedIn: boolean }> {
-    const events: BridgeEventBody[] = []
-    const home = mkdtempSync(join(tmpdir(), 'shuttle-cursor-home-'))
-
-    return withEnv({ HOME: home, FAKE_CURSOR_MODE: mode }, async () => {
-      await runCursorLogin((event) => events.push(event), new AbortController().signal, { bin })
-
-      return { events, signedIn: await cursorSignedIn({ bin }) }
-    })
-  }
-
   test('shows the link and reports success after browser auth', async () => {
     const { events, signedIn } = await login()
 

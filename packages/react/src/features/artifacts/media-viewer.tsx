@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { EmptyState } from '../../components/ui/panel'
 import { ScrollArea } from '../../components/ui/scroll-area'
 import { cn } from '../../lib/cn'
+import { hasText } from '../../lib/text'
 import { clockTime } from '../../lib/time'
 import type { AgentIdentity } from '../sessions/agents'
 import { formatBytes, mediaKind, type SessionMedia } from '../sessions/media'
@@ -112,10 +113,10 @@ function named(entry: SessionMedia): boolean {
 
 function origin(entry: SessionMedia, identities: ReadonlyMap<string, AgentIdentity>): string {
   if (entry.source === 'upload') {
-    return entry.authorName ? `Attached by ${entry.authorName}` : 'Attached'
+    return hasText(entry.authorName) ? `Attached by ${entry.authorName}` : 'Attached'
   }
 
-  const label = entry.threadId ? identities.get(entry.threadId)?.label : undefined
+  const label = hasText(entry.threadId) ? identities.get(entry.threadId)?.label : undefined
 
-  return label ? `Made by ${label}` : 'Made by an agent'
+  return hasText(label) ? `Made by ${label}` : 'Made by an agent'
 }

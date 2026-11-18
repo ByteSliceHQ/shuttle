@@ -55,7 +55,7 @@ function browserSignals(env: ShuttleEnv, runId: string): readonly string[] {
 export function runIdOfPath(pathname: string): string | null {
   const match = /^\/(?:runs|sessions)\/([^/]+)/.exec(pathname)
 
-  if (!match?.[1]) {
+  if (match?.[1] === undefined || match[1] === '') {
     return null
   }
 

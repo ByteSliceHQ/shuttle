@@ -85,7 +85,17 @@ export function runTimingObserver(runId: string): RuntimeObserver {
           logTiming({ source: 'run', type: event.type, runId, durationMs: event.latenessMs })
           return
 
-        default:
+        case 'run.start':
+        case 'snapshot.save':
+        case 'snapshot.trim':
+        case 'effect.attempt':
+        case 'effect.retry':
+        case 'effect.timeout':
+        case 'effect.heartbeat':
+        case 'effect.cancellation':
+        case 'secrets.issued':
+        case 'secrets.failed':
+          return
       }
     },
   }

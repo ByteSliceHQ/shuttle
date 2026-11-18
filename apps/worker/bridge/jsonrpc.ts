@@ -1,17 +1,30 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
 
-type Json = unknown
+import {
+  definedFields,
+  field,
+  isJsonObject,
+  isNumber,
+  isString,
+  parseJson,
+  stringField,
+  type JsonObject,
+  type JsonValue,
+} from './json.ts'
 
 interface Pending {
-  readonly resolve: (value: Json) => void
+  readonly resolve: (value: JsonValue) => void
   readonly reject: (error: Error) => void
 }
 
 export interface JsonRpcHandlers {
-  onNotification(method: string, params: Json): void
+  onNotification(method: string, params: JsonValue | undefined): void
   /** A request from the peer. The returned value is sent back as the result; a throw as an error. */
-  onRequest(method: string, params: Json): Json | Promise<Json>
+  onRequest(
+    method: string,
+    params: JsonValue | undefined,
+  ): JsonValue | undefined | Promise<JsonValue | undefined>
 }
 
 /**
@@ -58,81 +71,79 @@ export class JsonRpcPeer {
     })
   }
 
-  request<T = Json>(method: string, params?: Json): Promise<T> {
+  request(method: string, params?: JsonValue): Promise<JsonValue> {
     const id = this.nextId
     this.nextId += 1
 
-    return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (value: Json) => void, reject })
-      this.send({ id, method, ...(params === undefined ? {} : { params }) })
+    return new Promise<JsonValue>((resolve, reject) => {
+      this.pending.set(id, { resolve, reject })
+      this.send(definedFields({ id, method, params }))
     })
   }
 
-  notify(method: string, params?: Json): void {
-    this.send({ method, ...(params === undefined ? {} : { params }) })
+  notify(method: string, params?: JsonValue): void {
+    this.send(definedFields({ method, params }))
   }
 
   kill(): void {
     this.child.kill('SIGTERM')
   }
 
-  private send(message: Record<string, Json>): void {
+  private send(message: JsonObject): void {
     if (this.child.stdin.writable) {
       this.child.stdin.write(`${JSON.stringify({ ...this.header, ...message })}\n`)
     }
   }
 
   private receive(line: string): void {
-    let message: {
-      id?: number | string
-      method?: string
-      params?: Json
-      result?: Json
-      error?: { message?: string }
-    }
+    // Agents sometimes print plain log lines on stdout. They are not protocol messages.
+    const message = parseJson(line)
 
-    try {
-      message = JSON.parse(line)
-    } catch {
-      // Agents sometimes print plain log lines on stdout. They are not protocol messages.
+    if (!isJsonObject(message)) {
       return
     }
 
-    if (typeof message !== 'object' || message === null) {
-      return
-    }
+    const method = stringField(message, 'method')
+    const rawId = field(message, 'id')
+    const id = isString(rawId) || isNumber(rawId) ? rawId : undefined
 
-    if (typeof message.method === 'string') {
-      if (message.id === undefined) {
-        this.handlers.onNotification(message.method, message.params)
+    if (method !== undefined) {
+      if (id === undefined) {
+        this.handlers.onNotification(method, field(message, 'params'))
         return
       }
 
-      void this.answer(message.id, message.method, message.params)
+      void this.answer(id, method, field(message, 'params'))
       return
     }
 
-    if (typeof message.id !== 'number') {
+    if (!isNumber(id)) {
       return
     }
 
-    const waiter = this.pending.get(message.id)
+    const waiter = this.pending.get(id)
 
     if (!waiter) {
       return
     }
 
-    this.pending.delete(message.id)
+    this.pending.delete(id)
 
-    if (message.error) {
-      waiter.reject(new Error(message.error.message ?? 'agent returned an error'))
+    const error = field(message, 'error')
+
+    if (isJsonObject(error)) {
+      waiter.reject(new Error(stringField(error, 'message') ?? 'agent returned an error'))
       return
     }
 
-    waiter.resolve(message.result)
+    waiter.resolve(field(message, 'result') ?? null)
   }
 
-  private async answer(id: number | string, method: string, params: Json): Promise<void> {
+  private async answer(
+    id: number | string,
+    method: string,
+    params: JsonValue | undefined,
+  ): Promise<void> {
     try {
       this.send({ id, result: (await this.handlers.onRequest(method, params)) ?? {} })
     } catch (cause) {

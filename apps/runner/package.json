@@ -12,7 +12,8 @@
     "test": "bun test src"
   },
   "dependencies": {
-    "@shuttle/runner-protocol": "workspace:*"
+    "@shuttle/runner-protocol": "workspace:*",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/bun": "^1.3.9",

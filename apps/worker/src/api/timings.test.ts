@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test'
 
+import type { JsonValue } from '@swirls/looms/core'
+
 import type { Actor } from '../tenancy/access'
 import { fakeEnv } from '../testing/fake-env'
 import { handleApi } from './handler'
@@ -23,7 +25,7 @@ afterEach(() => {
 })
 
 /** Reports `timings` the way the browser does, and returns the lines the Worker logged. */
-async function report(body: unknown): Promise<{ status: number; lines: unknown[] }> {
+async function report(body: JsonValue): Promise<{ status: number; lines: unknown[] }> {
   const response = await handleApi({
     env: fakeEnv(),
     actor,
@@ -37,7 +39,11 @@ async function report(body: unknown): Promise<{ status: number; lines: unknown[]
 
   return {
     status: response?.status ?? 0,
-    lines: log.mock.calls.map(([line]) => JSON.parse(String(line)) as unknown),
+    lines: log.mock.calls.map(([line]) => {
+      const parsed: unknown = JSON.parse(String(line))
+
+      return parsed
+    }),
   }
 }
 

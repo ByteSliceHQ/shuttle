@@ -4,6 +4,7 @@ import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import type { Tenant } from '@shuttle/api'
 import { LoomsProvider } from '@swirls/looms/react'
 
+import { hasText } from '../lib/text'
 import type { ShuttleDevice } from './device'
 import type { ShuttleApi, ShuttleHost } from './host'
 import { peopleQuery, type ShuttleIdentity } from './identity'
@@ -89,7 +90,14 @@ export function useOrgPeople(): ReadonlyMap<string, string> {
 
   return useMemo(
     () =>
-      data ? new Map(data.map((person) => [person.userId, person.name || person.email])) : nobody,
+      data
+        ? new Map(
+            data.map((person) => [
+              person.userId,
+              hasText(person.name) ? person.name : person.email,
+            ]),
+          )
+        : nobody,
     [data],
   )
 }

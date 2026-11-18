@@ -44,38 +44,38 @@ export function assetKind(mediaType: string): AssetKind {
   return mediaType === 'application/pdf' ? 'pdf' : 'file'
 }
 
-const MEDIA_TYPES: Readonly<Record<string, string>> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  avif: 'image/avif',
-  svg: 'image/svg+xml',
-  bmp: 'image/bmp',
-  mp4: 'video/mp4',
-  m4v: 'video/mp4',
-  webm: 'video/webm',
-  mov: 'video/quicktime',
-  mp3: 'audio/mpeg',
-  wav: 'audio/wav',
-  ogg: 'audio/ogg',
-  m4a: 'audio/mp4',
-  flac: 'audio/flac',
-  pdf: 'application/pdf',
-  json: 'application/json',
-  csv: 'text/csv',
-  txt: 'text/plain',
-  md: 'text/markdown',
-  html: 'text/html',
-  zip: 'application/zip',
-}
+const MEDIA_TYPES = new Map([
+  ['png', 'image/png'],
+  ['jpg', 'image/jpeg'],
+  ['jpeg', 'image/jpeg'],
+  ['gif', 'image/gif'],
+  ['webp', 'image/webp'],
+  ['avif', 'image/avif'],
+  ['svg', 'image/svg+xml'],
+  ['bmp', 'image/bmp'],
+  ['mp4', 'video/mp4'],
+  ['m4v', 'video/mp4'],
+  ['webm', 'video/webm'],
+  ['mov', 'video/quicktime'],
+  ['mp3', 'audio/mpeg'],
+  ['wav', 'audio/wav'],
+  ['ogg', 'audio/ogg'],
+  ['m4a', 'audio/mp4'],
+  ['flac', 'audio/flac'],
+  ['pdf', 'application/pdf'],
+  ['json', 'application/json'],
+  ['csv', 'text/csv'],
+  ['txt', 'text/plain'],
+  ['md', 'text/markdown'],
+  ['html', 'text/html'],
+  ['zip', 'application/zip'],
+])
 
 /** The media type a file name implies, for files that arrive without one. */
 export function mediaTypeOfName(name: string): string {
   const extension = name.slice(name.lastIndexOf('.') + 1).toLowerCase()
 
-  return MEDIA_TYPES[extension] ?? 'application/octet-stream'
+  return MEDIA_TYPES.get(extension) ?? 'application/octet-stream'
 }
 
 /** A file name safe to show, store and use as the last part of a path. */
@@ -83,12 +83,12 @@ export function cleanAssetName(name: string): string {
   const base = name.split(/[\\/]/).pop() ?? ''
 
   const cleaned = base
-    // oxlint-disable-next-line no-control-regex
+    // oxlint-disable-next-line no-control-regex -- stripping control characters from a file name is the intent here
     .replace(/[\u0000-\u001f\u007f]/g, '')
     .trim()
     .slice(0, 160)
 
-  return cleaned && cleaned !== '.' && cleaned !== '..' ? cleaned : 'file'
+  return cleaned !== '' && cleaned !== '.' && cleaned !== '..' ? cleaned : 'file'
 }
 
 /**
@@ -98,7 +98,7 @@ export function cleanAssetName(name: string): string {
 export function uploadMediaType(declared: string | null | undefined, name: string): string {
   const type = cleanMediaType(declared)
 
-  return type && type !== 'application/octet-stream' ? type : mediaTypeOfName(name)
+  return type !== null && type !== 'application/octet-stream' ? type : mediaTypeOfName(name)
 }
 
 /** A media type as a browser reports it, without parameters, or `null` when it is not one. */
@@ -143,7 +143,7 @@ function refOf(id: string, object: R2Object): AssetRef {
 
   return {
     id,
-    name: stored ? decodeURIComponent(stored) : id,
+    name: stored !== undefined && stored !== '' ? decodeURIComponent(stored) : id,
     mediaType: object.httpMetadata?.contentType ?? 'application/octet-stream',
     size: object.size,
   }
@@ -155,7 +155,7 @@ export async function headAsset(
   runId: string,
   assetId: string,
 ): Promise<AssetRef | null> {
-  if (!isAssetId(assetId)) {
+  if (!ASSET_ID.test(assetId)) {
     return null
   }
 
@@ -170,7 +170,7 @@ export async function getAsset(
   assetId: string,
   options: { readonly range?: Headers } = {},
 ): Promise<{ ref: AssetRef; object: R2ObjectBody } | null> {
-  if (!isAssetId(assetId)) {
+  if (!ASSET_ID.test(assetId)) {
     return null
   }
 
@@ -183,7 +183,7 @@ export async function getAsset(
 }
 
 export async function deleteAsset(bucket: R2Bucket, runId: string, assetId: string): Promise<void> {
-  if (isAssetId(assetId)) {
+  if (ASSET_ID.test(assetId)) {
     await bucket.delete(assetKey(runId, assetId))
   }
 }

@@ -22,7 +22,7 @@ function evt(
     payload: partial.payload,
     threadId: partial.threadId ?? null,
     origin: { type: 'external' },
-  } as EventEnvelope
+  }
 }
 
 function fold(events: readonly EventEnvelope[]): WorkProjectionState {

@@ -39,14 +39,16 @@ export interface DeviceRunnerStatus {
   readonly backend?: { readonly id: string; readonly label: string; readonly isolation: string }
 }
 
-const ISOLATION: Record<string, string> = {
-  microvm: 'in its own virtual machine',
-  vm: 'in a virtual machine',
-  container: 'in a container',
-  process: 'as a sandboxed process',
-}
+const ISOLATION = new Map<string, string>(
+  Object.entries({
+    microvm: 'in its own virtual machine',
+    vm: 'in a virtual machine',
+    container: 'in a container',
+    process: 'as a sandboxed process',
+  }),
+)
 
 /** How a local sandbox is kept apart from the machine, in a few words. */
 export function isolationLabel(isolation: string | undefined): string {
-  return (isolation && ISOLATION[isolation]) || 'in a sandbox'
+  return (isolation === undefined ? undefined : ISOLATION.get(isolation)) ?? 'in a sandbox'
 }

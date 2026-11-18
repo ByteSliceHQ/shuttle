@@ -157,10 +157,10 @@ export function shortcutLabel(shortcut: Pick<PaneShortcut, 'key' | 'shift'>): st
   const key = shortcut.key.toUpperCase()
 
   if (isMac()) {
-    return `⌘${shortcut.shift ? '⇧' : ''}${key}`
+    return `⌘${shortcut.shift === true ? '⇧' : ''}${key}`
   }
 
-  return `Ctrl+${shortcut.shift ? 'Shift+' : ''}${key}`
+  return `Ctrl+${shortcut.shift === true ? 'Shift+' : ''}${key}`
 }
 
 /** Runs pane shortcuts from anywhere on the page. */

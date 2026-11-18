@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { Auth } from '../auth/auth'
-import { githubTokenOf } from './user-token'
+import { githubTokenOf, type GithubTokenSource } from './user-token'
 
 /** An auth instance that knows these accounts and hands out `token` for the GitHub one. */
 function authWith(
@@ -10,7 +9,7 @@ function authWith(
 ) {
   const asked: string[] = []
 
-  const auth = {
+  const auth: GithubTokenSource = {
     api: {
       listUserAccounts: async () => accounts,
       getAccessToken: async ({ body }: { body: { accountId: string } }) => {
@@ -19,7 +18,7 @@ function authWith(
         return token()
       },
     },
-  } as unknown as Auth
+  }
 
   return { auth, asked }
 }

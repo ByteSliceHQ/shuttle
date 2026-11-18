@@ -101,7 +101,7 @@ async function main(): Promise<void> {
       op,
       file: resolve(file),
       waitMs: Number.isFinite(waitMs) && waitMs > 0 ? waitMs : LSP_DEFAULT_WAIT_MS,
-      ...(text === undefined ? {} : { text }),
+      text,
     }
   } else if (op === 'status' || op === 'stop') {
     request = { op }

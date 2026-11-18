@@ -1,11 +1,15 @@
 import { describe, expect, test } from 'bun:test'
 
+import { z } from 'zod'
+
+import { defineTool } from '@swirls/looms/agent'
 import type { LlmCompleteArgs } from '@swirls/looms/agent'
 
-import type { BridgeEvent, BridgeEventBody } from '../../bridge/protocol'
+import type { BridgeEventBody } from '../../bridge/protocol'
 import type { CredentialPayload } from '../credentials/store'
 import { bindStepObserver, bindThinkingObserver } from '../llm'
 import type { AgentRunInput } from '../sandbox/agent-runs'
+import { memoryStorage } from '../testing/memory-storage'
 import {
   describeProposalOutcome,
   PULL_REQUEST_INSTRUCTIONS,
@@ -13,18 +17,6 @@ import {
   SANDBOX_INSTRUCTIONS,
   type VendorTurnDeps,
 } from './turn'
-
-function memoryStorage() {
-  const values = new Map<string, unknown>()
-
-  return {
-    values,
-    get: async <T>(key: string) => values.get(key) as T | undefined,
-    put: async (key: string, value: unknown) => {
-      values.set(key, value)
-    },
-  } as unknown as Pick<DurableObjectStorage, 'get' | 'put'> & { values: Map<string, unknown> }
-}
 
 /** A sandbox whose agent run plays back `pages` of events, one page per read. */
 function fakeSandbox(pages: BridgeEventBody[][], collected: Record<string, string> = {}) {
@@ -48,7 +40,7 @@ function fakeSandbox(pages: BridgeEventBody[][], collected: Record<string, strin
 
       const events = body.map((event) => {
         seq += 1
-        return { ...event, seq, at: seq } as BridgeEvent
+        return { ...event, seq, at: seq }
       })
 
       return {
@@ -195,10 +187,10 @@ describe('runVendorTurn', () => {
       },
     ])
 
-    expect(seen).toEqual([
+    expect(seen.map((line) => line.replace(/"durationMs":\d+/, '"durationMs":0'))).toEqual([
       '{"type":"started","harness":"codex","label":"Codex","model":"gpt-test"}',
       'thinking:Plan. ',
-      expect.stringMatching(/^\{"type":"thought","text":"Plan\.","durationMs":\d+\}$/),
+      '{"type":"thought","text":"Plan.","durationMs":0}',
       'text:Looking. ',
       '{"type":"message","text":"Looking."}',
       '{"type":"tool_started","toolCall":{"id":"t1","name":"bash","arguments":{"command":"ls"}}}',
@@ -627,9 +619,12 @@ describe("runVendorTurn in a person's own sandbox", () => {
 })
 
 describe('pull requests from a vendor agent', () => {
-  const proposeTool = {
+  const proposeTool = defineTool({
     name: 'propose_pull_request',
-  } as unknown as LlmCompleteArgs['tools'][number]
+    description: 'Propose a pull request.',
+    input: z.object({}),
+    handler: async () => ({}),
+  })
 
   const proposed: BridgeEventBody[][] = [
     [

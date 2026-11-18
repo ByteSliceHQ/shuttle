@@ -54,7 +54,7 @@ function connectionsSandbox(env: ShuttleEnv, actor: Actor, request: Request): st
   // Asked from the desktop app, a sign-in happens on that machine and stays there: a session
   // working there uses it, and it never leaves for the cloud. The name is built from the
   // caller, so the machine is one of their own.
-  if (deviceId && DEVICE_ID.test(deviceId)) {
+  if (deviceId !== null && deviceId !== '' && DEVICE_ID.test(deviceId)) {
     return localSandboxName(actor.orgId, actor.userId, deviceId)
   }
 
@@ -82,7 +82,7 @@ function places({ env, actor, request }: ApiContext) {
 function connectable(value: string): VendorHarnessId {
   const harness = parseHarness(value)
 
-  if (!harness || !isVendorHarness(harness) || !vendorHarnessInfo(harness).supported) {
+  if (harness === null || !isVendorHarness(harness) || !vendorHarnessInfo(harness).supported) {
     throw notFound('unknown harness')
   }
 
@@ -104,7 +104,7 @@ export function explainDeadRun(label: string, log: string): string {
     .split('\n')
     .findLast((line) => line.trim() !== '')
 
-  return lastLine
+  return lastLine !== undefined && lastLine !== ''
     ? `${label} sign-in stopped before it started: ${lastLine.trim().slice(0, 300)}`
     : `${label} sign-in stopped before it started, and left no explanation.`
 }
@@ -146,7 +146,6 @@ const connections = api.connections.use(explainFailures)
 
 type Places = ReturnType<typeof places>
 type LoginBridgeEvent = Extract<BridgeEvent, { type: 'login_prompt' | 'login_done' }>
-type LoginDone = Extract<BridgeEvent, { type: 'login_done' }>
 
 function isLoginEvent(event: BridgeEvent): event is LoginBridgeEvent {
   return event.type === 'login_prompt' || event.type === 'login_done'
@@ -197,12 +196,12 @@ async function readLoginAftermath(
     page = await sandbox.readAgentEvents(loginId, offset)
     log = (await sandbox.readAgentLog(loginId).catch(() => ({ log: '' }))).log
 
-    if (page.events.length > 0 || log.trim()) {
+    if (page.events.length > 0 || log.trim() !== '') {
       break
     }
   }
 
-  if (!log.trim()) {
+  if (log.trim() === '') {
     log = (await sandbox.readAgentLog(loginId).catch(() => ({ log: '' }))).log
   }
 
@@ -216,22 +215,22 @@ async function followLogin(
   deps: Pick<Places, 'sandbox' | 'credentials' | 'personal' | 'onMachine'> & { userId: string },
 ) {
   let page = await deps.sandbox.readAgentEvents(loginId, offset)
-  let end = page.events.find(isTerminalBridgeEvent) as LoginDone | undefined
+  let end = page.events.find(isTerminalBridgeEvent)
 
   // A sign-in writes nothing but its own events; anything else is left out rather than passed on.
   const progress = () => ({ ...page, events: page.events.filter(isLoginEvent) })
 
   // A bridge that fails immediately can exit before the sandbox filesystem shows its events.
   // Wait briefly so we surface the real login_done error instead of an empty log.
-  if (!end && page.events.length === 0) {
+  if (end === undefined && page.events.length === 0) {
     const { state } = await deps.sandbox.agentRunState(loginId)
 
     if (state === 'exited' || state === 'missing') {
       const aftermath = await readLoginAftermath(loginId, offset, deps.sandbox)
       page = aftermath.page
-      end = page.events.find(isTerminalBridgeEvent) as LoginDone | undefined
+      end = page.events.find(isTerminalBridgeEvent)
 
-      if (!end) {
+      if (end === undefined) {
         return {
           ...progress(),
           done: true,
@@ -242,7 +241,7 @@ async function followLogin(
     }
   }
 
-  if (!end?.success) {
+  if (end?.type !== 'login_done' || !end.success) {
     return { ...progress(), connected: false }
   }
 
@@ -347,21 +346,21 @@ export const connectionsRouter = {
   setDefault: connections.setDefault.handler(async ({ input, context }) => {
     const { credentials } = places(context)
 
-    if (!input.harness && !input.team) {
+    if (input.harness === undefined && input.team === undefined) {
       throw badRequest('unknown harness or invalid team')
     }
 
     // The shape is checked at the edge; this settles what a team must always hold true.
-    const team = input.team ? parseTeam(input.team) : null
+    const team = input.team === undefined ? null : parseTeam(input.team)
 
     // New sessions start with these. They are stored on the workspace run.
     return {
-      defaultHarness: input.harness
-        ? (await credentials.setHarness(input.harness)).harness
-        : (await credentials.getHarness()).harness,
-      defaultTeam: team
-        ? (await credentials.setTeam(team)).team
-        : (await credentials.getTeam()).team,
+      defaultHarness:
+        input.harness === undefined
+          ? (await credentials.getHarness()).harness
+          : (await credentials.setHarness(input.harness)).harness,
+      defaultTeam:
+        team !== null ? (await credentials.setTeam(team)).team : (await credentials.getTeam()).team,
     }
   }),
 
@@ -394,7 +393,7 @@ export const connectionsRouter = {
     start: connections.login.start.handler(async ({ input, context }) => {
       const harness = connectable(input.harness)
 
-      if (!context.env.SHUTTLE_CREDENTIALS_KEY?.trim()) {
+      if ((context.env.SHUTTLE_CREDENTIALS_KEY?.trim() ?? '') === '') {
         throw new CredentialsKeyMissingError()
       }
 

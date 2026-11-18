@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 
+import { createEvent } from '@swirls/looms/core'
+
 import { threadSnapshot } from '../github/pulls'
+import { pullsModule } from './scope'
 import { sameThreads } from './thread-sync'
 import { pullThreads, type PullComment, type PullThreadsState } from './threads'
 
@@ -22,16 +25,26 @@ const comment = (commentId: number, overrides: Partial<PullComment> = {}): PullC
   ...overrides,
 })
 
-const fold = (events: readonly { type: string; payload: unknown }[]): PullThreadsState =>
-  events.reduce(
-    (state, event) => pullThreads.reduce(state, event as never),
-    pullThreads.initialState as PullThreadsState,
+type ThreadEvent = Parameters<typeof pullThreads.reduce>[1]
+
+const fold = (events: readonly ThreadEvent[]): PullThreadsState =>
+  events.reduce((state, event) => pullThreads.reduce(state, event), pullThreads.initialState)
+
+const upserted = (value: PullComment) =>
+  createEvent('run_test', pullsModule.input('comment.upserted', { ...PULL, comment: value }))
+
+const removed = (commentId: number) =>
+  createEvent('run_test', pullsModule.input('comment.removed', { ...PULL, commentId }))
+
+const resolution = (resolved: boolean) =>
+  createEvent(
+    'run_test',
+    pullsModule.input('thread.resolution', { ...PULL, rootId: 1, resolved, updatedAt: 50 }),
   )
 
-const upserted = (value: PullComment) => ({
-  type: 'pulls.comment.upserted',
-  payload: { ...PULL, comment: value },
-})
+const threadOf = (body: string) => [
+  { rootId: 1, resolved: false, comments: [comment(1, { body })] },
+]
 
 describe('pullThreads projection', () => {
   test('a reply joins the thread of the comment it answers, oldest first', () => {
@@ -60,21 +73,11 @@ describe('pullThreads projection', () => {
   test('deleting a reply keeps the thread; deleting its first comment removes it', () => {
     const base = [upserted(comment(1)), upserted(comment(2, { rootId: 1 }))]
 
-    const removed = (commentId: number) => ({
-      type: 'pulls.comment.removed',
-      payload: { ...PULL, commentId },
-    })
-
     expect(fold([...base, removed(2)]).pulls[KEY]?.[0]?.comments).toHaveLength(1)
     expect(fold([...base, removed(1)]).pulls[KEY]).toEqual([])
   })
 
   test('a thread is resolved and reopened', () => {
-    const resolution = (resolved: boolean) => ({
-      type: 'pulls.thread.resolution',
-      payload: { ...PULL, rootId: 1, resolved, updatedAt: 50 },
-    })
-
     expect(fold([upserted(comment(1)), resolution(true)]).pulls[KEY]?.[0]?.resolved).toBe(true)
 
     expect(
@@ -86,16 +89,16 @@ describe('pullThreads projection', () => {
     const state = fold([
       upserted(comment(1)),
       upserted(comment(9)),
-      {
-        type: 'pulls.threads.synced',
-        payload: {
+      createEvent(
+        'run_test',
+        pullsModule.input('threads.synced', {
           ...PULL,
           syncedAt: 100,
           threads: [
             { rootId: 1, resolved: true, comments: [comment(2, { rootId: 1 }), comment(1)] },
           ],
-        },
-      },
+        }),
+      ),
     ])
 
     expect(state.pulls[KEY]).toHaveLength(1)
@@ -105,20 +108,16 @@ describe('pullThreads projection', () => {
 })
 
 describe('sameThreads', () => {
-  const thread = (body: string) => [
-    { rootId: 1, resolved: false, comments: [comment(1, { body })] },
-  ]
-
   test('nothing known and nothing on GitHub is no change', () => {
     expect(sameThreads(undefined, [])).toBe(true)
   })
 
   test('an edited comment, a new one or a resolution is a change', () => {
-    expect(sameThreads(thread('a'), thread('a'))).toBe(true)
-    expect(sameThreads(thread('a'), thread('b'))).toBe(false)
-    expect(sameThreads(thread('a'), [])).toBe(false)
+    expect(sameThreads(threadOf('a'), threadOf('a'))).toBe(true)
+    expect(sameThreads(threadOf('a'), threadOf('b'))).toBe(false)
+    expect(sameThreads(threadOf('a'), [])).toBe(false)
 
-    expect(sameThreads(thread('a'), [{ ...thread('a')[0]!, resolved: true }])).toBe(false)
+    expect(sameThreads(threadOf('a'), [{ ...threadOf('a')[0]!, resolved: true }])).toBe(false)
   })
 })
 

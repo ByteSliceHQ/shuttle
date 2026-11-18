@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 
+import { z } from 'zod'
+
+import type { JsonValue } from '@swirls/looms/core'
+
 import type { Actor } from '../tenancy/access'
 import { fakeEnv } from '../testing/fake-env'
 import { handleApi } from './handler'
@@ -20,7 +24,7 @@ function call(path: string, init?: RequestInit): Promise<Response | null> {
   })
 }
 
-function post(path: string, body: unknown): Promise<Response | null> {
+function post(path: string, body: JsonValue): Promise<Response | null> {
   return call(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -34,16 +38,25 @@ describe('handleApi', () => {
 
     expect(response?.status).toBe(200)
 
-    expect(await response?.json()).toEqual({
-      user: { id: 'user1', name: 'Ada', email: 'ada@example.com' },
-      org: { id: 'org1', role: 'admin' },
-      runs: {
-        workspace: expect.stringContaining('org1'),
-        personal: expect.stringContaining('user1'),
-        pulls: expect.stringContaining('org1'),
-        playbook: expect.stringContaining('org1'),
-      },
-    })
+    const body = z
+      .strictObject({
+        user: z.strictObject({ id: z.string(), name: z.string(), email: z.string() }),
+        org: z.strictObject({ id: z.string(), role: z.string() }),
+        runs: z.strictObject({
+          workspace: z.string(),
+          personal: z.string(),
+          pulls: z.string(),
+          playbook: z.string(),
+        }),
+      })
+      .parse(await response?.json())
+
+    expect(body.user).toEqual({ id: 'user1', name: 'Ada', email: 'ada@example.com' })
+    expect(body.org).toEqual({ id: 'org1', role: 'admin' })
+    expect(body.runs.workspace).toContain('org1')
+    expect(body.runs.personal).toContain('user1')
+    expect(body.runs.pulls).toContain('org1')
+    expect(body.runs.playbook).toContain('org1')
   })
 
   test('leaves a path that is not in the contract to the other handlers', async () => {
@@ -70,9 +83,8 @@ describe('handleApi', () => {
 
     expect(response?.status).toBe(400)
 
-    const body: { error?: unknown; message?: unknown } = (await response?.json()) ?? {}
+    const body = z.object({ error: z.string(), message: z.string() }).parse(await response?.json())
 
-    expect(typeof body.error).toBe('string')
     expect(body.error).toBe(body.message)
   })
 })

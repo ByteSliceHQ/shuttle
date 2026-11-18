@@ -142,7 +142,7 @@ export function SignInScreen({
             </Field>
           ) : null}
 
-          {error ? (
+          {error !== null && error !== '' ? (
             <p role="alert" className="text-destructive text-[12.5px] leading-relaxed">
               {error}
             </p>

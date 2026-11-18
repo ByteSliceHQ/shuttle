@@ -1,9 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { SandboxWorkspace } from '@shuttle/api'
+import { z } from 'zod'
+
+import { SandboxWorkspace } from '@shuttle/api'
+import type { JsonValue } from '@swirls/looms/core'
 
 import type { ShuttleEnv } from '../env'
 import { localSandboxName } from '../sandbox/names'
+import type { SummaryRepo, WorkspaceRepoSummary } from '../sandbox/workspace-summary'
+import type { SandboxPlacement } from '../session/bind-sandbox'
 import type { SessionStacks } from '../session/stack-state'
 import type { Actor } from '../tenancy/access'
 import { migratedD1 } from '../testing/fake-d1'
@@ -32,16 +37,16 @@ interface World {
   /** What the session has published, by stack. */
   stacks?: SessionStacks
   /** More of what the sandbox says about the demo repository's changes. */
-  summary?: Record<string, unknown>
+  summary?: Partial<WorkspaceRepoSummary>
 }
 
 /** An env whose session and sandbox objects answer from `world`, and record what was done. */
 function envWith(world: World = {}, overrides: Partial<ShuttleEnv> = {}) {
   const files = { ...world.files }
-  const placed: unknown[] = []
-  const later: unknown[] = []
+  const placed: (SandboxPlacement | null)[] = []
+  const later: (SandboxPlacement | null)[] = []
   const commands: string[] = []
-  const measured: unknown[] = []
+  const measured: (readonly SummaryRepo[])[] = []
 
   const run = {
     getSandboxName: async () => world.home ?? null,
@@ -53,12 +58,12 @@ function envWith(world: World = {}, overrides: Partial<ShuttleEnv> = {}) {
     getSessionRepos: async () => [],
     getSessionStacks: async () => world.stacks ?? {},
     getSessionActivitySnapshot: async () => ({ activity: world.activity ?? 'idle', tail: 0 }),
-    placeSandbox: async (placement: unknown) => {
+    placeSandbox: async (placement: SandboxPlacement | null) => {
       placed.push(placement)
 
       return { sandboxName: null, moved: null }
     },
-    placeSandboxLater: async (placement: unknown) => {
+    placeSandboxLater: async (placement: SandboxPlacement | null) => {
       later.push(placement)
 
       return { ok: true }
@@ -85,7 +90,7 @@ function envWith(world: World = {}, overrides: Partial<ShuttleEnv> = {}) {
 
       return { exitCode: 0, stdout: world.stdout ?? '', stderr: '' }
     },
-    workspaceSummary: async (_runId: string, repos: unknown) => {
+    workspaceSummary: async (_runId: string, repos: readonly SummaryRepo[]) => {
       measured.push(repos)
 
       return {
@@ -106,32 +111,39 @@ function envWith(world: World = {}, overrides: Partial<ShuttleEnv> = {}) {
   }
 
   const env = fakeEnv({
+    // SAFETY: the routes under test call only the methods these fakes implement on each stub.
     LOOMS_RUN: { getByName: () => run as never },
+    // SAFETY: as above, for the sandbox stub.
     SANDBOX: { getByName: () => sandbox } as never,
-    ...(world.mode ? { SHUTTLE_WORKSPACE_MODE: world.mode } : {}),
+    SHUTTLE_WORKSPACE_MODE: world.mode === undefined || world.mode === '' ? undefined : world.mode,
     ...overrides,
   })
 
   return { env, files, placed, later, commands, measured }
 }
 
-async function call(env: ShuttleEnv, method: string, path: string, body?: unknown) {
+async function call(env: ShuttleEnv, method: string, path: string, body?: JsonValue) {
+  const init: RequestInit = { method }
+
+  if (body !== undefined) {
+    init.headers = { 'content-type': 'application/json' }
+    init.body = JSON.stringify(body)
+  }
+
   const response = await handleApi({
     env,
     actor,
-    request: new Request(`http://worker.test/sessions/${RUN}/sandbox/${path}`, {
-      method,
-      ...(body === undefined
-        ? {}
-        : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
-    }),
+    request: new Request(`http://worker.test/sessions/${RUN}/sandbox/${path}`, init),
   })
 
   if (!response) {
     throw new Error(`${method} ${path} is not in the contract`)
   }
 
-  return { status: response.status, body: (await response.json()) as Record<string, unknown> }
+  return {
+    status: response.status,
+    body: z.record(z.string(), z.json()).parse(await response.json()),
+  }
 }
 
 describe('reading a session’s files', () => {
@@ -189,7 +201,7 @@ describe('reading a session’s files', () => {
     const { status, body } = await call(envWith(world).env, 'GET', 'file')
 
     expect(status).toBe(400)
-    expect(typeof body.error).toBe('string')
+    expect(z.string().safeParse(body.error).success).toBe(true)
   })
 
   test('a path outside the worktree is refused', async () => {
@@ -280,10 +292,12 @@ describe('what a session changed', () => {
   test('each repository is measured the way it was asked for', async () => {
     const { env, measured } = envWith({
       summary: {
-        head: { branch: 'shuttle/x/demo', sha: 'c2' },
+        head: { branch: 'shuttle/x/demo', sha: 'c2', tree: 't2' },
         dirty: true,
         sessionBaseSha: 'b0',
-        commits: [{ sha: 'c2', subject: 'two', at: 2000, branches: ['shuttle/x/demo'] }],
+        commits: [
+          { sha: 'c2', tree: 't2', subject: 'two', at: 2000, branches: ['shuttle/x/demo'] },
+        ],
         measure: { baseSha: 'c2', baseMode: 'merge-base', headSha: null, error: null },
       },
     })
@@ -293,8 +307,8 @@ describe('what a session changed', () => {
     expect(status).toBe(200)
     expect(measured).toEqual([[expect.objectContaining({ name: 'demo', against: 'uncommitted' })]])
 
-    expect((body as SandboxWorkspace).repos[0]).toMatchObject({
-      head: { branch: 'shuttle/x/demo', sha: 'c2' },
+    expect(SandboxWorkspace.parse(body).repos[0]).toMatchObject({
+      head: { branch: 'shuttle/x/demo', sha: 'c2', tree: 't2' },
       dirty: true,
       commits: [{ sha: 'c2', subject: 'two' }],
       comparison: { against: 'uncommitted', baseSha: 'c2', error: null },
@@ -314,7 +328,7 @@ describe('what a session changed', () => {
 
     const { body } = await call(env, 'GET', 'workspace?against%5Bdemo%5D=ref:develop')
 
-    const [repo] = (body as SandboxWorkspace).repos
+    const [repo] = SandboxWorkspace.parse(body).repos
 
     expect(repo?.comparison?.error).toContain('develop')
     expect(repo?.changes).toEqual([{ path: 'a.ts', status: 'M' }])
@@ -325,6 +339,7 @@ describe('what a session changed', () => {
   test('a sandbox that fails says why', async () => {
     const { env } = envWith()
 
+    // SAFETY: the route under test calls only `isAwake` and `workspaceSummary` on the stub.
     const broken = {
       ...env,
       SANDBOX: {
@@ -396,7 +411,7 @@ describe('saving an edit', () => {
     const { status, body } = await call(envWith().env, 'POST', 'write', { path: 'demo/a.ts' })
 
     expect(status).toBe(400)
-    expect(typeof body.error).toBe('string')
+    expect(z.string().safeParse(body.error).success).toBe(true)
   })
 
   test('needs a file in one of the repositories', async () => {
@@ -430,7 +445,7 @@ describe('adopting a stray', () => {
     const { status, body } = await call(envWith().env, 'POST', 'adopt', {})
 
     expect(status).toBe(400)
-    expect(typeof body.error).toBe('string')
+    expect(z.string().safeParse(body.error).success).toBe(true)
   })
 })
 
@@ -486,7 +501,7 @@ describe('diagnostics', () => {
     const elsewhere = await call(env, 'GET', 'diagnostics?path=elsewhere/a.ts')
 
     expect(noText.status).toBe(400)
-    expect(typeof noText.body.error).toBe('string')
+    expect(z.string().safeParse(noText.body.error).success).toBe(true)
     expect(noPath.status).toBe(400)
     expect(elsewhere.status).toBe(400)
     expect(elsewhere.body.error).toBe('path must be a file in one of the session repositories')
@@ -567,11 +582,13 @@ describe('where a session is', () => {
   test('a move must say where to', async () => {
     const { env } = envWith()
 
-    for (const body of [{}, { to: 'local' }, { to: 'moon' }]) {
+    const bodies: JsonValue[] = [{}, { to: 'local' }, { to: 'moon' }]
+
+    for (const body of bodies) {
       const answer = await call(env, 'POST', 'place', body)
 
       expect(answer.status).toBe(400)
-      expect(typeof answer.body.error).toBe('string')
+      expect(z.string().safeParse(answer.body.error).success).toBe(true)
     }
   })
 })
@@ -583,7 +600,7 @@ describe('the preview address', () => {
     const second = await call(env, 'GET', 'preview')
 
     expect(first.status).toBe(200)
-    expect(typeof first.body.label).toBe('string')
+    expect(z.string().safeParse(first.body.label).success).toBe(true)
     expect(first.body.host).toBe('pre.test')
     expect(second.body).toEqual(first.body)
   })

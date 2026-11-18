@@ -44,22 +44,24 @@ const dotClass: Record<StatusTone, string> = {
   idle: 'border-muted-foreground/45 border',
 }
 
-const LABELS: Record<string, string> = {
-  working: 'Working',
-  running: 'Working',
-  starting: 'Starting',
-  delegating: 'Delegating',
-  needs_input: 'Needs input',
-  waiting: 'Waiting',
-  idle: 'Idle',
-  completed: 'Completed',
-  failed: 'Failed',
-  error: 'Failed',
-  cancelled: 'Cancelled',
-}
+const LABELS = new Map<string, string>(
+  Object.entries({
+    working: 'Working',
+    running: 'Working',
+    starting: 'Starting',
+    delegating: 'Delegating',
+    needs_input: 'Needs input',
+    waiting: 'Waiting',
+    idle: 'Idle',
+    completed: 'Completed',
+    failed: 'Failed',
+    error: 'Failed',
+    cancelled: 'Cancelled',
+  }),
+)
 
 export function statusLabel(status: string): string {
-  return LABELS[status] ?? status
+  return LABELS.get(status) ?? status
 }
 
 export function statusClass(status: string): string {

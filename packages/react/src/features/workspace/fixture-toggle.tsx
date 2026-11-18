@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react'
 
 import { useFixtureMode } from './workspace-context'
-import type { FixtureMode } from './workspace-fixtures'
+import { FIXTURE_MODES, type FixtureMode } from './workspace-fixtures'
 
-const LABELS: Record<FixtureMode, string> = {
+const LABELS = {
   live: 'Live data',
   worst: 'Worst case',
   empty: 'Empty',
   huge: '1,284 sessions',
-}
+} satisfies Record<FixtureMode, string>
 
 const HIDDEN_KEY = 'shuttle.fixture.bar'
 
@@ -86,7 +86,7 @@ export function FixtureToggle() {
       title="Shift+F to hide"
       className="fixed bottom-3 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-0.5 rounded-full bg-neutral-300 p-0.5 font-[system-ui] text-[11px] whitespace-nowrap text-neutral-700 shadow-lg"
     >
-      {(Object.keys(LABELS) as FixtureMode[]).map((option) => (
+      {FIXTURE_MODES.map((option) => (
         <button
           key={option}
           type="button"

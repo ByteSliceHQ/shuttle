@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 
 import { orgOfRun } from '../tenancy/run-id'
+import { isEventOf } from './event-guard'
 import { TabKindSchema, workspaceModule, type ArtifactTab } from './scope'
 import { mutateSessionTabs, type SessionTabSet } from './tab-set'
 
@@ -8,11 +9,11 @@ function activityEventSeq(
   payloadSeq: number | undefined,
   idempotencyKey: string | null | undefined,
 ): number | undefined {
-  if (typeof payloadSeq === 'number' && Number.isFinite(payloadSeq)) {
+  if (payloadSeq !== undefined && Number.isFinite(payloadSeq)) {
     return payloadSeq
   }
 
-  if (typeof idempotencyKey === 'string' && idempotencyKey.startsWith('activity:')) {
+  if (idempotencyKey?.startsWith('activity:') === true) {
     const tail = Number(idempotencyKey.slice(idempotencyKey.lastIndexOf(':') + 1))
 
     if (Number.isFinite(tail)) {
@@ -41,7 +42,7 @@ function isStaleActivityEvent(
 
 /** Projections re-fold from the event log on read — never stamp wall clock. */
 function eventTimestamp(event: { readonly ts?: number }): number {
-  return typeof event.ts === 'number' && Number.isFinite(event.ts) ? event.ts : Date.now()
+  return event.ts !== undefined && Number.isFinite(event.ts) ? event.ts : Date.now()
 }
 
 /** Reconcile corrections fix a stuck status; they are not new activity, so they never advance the clock. */
@@ -50,9 +51,7 @@ function activityEventAt(
   at: number,
   idempotencyKey: string | null | undefined,
 ): number {
-  return typeof idempotencyKey === 'string' && idempotencyKey.startsWith('reconcile:')
-    ? Math.min(at, session.updatedAt)
-    : at
+  return idempotencyKey?.startsWith('reconcile:') === true ? Math.min(at, session.updatedAt) : at
 }
 
 const GithubAccountSchema = Schema.Struct({
@@ -105,6 +104,28 @@ const InstallationSchema = Schema.Struct({
   account: GithubAccountSchema,
 })
 
+/** The events the sidebar tree folds; it ignores the rest. */
+const TREE_EVENTS = [
+  'workspace.folder.created',
+  'workspace.folder.renamed',
+  'workspace.folder.archived',
+  'workspace.folder.reordered',
+  'workspace.folder.auto_review.set',
+  'workspace.github.connected',
+  'workspace.github.disconnected',
+  'workspace.repo.linked',
+  'workspace.repo.unlinked',
+  'workspace.session.requested',
+  'workspace.session.listed',
+  'workspace.session.unlisted',
+  'workspace.session.shared',
+  'workspace.session.launched',
+  'workspace.session.renamed',
+  'workspace.session.archived',
+  'workspace.session.activity',
+  'runtime.child.settled',
+] as const
+
 export const workspaceTree = workspaceModule.projection({
   name: 'workspaceTree',
   shape: Schema.Struct({
@@ -115,6 +136,10 @@ export const workspaceTree = workspaceModule.projection({
   }),
   initialState: { folderOrder: [], folders: {}, sessions: {}, installations: {} },
   reduce(state, event) {
+    if (!isEventOf(event, TREE_EVENTS)) {
+      return state
+    }
+
     switch (event.type) {
       case 'workspace.folder.created': {
         if (state.folders[event.payload.folderId]) {
@@ -427,11 +452,10 @@ export const workspaceTree = workspaceModule.projection({
               ...session,
               activity: event.payload.activity,
               activityAt: Math.max(session.activityAt ?? 0, at),
-              ...(seq !== undefined
-                ? { activitySeq: Math.max(session.activitySeq ?? 0, seq) }
-                : {}),
+              activitySeq:
+                seq === undefined ? session.activitySeq : Math.max(session.activitySeq ?? 0, seq),
               updatedAt: Math.max(session.updatedAt, at),
-              ...(finishedWork ? { lastCompletedAt: at } : {}),
+              lastCompletedAt: finishedWork ? at : session.lastCompletedAt,
             },
           },
         }
@@ -440,7 +464,7 @@ export const workspaceTree = workspaceModule.projection({
       case 'runtime.child.settled': {
         const { runId, status } = event.payload
 
-        if (!runId) {
+        if (runId === '') {
           return state
         }
 
@@ -450,7 +474,7 @@ export const workspaceTree = workspaceModule.projection({
           return state
         }
 
-        const nextStatus = status ?? session.status
+        const nextStatus = status
         const at = eventTimestamp(event)
 
         return {
@@ -462,14 +486,11 @@ export const workspaceTree = workspaceModule.projection({
               status: nextStatus,
               activity: nextStatus === 'failed' ? 'error' : 'idle',
               updatedAt: at,
-              ...(nextStatus === 'completed' ? { lastCompletedAt: at } : {}),
+              lastCompletedAt: nextStatus === 'completed' ? at : session.lastCompletedAt,
             },
           },
         }
       }
-
-      default:
-        return state
     }
   },
 })
@@ -491,11 +512,23 @@ export type { ArtifactTab, SessionTabSet }
 
 export type SessionTabsState = Readonly<Record<string, SessionTabSet>>
 
+/** The events the session tab sets fold; they ignore the rest. */
+const TAB_EVENTS = [
+  'workspace.tab.opened',
+  'workspace.tab.closed',
+  'workspace.tab.reordered',
+  'workspace.tab.retargeted',
+] as const
+
 export const sessionTabs = workspaceModule.projection({
   name: 'sessionTabs',
   shape: Schema.Record(Schema.String, SessionTabSetSchema),
   initialState: {},
   reduce(state, event) {
+    if (!isEventOf(event, TAB_EVENTS)) {
+      return state
+    }
+
     switch (event.type) {
       case 'workspace.tab.opened': {
         const { runId, tabId, kind, title, target, at } = event.payload
@@ -525,9 +558,6 @@ export const sessionTabs = workspaceModule.projection({
 
         return mutateSessionTabs(state, runId, { type: 'retarget', tabId, title, target })
       }
-
-      default:
-        return state
     }
   },
 })

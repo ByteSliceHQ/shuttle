@@ -12,13 +12,13 @@ import {
 import { shareSandboxFile } from '../assets/sandbox'
 import type { ShuttleEnv } from '../env'
 import { sandboxStub } from '../env'
+import { present } from '../present'
 import { shellQuote } from '../sandbox/exec-argv'
 import {
   insideSessionWorktree,
   resolvePath,
   sessionWorkDir,
   worktreeRoot,
-  type LinkedSandboxRepo,
 } from '../sandbox/workspace'
 import type { SandboxBinding } from '../session/bind-sandbox'
 import { readSandboxBinding, sandboxNameForSession } from '../session/bind-sandbox'
@@ -42,7 +42,7 @@ async function withAbort<T>(
     throw new Error('Aborted')
   }
 
-  return await new Promise<T>((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     const onAbortEvent = () => {
       void onAbort().finally(() => reject(new Error('Aborted')))
     }
@@ -66,7 +66,7 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
         return stored
       }
 
-      return { sandboxName: runId, repos: [] as LinkedSandboxRepo[] }
+      return { sandboxName: runId, repos: [] }
     })()
 
     const bound = await bindingPromise
@@ -78,7 +78,7 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
     }
   }
 
-  async function prepare(): Promise<{ cwd: string; repos: LinkedSandboxRepo[] }> {
+  async function prepare(): Promise<{ cwd: string; repos: SandboxBinding['repos'] }> {
     const binding = await resolveBinding()
 
     // Sets the sandbox up, and first moves the session into it if it was working elsewhere.
@@ -86,7 +86,7 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
 
     return {
       cwd: sessionWorkDir(runId, binding.repos),
-      repos: binding.repos as LinkedSandboxRepo[],
+      repos: binding.repos,
     }
   }
 
@@ -135,7 +135,7 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
 
       return toolDiagnostics(result.stdout)
     } catch (cause) {
-      if (signal?.aborted) {
+      if (signal?.aborted === true) {
         throw cause
       }
 
@@ -161,9 +161,9 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
 
       return {
         path,
-        content: result.missing ? null : result.content,
+        content: result.missing === true ? null : result.content,
         missing: result.missing === true,
-        error: result.missing ? result.error : null,
+        error: result.missing === true ? result.error : null,
       }
     },
   })
@@ -221,13 +221,10 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
         onAbort,
       )
 
-      return {
-        path,
-        replacements: result.replacements,
-        ...(result.replacements > 0
-          ? await diagnose(path, cwd, binding.sandboxName, ctx.signal)
-          : {}),
-      }
+      const diagnostics =
+        result.replacements > 0 ? await diagnose(path, cwd, binding.sandboxName, ctx.signal) : {}
+
+      return { path, replacements: result.replacements, ...diagnostics }
     },
   })
 
@@ -266,7 +263,7 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
       const timeoutMs = (timeout_seconds ?? 120) * 1000
       const execId = crypto.randomUUID()
 
-      return await withAbort(
+      return withAbort(
         ctx.signal,
         () => sandbox.exec(command, { cwd, timeoutMs, execId }),
         async () => {
@@ -323,7 +320,7 @@ export function createSandboxTools(env: ShuttleEnv, runId: string, storage?: Dur
             runId,
             path,
             cwd,
-            ...(name ? { name } : {}),
+            name: present(name),
             sharedBy: ctx.threadId,
           }),
         onAbort,

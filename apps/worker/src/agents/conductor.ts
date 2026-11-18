@@ -2,13 +2,13 @@ import { z } from 'zod'
 
 import { asAgentTool, asEffectsTool, defineAgent } from '@swirls/looms/agent'
 import { gate } from '@swirls/looms/approval'
-import { isJsonObject, isJsonString } from '@swirls/looms/core'
+import { isJsonObject, isJsonString, type JsonValue } from '@swirls/looms/core'
 
 import { resolveTeam, workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
 import { loomsStub } from '../looms-stub'
 import { readSponsor } from '../session/sponsor'
-import { DEFAULT_TEAM, frameTask, presetRoles, type DelegateMode, type Team } from '../team'
+import { DEFAULT_TEAM, frameTask, presetRoles, type Team } from '../team'
 import { orgOfRun } from '../tenancy/run-id'
 import { createSandboxTools } from '../tools/sandbox'
 import { AttachmentInputSchema } from './attachment-input'
@@ -130,7 +130,7 @@ async function sessionTeam(
   const ownerId = await readSponsor(storage)
 
   const connected = new Set(
-    ownerId
+    ownerId !== null && ownerId !== ''
       ? (
           await loomsStub(env.LOOMS_RUN, workspaceRunId(env, orgOfRun(runId))).listCredentials(
             ownerId,
@@ -157,14 +157,14 @@ const delegateInput = z.object({
     ),
 })
 
-function taskInput(input: unknown) {
+function taskInput(input: JsonValue) {
   if (isJsonObject(input) && isJsonString(input.text)) {
-    const mode = isJsonString(input.mode) ? (input.mode as DelegateMode) : undefined
+    const mode = delegateInput.shape.mode.safeParse(input.mode).data
 
     return { text: frameTask(input.text, mode) }
   }
 
-  return { text: String(input) }
+  return { text: isJsonString(input) ? input : JSON.stringify(input) }
 }
 
 /** One delegate tool per team member. A preset's role for an agent rides on its description. */

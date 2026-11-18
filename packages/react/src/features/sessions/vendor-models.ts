@@ -49,7 +49,7 @@ export function modelSections(harness: HarnessId, team: Team): ModelSection[] {
   ]
 }
 
-const EFFORT_LABELS: Record<string, string> = {
+const EFFORT_LABELS = {
   minimal: 'Minimal',
   low: 'Low',
   medium: 'Medium',
@@ -57,10 +57,26 @@ const EFFORT_LABELS: Record<string, string> = {
   xhigh: 'Extra High',
   max: 'Max',
   ultra: 'Ultra',
+} satisfies Record<string, string>
+
+function isKnownEffort(effort: string): effort is keyof typeof EFFORT_LABELS {
+  return Object.hasOwn(EFFORT_LABELS, effort)
 }
 
 export function effortLabel(effort: string): string {
-  return EFFORT_LABELS[effort] ?? effort.charAt(0).toUpperCase() + effort.slice(1)
+  return isKnownEffort(effort)
+    ? EFFORT_LABELS[effort]
+    : effort.charAt(0).toUpperCase() + effort.slice(1)
+}
+
+/** The model a choice names, or `undefined` when it leaves the choice to the agent's default. */
+export function chosenModelId(choice: VendorModelChoice | undefined): string | undefined {
+  return choice?.model === undefined || choice.model === '' ? undefined : choice.model
+}
+
+/** The reasoning effort a choice names, or `undefined` when it leaves it to the model. */
+export function chosenEffort(choice: VendorModelChoice | undefined): string | undefined {
+  return choice?.effort === undefined || choice.effort === '' ? undefined : choice.effort
 }
 
 /** The model a choice runs on: the chosen one, else the one the agent uses by default. */
@@ -68,9 +84,9 @@ export function chosenVendorModel(
   choice: VendorModelChoice | undefined,
   models: readonly VendorModel[],
 ): VendorModel | undefined {
-  return choice?.model
-    ? models.find((model) => model.id === choice.model)
-    : models.find((model) => model.isDefault)
+  return chosenModelId(choice) === undefined
+    ? models.find((model) => model.isDefault === true)
+    : models.find((model) => model.id === choice?.model)
 }
 
 /** Short text for a choice, such as "GPT-6.1-Sol · High". */
@@ -81,7 +97,9 @@ export function vendorChoiceLabel(
   const model = chosenVendorModel(choice, models)
   const name = model?.label ?? choice?.model ?? 'Default model'
 
-  return choice?.effort ? `${name} · ${effortLabel(choice.effort)}` : name
+  const effort = chosenEffort(choice)
+
+  return effort === undefined ? name : `${name} · ${effortLabel(effort)}`
 }
 
 /** Moves a choice to another model, keeping the effort only when the new model accepts it. */
@@ -91,7 +109,12 @@ export function withVendorModel(
   defaultModel: VendorModel | undefined,
 ): VendorModelChoice {
   const efforts = (model ?? defaultModel)?.efforts ?? []
-  const effort = choice?.effort && efforts.includes(choice.effort) ? choice.effort : undefined
+  const kept = chosenEffort(choice)
+  const effort = kept !== undefined && efforts.includes(kept) ? kept : undefined
 
-  return { ...(model ? { model: model.id } : {}), ...(effort ? { effort } : {}) }
+  if (model === undefined) {
+    return effort === undefined ? {} : { effort }
+  }
+
+  return effort === undefined ? { model: model.id } : { model: model.id, effort }
 }

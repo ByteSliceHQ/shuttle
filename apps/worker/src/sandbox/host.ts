@@ -46,22 +46,28 @@ export function cloudflareHost(container: DurableContainer): SandboxHost {
 
   return {
     async exec(argv, options) {
-      const process = await container.exec(argv, {
-        ...(options?.cwd ? { cwd: options.cwd } : {}),
-        ...(options?.env ? { env: { ...options.env } } : {}),
-        ...(options?.stdin ? { stdin: options.stdin } : {}),
-      })
+      const execOptions: ContainerExecOptions = {}
+
+      if (options?.cwd !== undefined && options.cwd !== '') {
+        execOptions.cwd = options.cwd
+      }
+
+      if (options?.env !== undefined) {
+        execOptions.env = { ...options.env }
+      }
+
+      if (options?.stdin !== undefined) {
+        execOptions.stdin = options.stdin
+      }
+
+      const process = await container.exec(argv, execOptions)
 
       return {
-        ...(typeof process.pid === 'number' ? { pid: process.pid } : {}),
+        pid: process.pid,
         async output() {
           const output = await process.output()
 
-          return {
-            stdout: output.stdout,
-            stderr: output.stderr ?? new ArrayBuffer(0),
-            exitCode: output.exitCode ?? 0,
-          }
+          return { stdout: output.stdout, stderr: output.stderr, exitCode: output.exitCode }
         },
       }
     },
@@ -73,20 +79,20 @@ export function cloudflareHost(container: DurableContainer): SandboxHost {
     readBytes: async (path) => {
       const output = await (await container.exec(['cat', '--', path])).output()
 
-      if ((output.exitCode ?? 0) !== 0) {
+      if (output.exitCode !== 0) {
         throw new Error(`ENOENT: no such file or directory, open '${path}'`)
       }
 
       return new Uint8Array(output.stdout)
     },
     writeBytes: async (path, content) => {
-      const stdin = new Blob([content as Uint8Array<ArrayBuffer>]).stream()
+      const stdin = new Blob([new Uint8Array(content)]).stream()
 
       const output = await (
         await container.exec(['bash', '-c', 'cat > "$1"', 'bash', path], { stdin })
       ).output()
 
-      if ((output.exitCode ?? 0) !== 0) {
+      if (output.exitCode !== 0) {
         throw new Error(`could not write ${path}`)
       }
     },

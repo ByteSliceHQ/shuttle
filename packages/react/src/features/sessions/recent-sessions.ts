@@ -1,4 +1,4 @@
-import { isRecord } from '../../lib/json'
+import { z } from 'zod'
 
 const STORAGE_KEY = 'shuttle.recent-sessions'
 const LIMIT = 20
@@ -9,24 +9,20 @@ export interface RecentSession {
   readonly openedAt: number
 }
 
-function isRecentSession(value: unknown): value is RecentSession {
-  if (!isRecord(value)) {
-    return false
-  }
-
-  const entry = value
-  return (
-    typeof entry.runId === 'string' &&
-    typeof entry.goal === 'string' &&
-    typeof entry.openedAt === 'number'
-  )
-}
+const RecentSessionSchema = z.object({ runId: z.string(), goal: z.string(), openedAt: z.number() })
 
 /** Sessions this browser opened, so the list works before a D1 replica is bound. */
 export function recentSessions(): RecentSession[] {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')
-    return Array.isArray(parsed) ? parsed.filter(isRecentSession) : []
+    const entries = z.array(z.unknown()).safeParse(parsed)
+
+    return entries.success
+      ? entries.data.flatMap((entry) => {
+          const session = RecentSessionSchema.safeParse(entry)
+          return session.success ? [session.data] : []
+        })
+      : []
   } catch {
     return []
   }

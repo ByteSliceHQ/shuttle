@@ -1,13 +1,20 @@
 import { Predicate } from 'effect'
 
-import { emit, invoke, type JsonValue, type RuntimeEffect } from '@swirls/looms/core'
+import { emit, invoke, isJsonObject, type JsonValue, type RuntimeEffect } from '@swirls/looms/core'
 
-import { jsonObject } from '../json'
 import { shuttleModule } from './scope'
 import { stacksAsJson, type PendingPrPublish } from './stack-state'
 
-function asObject(value: unknown): { [key: string]: JsonValue } {
-  return jsonObject(value)
+function asObject(value: JsonValue | undefined): { [key: string]: JsonValue } {
+  return isJsonObject(value) ? value : {}
+}
+
+/** An `approval.decided` payload: who decided which gate, how, and any fields they filled in. */
+export interface ApprovalDecision {
+  readonly approvalId: string
+  readonly actionId: string
+  readonly outcome: 'approve' | 'reject'
+  readonly payload?: JsonValue | undefined
 }
 
 export interface PublishSessionSlice {
@@ -19,12 +26,12 @@ export interface PublishSessionSlice {
 /** Apply an approval decision to a pending PR publish, or return null if unrelated. */
 export function withPrApprovalDecision<S extends PublishSessionSlice>(
   state: S,
-  payload: { readonly [key: string]: unknown },
+  payload: ApprovalDecision,
 ): S | null {
-  const approvalId = Predicate.isString(payload.approvalId) ? payload.approvalId : ''
+  const approvalId = payload.approvalId
   const pending = state.pendingPrPublish
 
-  if (!pending || pending.approvalId !== approvalId) {
+  if (pending === null || pending.approvalId !== approvalId) {
     return null
   }
 
@@ -33,7 +40,7 @@ export function withPrApprovalDecision<S extends PublishSessionSlice>(
   }
 
   const fields = asObject(payload.payload)
-  const actionId = Predicate.isString(payload.actionId) ? payload.actionId : 'draft'
+  const actionId = payload.actionId
   const title = Predicate.isString(fields.title) ? fields.title : pending.title
   const body = Predicate.isString(fields.body) ? fields.body : pending.body
 
@@ -45,7 +52,7 @@ export function withPrApprovalDecision<S extends PublishSessionSlice>(
   const draft =
     actionId === 'publish'
       ? false
-      : typeof fields.draft === 'boolean'
+      : Predicate.isBoolean(fields.draft)
         ? fields.draft
         : pending.draft
 
@@ -92,7 +99,7 @@ export function appendPrPublishEffects(state: PublishSessionSlice, effects: Runt
     )
   }
 
-  if (state.discardedPrApprovalId) {
+  if (state.discardedPrApprovalId !== null && state.discardedPrApprovalId !== '') {
     effects.push(
       emit(
         shuttleModule.input('pr.discarded', {

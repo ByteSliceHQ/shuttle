@@ -18,7 +18,7 @@ export function needsSignIn(
   connection: Connection | undefined,
   place: SignInPlace | null,
 ): connection is Connection {
-  return Boolean(connection && place && signedInAt(connection, place) === false)
+  return connection !== undefined && place !== null && signedInAt(connection, place) === false
 }
 
 /** The words for a place, as in "signed in on this machine". */

@@ -29,7 +29,7 @@ export async function handleSandboxRoutes(
 
   const runId = decodeURIComponent(match[1] ?? '')
 
-  if (!runId) {
+  if (runId === '') {
     return Response.json({ error: 'Invalid sandbox path' }, { status: 400 })
   }
 
@@ -38,7 +38,9 @@ export async function handleSandboxRoutes(
   const own = sandboxesArePersonal(env) ? userSandboxName(actor.orgId, actor.userId) : null
 
   // Starts in the session's files when this sandbox has them; the sandbox falls back if not.
-  if (!url.searchParams.get('cwd')) {
+  const cwd = url.searchParams.get('cwd')
+
+  if (cwd === null || cwd === '') {
     url.searchParams.set('cwd', `/workspace/.wt/${runId}`)
   }
 

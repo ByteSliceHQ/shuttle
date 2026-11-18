@@ -5,12 +5,13 @@ import { z } from 'zod'
 
 import { agent, asAgentTool, asEffectsTool, defineAgent } from '@swirls/looms/agent'
 import { approval, gate } from '@swirls/looms/approval'
-import type { EventEnvelope } from '@swirls/looms/core'
+import { emptyRunState, type EventEnvelope, type JsonValue } from '@swirls/looms/core'
 import { evaluator } from '@swirls/looms/evaluator'
 import { createLooms } from '@swirls/looms/runtime'
 
 import { intake } from '../agents/intake'
 import type { ShuttleEnv } from '../env'
+import type { LoomsRunStub } from '../looms-stub'
 import { codingSession, say, shuttleSession } from '../session/module'
 import { fakeEnv } from '../testing/fake-env'
 import { createWorkspaceActivityProjector } from './activity'
@@ -33,32 +34,50 @@ interface RecordedSignal {
 }
 
 function createTestEnv(signals: RecordedSignal[]): ShuttleEnv {
-  return {
-    SHUTTLE_WORKSPACE_RUN_ID: 'shuttle-workspace',
-    LOOMS_RUN: {
-      getByName: () => ({
-        signal: async (events: RecordedSignal[]) => {
-          signals.push(...events)
-        },
-      }),
+  // SAFETY: the projector reaches the Looms run only through `signal`, which this answers; no
+  // other method of the stub is called.
+  const stub = {
+    signal: async (events: RecordedSignal[]) => {
+      signals.push(...events)
+
+      return emptyRunState('shuttle-workspace')
     },
-    SANDBOX: {} as DurableObjectNamespace,
-  } as unknown as ShuttleEnv
+  } as LoomsRunStub
+
+  return fakeEnv({
+    SHUTTLE_WORKSPACE_RUN_ID: 'shuttle-workspace',
+    LOOMS_RUN: { getByName: () => stub },
+  })
 }
 
 function createMemoryStorage(): DurableObjectStorage {
-  const store = new Map<string, unknown>()
+  const store = new Map<string, JsonValue>()
 
+  // SAFETY: a value is read back as the type it was stored under, and the projector uses only
+  // `get` and `put`.
   return {
     get: async <T>(key: string) => store.get(key) as T | undefined,
-    put: async (key: string, value: unknown) => {
+    put: async (key: string, value: JsonValue) => {
       store.set(key, value)
     },
-  } as unknown as DurableObjectStorage
+  } as DurableObjectStorage
+}
+
+/** A run event as the log holds it, with the fields these tests do not look at filled in. */
+function envelope(
+  fields: Pick<EventEnvelope, 'type' | 'seq' | 'ts' | 'payload'> & Partial<EventEnvelope>,
+): EventEnvelope {
+  return {
+    id: `evt_${fields.seq}`,
+    runId: 'session_abc',
+    threadId: null,
+    origin: { type: 'system' },
+    ...fields,
+  }
 }
 
 function launchedEvent(seq = 1, ts = 5): EventEnvelope {
-  return {
+  return envelope({
     type: 'runtime.run.started',
     seq,
     ts,
@@ -72,7 +91,7 @@ function launchedEvent(seq = 1, ts = 5): EventEnvelope {
         causationSeq: 3,
       },
     },
-  } as unknown as EventEnvelope
+  })
 }
 
 describe('workspace activity projector', () => {
@@ -83,12 +102,12 @@ describe('workspace activity projector', () => {
     const self = createWorkspaceActivityProjector(env, 'shuttle-workspace')
 
     await self.project([
-      {
+      envelope({
         type: 'agent.turn.started',
         seq: 1,
         ts: 10,
         payload: {},
-      } as EventEnvelope,
+      }),
     ])
 
     expect(signals).toHaveLength(0)
@@ -96,8 +115,8 @@ describe('workspace activity projector', () => {
     const playbook = createWorkspaceActivityProjector(env, 'shuttle-playbook')
 
     await playbook.project([
-      { type: 'runtime.run.started', seq: 1, ts: 5, payload: {} } as EventEnvelope,
-      { type: 'agent.turn.started', seq: 2, ts: 10, payload: {} } as EventEnvelope,
+      envelope({ type: 'runtime.run.started', seq: 1, ts: 5, payload: {} }),
+      envelope({ type: 'agent.turn.started', seq: 2, ts: 10, payload: {} }),
     ])
 
     expect(signals).toHaveLength(0)
@@ -106,18 +125,18 @@ describe('workspace activity projector', () => {
 
     await projector.project([
       launchedEvent(0, 5),
-      {
+      envelope({
         type: 'agent.turn.started',
         seq: 1,
         ts: 10,
         payload: {},
-      } as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'approval.requested',
         seq: 2,
         ts: 20,
         payload: {},
-      } as EventEnvelope,
+      }),
     ])
 
     expect(signals).toHaveLength(1)
@@ -135,90 +154,90 @@ describe('workspace activity projector', () => {
 
     await firstInstance.project([
       launchedEvent(1, 100),
-      {
+      envelope({
         type: 'runtime.thread.started',
         seq: 2,
         ts: 101,
         threadId: 'thr_session',
         payload: { threadId: 'thr_session', kind: 'shuttle-session', definitionName: 'coding' },
-      } as unknown as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'shuttle.conductor.spawned',
         seq: 3,
         ts: 102,
         threadId: 'thr_session',
         payload: { childThreadId: 'thr_conductor' },
-      } as unknown as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'runtime.thread.started',
         seq: 4,
         ts: 103,
         threadId: 'thr_conductor',
         payload: { threadId: 'thr_conductor', kind: 'agent', definitionName: 'conductor' },
-      } as unknown as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'runtime.wait.registered',
         seq: 5,
         ts: 104,
         threadId: 'thr_session',
         payload: { waitId: 'w_mail', tag: { kind: 'shuttle-mailbox' } },
-      } as unknown as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'agent.turn.started',
         seq: 6,
         ts: 110,
         threadId: 'thr_conductor',
         payload: { turn: 1, messageCount: 1 },
-      } as unknown as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'agent.tool_call.requested',
         seq: 7,
         ts: 115,
         threadId: 'thr_conductor',
         payload: { turn: 1, toolCall: { id: 'del_1', name: 'delegate', arguments: {} } },
-      } as unknown as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'agent.tool_call.requested',
         seq: 8,
         ts: 116,
         threadId: 'thr_conductor',
         payload: { turn: 1, toolCall: { id: 'del_2', name: 'delegate', arguments: {} } },
-      } as unknown as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'agent.turn.settled',
         seq: 9,
         ts: 117,
         threadId: 'thr_conductor',
         payload: { turn: 1 },
-      } as unknown as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'agent.spawn.requested',
         seq: 10,
         ts: 118,
         threadId: 'thr_conductor',
         payload: { toolCallId: 'del_1', childThreadId: 'thr_worker_1' },
-      } as unknown as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'agent.spawn.requested',
         seq: 11,
         ts: 119,
         threadId: 'thr_conductor',
         payload: { toolCallId: 'del_2', childThreadId: 'thr_worker_2' },
-      } as unknown as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'runtime.thread.started',
         seq: 12,
         ts: 120,
         threadId: 'thr_worker_1',
         payload: { threadId: 'thr_worker_1', kind: 'agent', definitionName: 'worker' },
-      } as unknown as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'runtime.thread.started',
         seq: 13,
         ts: 121,
         threadId: 'thr_worker_2',
         payload: { threadId: 'thr_worker_2', kind: 'agent', definitionName: 'worker' },
-      } as unknown as EventEnvelope,
+      }),
     ])
 
     expect(signals).toHaveLength(1)
@@ -229,14 +248,14 @@ describe('workspace activity projector', () => {
     const wokenInstance = createWorkspaceActivityProjector(env, 'session_parallel', storage)
 
     await wokenInstance.project([
-      {
+      envelope({
         type: 'runtime.thread.completed',
         seq: 14,
         ts: 150,
         threadId: 'thr_worker_1',
         payload: { threadId: 'thr_worker_1', output: { ok: true } },
-      } as unknown as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'agent.tool.result',
         seq: 15,
         ts: 151,
@@ -248,7 +267,7 @@ describe('workspace activity projector', () => {
           result: { ok: true },
           error: null,
         },
-      } as unknown as EventEnvelope,
+      }),
     ])
 
     // Still working (within 60s heartbeat window), so no redundant signal emitted.
@@ -256,14 +275,14 @@ describe('workspace activity projector', () => {
 
     // Worker 2 finishes, conductor runs its summary turn, and settles without completing its thread.
     await wokenInstance.project([
-      {
+      envelope({
         type: 'runtime.thread.completed',
         seq: 16,
         ts: 200,
         threadId: 'thr_worker_2',
         payload: { threadId: 'thr_worker_2', output: { ok: true } },
-      } as unknown as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'agent.tool.result',
         seq: 17,
         ts: 201,
@@ -275,28 +294,28 @@ describe('workspace activity projector', () => {
           result: { ok: true },
           error: null,
         },
-      } as unknown as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'agent.turn.started',
         seq: 18,
         ts: 210,
         threadId: 'thr_conductor',
         payload: { turn: 2, messageCount: 4 },
-      } as unknown as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'agent.message',
         seq: 19,
         ts: 220,
         threadId: 'thr_conductor',
         payload: { turn: 2, message: { role: 'assistant', content: 'All done!' } },
-      } as unknown as EventEnvelope,
-      {
+      }),
+      envelope({
         type: 'agent.turn.settled',
         seq: 20,
         ts: 225,
         threadId: 'thr_conductor',
         payload: { turn: 2 },
-      } as unknown as EventEnvelope,
+      }),
     ])
 
     expect(signals).toHaveLength(2)
@@ -330,14 +349,16 @@ describe('workspace activity projector', () => {
       agent: workerAgent,
     })
 
+    const askUserInput = z.object({ title: z.string() })
+
     const askUser = asEffectsTool({
       name: 'ask_user',
       description: 'Ask the human',
-      input: z.object({ title: z.string() }),
+      input: askUserInput,
       effects: (input) =>
         gate({
           approvalId: 'gate_1',
-          title: String((input as { title?: string })?.title ?? 'Approve?'),
+          title: askUserInput.safeParse(input).data?.title ?? 'Approve?',
           actions: [
             { id: 'approve', label: 'Approve', outcome: 'approve' },
             { id: 'reject', label: 'Reject', outcome: 'reject' },

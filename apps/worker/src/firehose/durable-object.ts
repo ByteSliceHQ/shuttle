@@ -1,9 +1,10 @@
 import { DurableObject } from 'cloudflare:workers'
+import { z } from 'zod'
 
 import type { EventEnvelope } from '@swirls/looms/core'
 
 import type { ShuttleEnv } from '../env'
-import { RUN_KINDS, runKindFor, type RunKind } from './run-kind'
+import { RunKindSchema, runKindFor, type RunKind } from './run-kind'
 import {
   ensureFirehoseSchema,
   ingest,
@@ -16,6 +17,44 @@ import {
   type FirehoseFrame,
 } from './store'
 
+const TextSchema = z.string()
+
+/** The values of `items` that are text. */
+function textsOf(items: readonly unknown[]): string[] {
+  return items.flatMap((item) => {
+    const text = TextSchema.safeParse(item)
+
+    return text.success ? [text.data] : []
+  })
+}
+
+/** A run kind field of a filter message: text to split, or a list of values of which text counts. */
+const RunKindsFieldSchema = z
+  .union([
+    z.string().transform((text) => parseRunKinds(text)),
+    z.array(z.unknown()).transform((items) => parseRunKinds(textsOf(items).join(','))),
+  ])
+  .optional()
+  .catch(undefined)
+
+/** A name list field of a filter message, read the same two ways. */
+const NamesFieldSchema = z
+  .union([
+    z.string().transform((text) => parseList(text)),
+    z.array(z.unknown()).transform((items) => textsOf(items)),
+  ])
+  .optional()
+  .catch(undefined)
+
+/** A client asking for a different filter, or a different place to read from. */
+const FilterMessageSchema = z.object({
+  type: z.literal('filter'),
+  runKind: RunKindsFieldSchema,
+  runId: NamesFieldSchema,
+  family: NamesFieldSchema,
+  after: z.number().optional().catch(undefined),
+})
+
 const BACKLOG_LIMIT = 200
 const PAGE_LIMIT = 200
 const PRUNE_ALARM_MS = 60_000
@@ -25,8 +64,17 @@ interface SocketAttachment {
   readonly after: number
 }
 
+const SocketAttachmentSchema = z.object({
+  filter: z.object({
+    runKinds: z.array(RunKindSchema).optional(),
+    runIds: z.array(z.string()).optional(),
+    families: z.array(z.string()).optional(),
+  }),
+  after: z.number(),
+})
+
 function parseList(value: string | null): string[] {
-  if (!value) {
+  if (value === null || value === '') {
     return []
   }
 
@@ -37,21 +85,31 @@ function parseList(value: string | null): string[] {
 }
 
 function parseRunKinds(value: string | null): RunKind[] {
-  return parseList(value).flatMap((part) =>
-    (RUN_KINDS as readonly string[]).includes(part) ? [part as RunKind] : [],
-  )
+  return parseList(value).flatMap((part) => {
+    const kind = RunKindSchema.safeParse(part)
+
+    return kind.success ? [kind.data] : []
+  })
+}
+
+function nonEmpty<T>(items: readonly T[] | undefined): readonly T[] | undefined {
+  return items !== undefined && items.length > 0 ? items : undefined
+}
+
+function filterOf(
+  runKinds: readonly RunKind[] | undefined,
+  runIds: readonly string[] | undefined,
+  families: readonly string[] | undefined,
+): FirehoseFilter {
+  return { runKinds: nonEmpty(runKinds), runIds: nonEmpty(runIds), families: nonEmpty(families) }
 }
 
 function filterFromSearch(url: URL): FirehoseFilter {
-  const runKinds = parseRunKinds(url.searchParams.get('runKind'))
-  const runIds = parseList(url.searchParams.get('runId'))
-  const families = parseList(url.searchParams.get('family'))
-
-  return {
-    ...(runKinds.length > 0 ? { runKinds } : {}),
-    ...(runIds.length > 0 ? { runIds } : {}),
-    ...(families.length > 0 ? { families } : {}),
-  }
+  return filterOf(
+    parseRunKinds(url.searchParams.get('runKind')),
+    parseList(url.searchParams.get('runId')),
+    parseList(url.searchParams.get('family')),
+  )
 }
 
 function parseAfter(url: URL): number {
@@ -86,16 +144,15 @@ function parseLimit(url: URL, fallback: number): number {
 }
 
 function readAttachment(ws: WebSocket): SocketAttachment | null {
-  if (!('deserializeAttachment' in ws) || typeof ws.deserializeAttachment !== 'function') {
+  if (!('deserializeAttachment' in ws)) {
     return null
   }
 
-  const value = ws.deserializeAttachment() as SocketAttachment | null
-  return value ?? null
+  return SocketAttachmentSchema.safeParse(ws.deserializeAttachment()).data ?? null
 }
 
 function writeAttachment(ws: WebSocket, attachment: SocketAttachment): void {
-  if (!('serializeAttachment' in ws) || typeof ws.serializeAttachment !== 'function') {
+  if (!('serializeAttachment' in ws)) {
     return
   }
 
@@ -106,7 +163,13 @@ function sendFrame(ws: WebSocket, frame: FirehoseFrame): void {
   ws.send(JSON.stringify(frame))
 }
 
-function sendJson(ws: WebSocket, payload: unknown): void {
+/** What the firehose says to a socket besides event frames. */
+type FirehoseControl =
+  | { readonly type: 'error'; readonly error: string }
+  | { readonly type: 'filter.applied'; readonly after: number }
+  | { readonly type: 'ready'; readonly after: number }
+
+function sendJson(ws: WebSocket, payload: FirehoseControl): void {
   ws.send(JSON.stringify(payload))
 }
 
@@ -167,68 +230,32 @@ export class EventFirehose extends DurableObject<ShuttleEnv> {
   override async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     this.ensureSchema()
 
-    if (typeof message !== 'string') {
+    if (message instanceof ArrayBuffer) {
       return
     }
 
-    let body: unknown
+    let record: z.infer<typeof FilterMessageSchema> | undefined
 
     try {
-      body = JSON.parse(message)
+      record = FilterMessageSchema.safeParse(JSON.parse(message)).data
     } catch {
       sendJson(ws, { type: 'error', error: 'invalid json' })
       return
     }
 
-    if (!body || typeof body !== 'object') {
-      return
-    }
-
-    const record = body as {
-      type?: unknown
-      runKind?: unknown
-      runId?: unknown
-      family?: unknown
-      after?: unknown
-    }
-
-    if (record.type !== 'filter') {
+    if (record === undefined) {
       return
     }
 
     const current = readAttachment(ws) ?? { filter: {}, after: 0 }
 
-    const runKinds =
-      typeof record.runKind === 'string'
-        ? parseRunKinds(record.runKind)
-        : Array.isArray(record.runKind)
-          ? parseRunKinds(record.runKind.join(','))
-          : current.filter.runKinds
+    const filter = filterOf(
+      record.runKind ?? current.filter.runKinds,
+      record.runId ?? current.filter.runIds,
+      record.family ?? current.filter.families,
+    )
 
-    const runIds =
-      typeof record.runId === 'string'
-        ? parseList(record.runId)
-        : Array.isArray(record.runId)
-          ? record.runId.filter((value): value is string => typeof value === 'string')
-          : current.filter.runIds
-
-    const families =
-      typeof record.family === 'string'
-        ? parseList(record.family)
-        : Array.isArray(record.family)
-          ? record.family.filter((value): value is string => typeof value === 'string')
-          : current.filter.families
-
-    const after =
-      typeof record.after === 'number' && Number.isFinite(record.after)
-        ? record.after
-        : current.after
-
-    const filter: FirehoseFilter = {
-      ...(runKinds && runKinds.length > 0 ? { runKinds } : {}),
-      ...(runIds && runIds.length > 0 ? { runIds } : {}),
-      ...(families && families.length > 0 ? { families } : {}),
-    }
+    const after = record.after ?? current.after
 
     writeAttachment(ws, { filter, after })
 
@@ -272,7 +299,7 @@ export class EventFirehose extends DurableObject<ShuttleEnv> {
   private handleSocketUpgrade(request: Request, url: URL): Response {
     const upgrade = request.headers.get('Upgrade')
 
-    if (!upgrade || upgrade.toLowerCase() !== 'websocket') {
+    if (upgrade === null || upgrade.toLowerCase() !== 'websocket') {
       return new Response('Expected WebSocket', { status: 426 })
     }
 

@@ -37,12 +37,15 @@ import {
   MODEL_TAG_LABELS,
   MODEL_TAG_TONES,
   modelsByGroup,
+  OPENROUTER_MODELS,
   type ModelTag,
   type OpenRouterModel,
   type OpenRouterModelId,
 } from './llm-models'
 import { matchesModelQuery } from './model-search'
 import {
+  chosenEffort,
+  chosenModelId,
   chosenVendorModel,
   effortLabel,
   modelSections,
@@ -79,13 +82,19 @@ function useVendorModels(
     queries: harnesses.map((harness) =>
       api.connections.models.queryOptions({ input: { harness } }),
     ),
-    combine: (results) =>
-      new Map(
-        results.map((result, index) => [
-          harnesses[index]!,
-          { models: result.data?.models, loading: result.isPending },
-        ]),
-      ),
+    combine: (results) => {
+      const lists = new Map<VendorHarnessId, VendorModelList>()
+
+      harnesses.forEach((harness, index) => {
+        const result = results[index]
+
+        if (result !== undefined) {
+          lists.set(harness, { models: result.data?.models, loading: result.isPending })
+        }
+      })
+
+      return lists
+    },
   })
 }
 
@@ -95,7 +104,9 @@ function useVendorModels(
  */
 function useActiveRow(query: string, count: number, resting: number) {
   const [moved, setMoved] = useState<{ query: string; index: number } | null>(null)
-  const index = moved && moved.query === query ? moved.index : query ? 0 : Math.max(resting, 0)
+
+  const index =
+    moved !== null && moved.query === query ? moved.index : query === '' ? Math.max(resting, 0) : 0
 
   const setActive = (next: number | null) =>
     setMoved((previous) =>
@@ -139,14 +150,18 @@ export function ModelSwitcher({
 
   const sections = modelSections(harness, team)
   const primary = sections[0] ?? 'openrouter'
-  const section = picked && sections.includes(picked) ? picked : primary
+  const section = picked !== null && sections.includes(picked) ? picked : primary
 
   const vendorSections = sections.filter(
     (entry): entry is VendorHarnessId => entry !== 'openrouter',
   )
 
   const vendorModels = useVendorModels(vendorSections)
-  const selected = getOpenRouterModel(value) ?? getOpenRouterModel(DEFAULT_OPENROUTER_MODEL)!
+
+  const selected =
+    getOpenRouterModel(value) ??
+    getOpenRouterModel(DEFAULT_OPENROUTER_MODEL) ??
+    OPENROUTER_MODELS[0]
 
   const summary = (entry: ModelSection): string =>
     entry === 'openrouter'
@@ -183,7 +198,7 @@ export function ModelSwitcher({
         className="flex w-auto max-w-[min(100vw-2rem,46rem)] gap-0 overflow-hidden p-0"
         onCloseAutoFocus={(event) => event.preventDefault()}
         onEscapeKeyDown={(event) => {
-          if (query) {
+          if (query !== '') {
             event.preventDefault()
             setQuery('')
           }
@@ -342,7 +357,7 @@ function OpenRouterPane({
         <p className="text-muted-foreground/80 mt-2 text-[11px]">
           {formatContextWindow(preview.context)}
         </p>
-        {preview.note ? (
+        {preview.note !== undefined && preview.note !== '' ? (
           <p className="text-muted-foreground/70 mt-1 text-[11px] italic">{preview.note}</p>
         ) : null}
         <div className="mt-2.5">
@@ -395,7 +410,9 @@ function VendorPane({
   onClose: () => void
 }) {
   const list = models ?? []
-  const defaultModel = list.find((model) => model.isDefault)
+  const defaultModel = list.find((model) => model.isDefault === true)
+  const choiceModel = chosenModelId(choice)
+  const choiceEffort = chosenEffort(choice)
   const current = chosenVendorModel(choice, list)
   const agent = sectionLabel(harness)
 
@@ -410,7 +427,7 @@ function VendorPane({
         ? `Whichever model ${agent} picks for your plan, currently ${defaultModel.label}.`
         : `Whichever model ${agent} picks for your plan.`,
       efforts: defaultModel?.efforts ?? [],
-      selected: !choice?.model,
+      selected: choiceModel === undefined,
       choice: withVendorModel(choice, undefined, defaultModel),
     },
     ...list.map((model) => ({
@@ -424,13 +441,13 @@ function VendorPane({
       selected: choice?.model === model.id,
       choice: withVendorModel(choice, model, defaultModel),
     })),
-    ...(choice?.model && !current
+    ...(choiceModel !== undefined && current === undefined
       ? [
           {
             key: ':missing',
-            label: choice.model,
-            keywords: [choice.model],
-            title: choice.model,
+            label: choiceModel,
+            keywords: [choiceModel],
+            title: choiceModel,
             description: `${agent} no longer lists this model.`,
             efforts: [],
             selected: true,
@@ -487,7 +504,7 @@ function VendorPane({
             key={row.key}
             label={row.label}
             trailing={
-              row.hint ? (
+              row.hint !== undefined && row.hint !== '' ? (
                 <span className="text-muted-foreground text-[10px]">{row.hint}</span>
               ) : null
             }
@@ -502,12 +519,12 @@ function VendorPane({
         {preview ? (
           <div className="px-2 pt-2 pb-1.5">
             <p className="text-foreground text-xs font-medium break-words">{preview.title}</p>
-            {preview.description ? (
+            {preview.description !== '' ? (
               <p className="text-muted-foreground mt-1 text-[11px] leading-relaxed">
                 {preview.description}
               </p>
             ) : null}
-            {preview.id ? (
+            {preview.id !== undefined && preview.id !== '' ? (
               <p className="text-muted-foreground/70 mt-1.5 font-mono text-[10px] break-all">
                 {preview.id}
               </p>
@@ -522,15 +539,15 @@ function VendorPane({
               <OptionRow
                 label="Default"
                 trailing={
-                  current?.defaultEffort ? (
+                  current?.defaultEffort !== undefined && current.defaultEffort !== '' ? (
                     <span className="text-muted-foreground text-[10px]">
                       {effortLabel(current.defaultEffort)}
                     </span>
                   ) : null
                 }
-                selected={!choice?.effort}
+                selected={choiceEffort === undefined}
                 onSelect={() => {
-                  onChange(choice?.model ? { model: choice.model } : {})
+                  onChange(choiceModel === undefined ? {} : { model: choiceModel })
                   onClose()
                 }}
               />
@@ -538,9 +555,12 @@ function VendorPane({
                 <OptionRow
                   key={effort}
                   label={effortLabel(effort)}
-                  selected={choice?.effort === effort}
+                  selected={choiceEffort === effort}
                   onSelect={() => {
-                    onChange({ ...(choice?.model ? { model: choice.model } : {}), effort })
+                    onChange(
+                      choiceModel === undefined ? { effort } : { model: choiceModel, effort },
+                    )
+
                     onClose()
                   }}
                 />
@@ -619,7 +639,7 @@ function ModelList({
 
   const changeQuery = (next: string) => {
     // The menu grows up from the composer, so a shrinking list would pull the field down.
-    if (!query && next) {
+    if (query === '' && next !== '') {
       setFullHeight(columnRef.current?.offsetHeight)
     }
 
@@ -652,7 +672,11 @@ function ModelList({
   return (
     <div
       ref={columnRef}
-      style={query && fullHeight ? { minHeight: fullHeight } : undefined}
+      style={
+        query !== '' && fullHeight !== undefined && fullHeight > 0
+          ? { minHeight: fullHeight }
+          : undefined
+      }
       className="flex w-60 shrink-0 flex-col sm:w-72"
     >
       <div className="border-border flex h-9 shrink-0 items-center gap-2 border-b px-3">
@@ -669,7 +693,7 @@ function ModelList({
           onKeyDown={onKeyDown}
           className="text-foreground placeholder:text-muted-foreground/70 min-w-0 flex-1 bg-transparent text-xs outline-none"
         />
-        {query ? (
+        {query !== '' ? (
           <button
             type="button"
             aria-label="Clear search"
@@ -748,7 +772,9 @@ function OptionRow({
         {selected ? <Check className="size-3.5" /> : null}
       </span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {trailing ? <span className="flex shrink-0 items-center gap-1">{trailing}</span> : null}
+      {trailing !== undefined && trailing !== null ? (
+        <span className="flex shrink-0 items-center gap-1">{trailing}</span>
+      ) : null}
     </button>
   )
 }

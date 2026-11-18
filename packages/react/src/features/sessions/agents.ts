@@ -20,7 +20,7 @@ export interface AgentRole {
   readonly blurb: string
 }
 
-const roles: Record<string, AgentRole> = {
+const roles = {
   coding: {
     label: 'Session',
     icon: Orbit,
@@ -76,6 +76,10 @@ const roles: Record<string, AgentRole> = {
     tone: 'text-route-constraint',
     blurb: 'Mines the event history for lessons.',
   },
+} satisfies Record<string, AgentRole>
+
+function isRoleName(name: string): name is keyof typeof roles {
+  return Object.hasOwn(roles, name)
 }
 
 const fallbackRole: AgentRole = {
@@ -94,7 +98,9 @@ export function isSystemAgent(definitionName: string | undefined): boolean {
 }
 
 export function agentRole(definitionName: string | undefined): AgentRole {
-  return (definitionName ? roles[definitionName] : undefined) ?? fallbackRole
+  return definitionName !== undefined && isRoleName(definitionName)
+    ? roles[definitionName]
+    : fallbackRole
 }
 
 export interface AgentIdentity {
@@ -114,7 +120,12 @@ export function agentIdentities(root: ThreadNode | null): ReadonlyMap<string, Ag
     const count = (seen.get(node.definitionName) ?? 0) + 1
     seen.set(node.definitionName, count)
 
-    const base = role === fallbackRole ? node.definitionName || 'thread' : role.label
+    const base =
+      role === fallbackRole
+        ? node.definitionName === ''
+          ? 'thread'
+          : node.definitionName
+        : role.label
 
     identities.set(node.threadId, {
       threadId: node.threadId,
@@ -128,17 +139,21 @@ export function agentIdentities(root: ThreadNode | null): ReadonlyMap<string, Ag
     }
   }
 
-  if (root) {
+  if (root !== null) {
     visit(root)
   }
 
   return identities
 }
 
-const HARNESS_LABELS: Readonly<Record<string, string>> = {
+const HARNESS_LABELS = {
   codex: 'Codex',
   'claude-code': 'Claude Code',
   cursor: 'Cursor',
+} satisfies Readonly<Record<string, string>>
+
+function isHarnessName(name: string): name is keyof typeof HARNESS_LABELS {
+  return Object.hasOwn(HARNESS_LABELS, name)
 }
 
 /** Thread definitions whose turns run on the session's vendor agent. */
@@ -156,9 +171,10 @@ function renamed(
     role: {
       ...identity.role,
       label,
-      blurb: model
-        ? `${label} on ${whose} subscription, running ${model}.`
-        : `${label} on ${whose} subscription.`,
+      blurb:
+        model !== undefined && model !== ''
+          ? `${label} on ${whose} subscription, running ${model}.`
+          : `${label} on ${whose} subscription.`,
     },
   }
 }
@@ -177,9 +193,12 @@ export function withVendorAgents(
   /** Says whose subscription a turn ran on, such as "your" or "Alice's". */
   whose?: (userId: string) => string,
 ): ReadonlyMap<string, AgentIdentity> {
-  const pendingLabel = sessionHarness ? HARNESS_LABELS[sessionHarness] : undefined
+  const pendingLabel =
+    sessionHarness !== undefined && isHarnessName(sessionHarness)
+      ? HARNESS_LABELS[sessionHarness]
+      : undefined
 
-  if (Object.keys(vendorAgents).length === 0 && !pendingLabel) {
+  if (Object.keys(vendorAgents).length === 0 && pendingLabel === undefined) {
     return identities
   }
 
@@ -188,17 +207,19 @@ export function withVendorAgents(
   for (const [threadId, identity] of identities) {
     const agent = vendorAgents[threadId]
 
-    if (agent) {
+    if (agent !== undefined) {
       next.set(
         threadId,
         renamed(
           identity,
           agent.label,
           agent.model,
-          agent.billedTo && whose ? whose(agent.billedTo) : undefined,
+          agent.billedTo !== undefined && agent.billedTo !== '' && whose !== undefined
+            ? whose(agent.billedTo)
+            : undefined,
         ),
       )
-    } else if (pendingLabel && VENDOR_RUN_DEFINITIONS.has(identity.definitionName)) {
+    } else if (pendingLabel !== undefined && VENDOR_RUN_DEFINITIONS.has(identity.definitionName)) {
       next.set(threadId, renamed(identity, pendingLabel))
     } else {
       next.set(threadId, identity)

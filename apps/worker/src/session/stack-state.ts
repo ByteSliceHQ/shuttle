@@ -1,6 +1,6 @@
 import { Predicate } from 'effect'
 
-import { asJson, type JsonValue } from '@swirls/looms/core'
+import { asJson, isJsonObject, type JsonObject, type JsonValue } from '@swirls/looms/core'
 
 import { jsonObject } from '../json'
 
@@ -63,16 +63,26 @@ export function stackKey(repoName: string, stackId: number): string {
   return stackId === 1 ? repoName : `${repoName}#${stackId}`
 }
 
+/** True for a string that is neither missing nor empty. */
+function isPresent(value: string | undefined | null): value is string {
+  return value !== undefined && value !== null && value !== ''
+}
+
 function repoNameFrom(value: string | null | undefined): string | null {
-  if (!value) {
+  if (!isPresent(value)) {
     return null
   }
 
   return value.includes('/') ? (value.split('/')[1] ?? value) : value
 }
 
-function stackIdFrom(value: unknown): number {
+function stackIdFrom(value: JsonValue | undefined): number {
   return Predicate.isNumber(value) && Number.isInteger(value) && value >= 1 ? value : 1
+}
+
+export interface StackContext {
+  readonly parentPull: { readonly fullName: string; readonly number: number } | null
+  readonly restacks: readonly number[]
 }
 
 /** Parent PR and PRs above `layer` that a publish of `layer` will touch. */
@@ -80,10 +90,7 @@ export function stackContextForLayer(
   stack: SessionRepoStack | undefined,
   layer: number,
   fullName: string,
-): {
-  readonly parentPull: { readonly fullName: string; readonly number: number } | null
-  readonly restacks: readonly number[]
-} {
+): StackContext {
   if (!stack) {
     return { parentPull: null, restacks: [] }
   }
@@ -104,12 +111,12 @@ export function stackContextForLayer(
  */
 export function withPrProposal<S extends StackSessionSlice>(
   state: S,
-  proposal: { readonly [key: string]: unknown },
+  proposal: JsonObject,
   threadId: string | null,
 ): S {
   const approvalId = Predicate.isString(proposal.approvalId) ? proposal.approvalId : null
 
-  if (!approvalId || state.pendingPrPublish?.approvalId === approvalId) {
+  if (!isPresent(approvalId) || state.pendingPrPublish?.approvalId === approvalId) {
     return state
   }
 
@@ -119,10 +126,10 @@ export function withPrProposal<S extends StackSessionSlice>(
     null
 
   const layer = Predicate.isNumber(proposal.layer) ? proposal.layer : null
-  const stackId = layer != null ? stackIdFrom(proposal.stackId) : null
+  const stackId = layer !== null ? stackIdFrom(proposal.stackId) : null
 
-  const fallback =
-    repoName && stackId != null && layer != null
+  const fallback: StackContext =
+    isPresent(repoName) && stackId !== null && layer !== null
       ? stackContextForLayer(
           state.stacks[stackKey(repoName, stackId)],
           layer,
@@ -130,12 +137,10 @@ export function withPrProposal<S extends StackSessionSlice>(
         )
       : { parentPull: null, restacks: [] }
 
-  const parentFromProposal = Predicate.isObject(proposal.parentPull)
-    ? proposal.parentPull
-    : undefined
+  const parentFromProposal = isJsonObject(proposal.parentPull) ? proposal.parentPull : undefined
 
   const parentPull =
-    parentFromProposal &&
+    parentFromProposal !== undefined &&
     Predicate.isString(parentFromProposal.fullName) &&
     Predicate.isNumber(parentFromProposal.number)
       ? { fullName: parentFromProposal.fullName, number: parentFromProposal.number }
@@ -164,30 +169,24 @@ export function withPrProposal<S extends StackSessionSlice>(
   }
 }
 
-export function withPrPublishSettled<S extends StackSessionSlice>(
-  state: S,
-  approvalId: unknown,
-): S {
-  return state.pendingPrPublish && state.pendingPrPublish.approvalId === approvalId
+export function withPrPublishSettled<S extends StackSessionSlice>(state: S, approvalId: string): S {
+  return state.pendingPrPublish !== null && state.pendingPrPublish.approvalId === approvalId
     ? { ...state, pendingPrPublish: null }
     : state
 }
 
-export function withStackPublished<S extends StackSessionSlice>(
-  state: S,
-  payload: { readonly [key: string]: unknown },
-): S {
+export function withStackPublished<S extends StackSessionSlice>(state: S, payload: JsonObject): S {
   const repo = Predicate.isString(payload.repo) ? payload.repo : null
   const layersRaw = Array.isArray(payload.layers) ? payload.layers : null
 
-  if (!repo || !layersRaw) {
+  if (!isPresent(repo) || layersRaw === null) {
     return state
   }
 
   const layers: SessionStackLayer[] = []
 
   for (const entry of layersRaw) {
-    if (!Predicate.isObject(entry)) {
+    if (!isJsonObject(entry)) {
       continue
     }
 
@@ -196,9 +195,16 @@ export function withStackPublished<S extends StackSessionSlice>(
     const parentBranch = Predicate.isString(entry.parentBranch) ? entry.parentBranch : null
     const remoteSha = Predicate.isString(entry.remoteSha) ? entry.remoteSha : null
     const publishedTree = Predicate.isString(entry.publishedTree) ? entry.publishedTree : null
-    const pullObj = Predicate.isObject(entry.pull) ? entry.pull : null
+    const pullObj = isJsonObject(entry.pull) ? entry.pull : null
 
-    if (!layer || !branch || !parentBranch || !remoteSha || !publishedTree) {
+    if (
+      layer === null ||
+      layer === 0 ||
+      !isPresent(branch) ||
+      !isPresent(parentBranch) ||
+      !isPresent(remoteSha) ||
+      !isPresent(publishedTree)
+    ) {
       continue
     }
 
@@ -209,10 +215,10 @@ export function withStackPublished<S extends StackSessionSlice>(
       remoteSha,
       publishedTree,
       pull:
-        pullObj &&
+        pullObj !== null &&
         Predicate.isNumber(pullObj.number) &&
         Predicate.isString(pullObj.url) &&
-        typeof pullObj.draft === 'boolean'
+        Predicate.isBoolean(pullObj.draft)
           ? { number: pullObj.number, url: pullObj.url, draft: pullObj.draft }
           : null,
     })
@@ -223,11 +229,11 @@ export function withStackPublished<S extends StackSessionSlice>(
   }
 
   const key = stackKey(repo, stackIdFrom(payload.stackId))
-  const stackRaw = Predicate.isObject(payload.stack) ? payload.stack : null
+  const stackRaw = isJsonObject(payload.stack) ? payload.stack : null
 
   let native: SessionStackNative = state.stacks[key]?.native ?? null
 
-  if (stackRaw) {
+  if (stackRaw !== null) {
     if (Predicate.isNumber(stackRaw.number) && Predicate.isString(stackRaw.url)) {
       native = { number: stackRaw.number, url: stackRaw.url }
     } else if (Predicate.isString(stackRaw.error)) {

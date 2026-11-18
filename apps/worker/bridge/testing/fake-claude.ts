@@ -4,6 +4,8 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 
+import type { JsonValue } from '../json.ts'
+
 /**
  * A stand-in for the Claude Code CLI that prints just enough of its output for the bridge tests.
  * FAKE_CLAUDE_MODE picks the behaviour: `turn` (default), `hang`, `unauthenticated`.
@@ -11,7 +13,7 @@ import { createInterface } from 'node:readline'
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? 'turn'
 const args = process.argv.slice(2)
-const print = (line: unknown) => process.stdout.write(`${JSON.stringify(line)}\n`)
+const print = (line: JsonValue) => process.stdout.write(`${JSON.stringify(line)}\n`)
 const signedInMarker = join(homedir(), '.fake-claude-signed-in')
 
 if (args[0] === 'auth' && args[1] === 'status') {
@@ -60,7 +62,7 @@ if (args[0] === 'auth' && args[1] === 'login') {
     process.on('SIGINT', () => process.exit(130))
     setInterval(() => {}, 1_000)
   } else {
-    const delta = (inner: unknown) =>
+    const delta = (inner: JsonValue) =>
       print({ type: 'stream_event', event: { type: 'content_block_delta', delta: inner } })
 
     delta({ type: 'thinking_delta', thinking: 'Look at the file.' })

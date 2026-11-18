@@ -4,7 +4,7 @@ import { codeStorageRepoName, scratchRepoName } from '../codestorage/client'
 import { DEMO_REPO, isDemoRepo } from './names'
 import { sessionRemoteRefs } from './session-sync'
 import type { LinkedSandboxRepo } from './workspace'
-import { isNeverWork, type ChangeStatus, type WorkspaceRepoSummary } from './workspace-summary'
+import { isNeverWork, type WorkspaceRepoSummary } from './workspace-summary'
 
 /**
  * Reads a session's work as it was last saved to Code Storage, without a sandbox.
@@ -57,6 +57,8 @@ export interface SavedWorkClient {
     }
   }
 }
+
+type SavedDiffParams = Parameters<SavedWorkClient['repos']['diff']['get']>[0]
 
 /** One repository's saved work. */
 export interface SavedRepo {
@@ -209,7 +211,13 @@ export async function readSavedBaseFile(
   const repo = saved.find((item) => item.name === path.slice(0, slash))
   const baseRef = repo?.baseRef
 
-  if (slash < 0 || !repo || !baseRef) {
+  if (
+    slash < 0 ||
+    repo === undefined ||
+    baseRef === undefined ||
+    baseRef === null ||
+    baseRef === ''
+  ) {
     return null
   }
 
@@ -230,13 +238,22 @@ export async function readSavedBaseFile(
  * it, and otherwise from the session's last commit, which shows only what was uncommitted.
  */
 async function savedChanges(client: SavedWorkClient, repo: SavedRepo, paths?: string[]) {
-  const { files } = await client.repos.diff.get({
+  const params: SavedDiffParams = {
     repo_name: repo.repoName,
     ref: repo.ref,
     ref_is_ephemeral: true,
-    ...(repo.baseRef ? { base_ref: repo.baseRef, base_is_ephemeral: true } : {}),
-    ...(paths ? { path: paths } : {}),
-  })
+  }
+
+  if (repo.baseRef !== null && repo.baseRef !== '') {
+    params.base_ref = repo.baseRef
+    params.base_is_ephemeral = true
+  }
+
+  if (paths !== undefined) {
+    params.path = paths
+  }
+
+  const { files } = await client.repos.diff.get(params)
 
   return files
 }
@@ -252,7 +269,7 @@ export async function savedDiffs(
     const files = await savedChanges(client, repo)
     const diff = files.map((file) => file.raw.replace(/\n?$/, '\n')).join('')
 
-    if (diff.trim()) {
+    if (diff.trim() !== '') {
       diffs.push({ name: repo.name, diff })
     }
   }
@@ -273,13 +290,9 @@ export async function savedRepoSummary(
 
   const changes = (await savedChanges(client, repo))
     .filter((file) => !isNeverWork(file.path))
-    .map((file) => ({
+    .map((file): WorkspaceRepoSummary['changes'][number] => ({
       path: file.path,
-      status: (file.state.startsWith('A')
-        ? 'A'
-        : file.state.startsWith('D')
-          ? 'D'
-          : 'M') as ChangeStatus,
+      status: file.state.startsWith('A') ? 'A' : file.state.startsWith('D') ? 'D' : 'M',
     }))
 
   return { name: repo.name, files, changes }

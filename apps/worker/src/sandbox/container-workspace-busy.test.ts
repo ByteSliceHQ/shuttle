@@ -8,9 +8,14 @@ describe('a workspace on a host', () => {
   test('is busy for exactly as long as a command is running', async () => {
     const { promise: finished, resolve: finish } = Promise.withResolvers<HostOutput>()
 
-    const host = {
+    const host: SandboxHost = {
       exec: async () => ({ output: () => finished }),
-    } as unknown as SandboxHost
+      readFile: async () => '',
+      writeFile: async () => {},
+      readBytes: async () => new Uint8Array(),
+      writeBytes: async () => {},
+      mkdir: async () => {},
+    }
 
     const workspace = new ContainerWorkspace(async () => host, fakeEnv({}))
 

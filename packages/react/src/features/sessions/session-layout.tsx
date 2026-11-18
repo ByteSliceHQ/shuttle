@@ -40,7 +40,7 @@ type PaneLayout = 'one' | 'two' | 'three'
  */
 export function SessionLayout() {
   const { panes } = useSession()
-  const [layoutRef, paneCount] = useWidthBucket<HTMLDivElement>(PANE_BREAKPOINTS)
+  const [layoutRef, paneCount] = useWidthBucket(PANE_BREAKPOINTS)
   const layout: PaneLayout = paneCount >= 2 ? 'three' : paneCount === 1 ? 'two' : 'one'
 
   // In the one-pane layout the artifacts pane opens over the conversation.

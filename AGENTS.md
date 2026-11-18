@@ -122,3 +122,12 @@ repository's web and desktop apps, and other products. It has three entry points
   to read the package's files, so a host only imports it after `tailwindcss`.
 - **Layout:** `src/features/<name>` holds a feature's components, logic and tests;
   `src/components` and `src/lib` hold only what features share.
+
+## TypeScript lint
+
+`bun run lint` runs oxlint type-aware with the anti-slop rules in `tools/oxlint/anti-slop` (ported from swirlsv2).
+
+- Decode external data (JSON, fetch bodies, storage, messages, rows) with zod at the boundary. Never cast `any`/`unknown` to a shape; no `!`, identity helpers or bare disables.
+- `typeof` only inside type-guard functions. Write explicit comparisons, not truthiness, on strings and numbers.
+- `apps/worker/bridge` ships without `node_modules`, so it decodes with `bridge/json.ts` guards, not zod.
+- A truly unavoidable cast gets one line: `// oxlint-disable-next-line <rule> -- SAFETY: <invariant>`.

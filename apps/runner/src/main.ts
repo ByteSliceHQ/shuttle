@@ -1,11 +1,15 @@
 import { createHash } from 'node:crypto'
 import { hostname } from 'node:os'
 
-import { DEVICE_ID } from '@shuttle/runner-protocol'
+import { z } from 'zod'
 
+import { DEVICE_ID, type RunnerBackendInfo } from '@shuttle/runner-protocol'
+
+import type { SandboxSpec } from './backend'
 import { detectBackend } from './detect'
 import { connect } from './link'
 import { takeLock } from './lock'
+import { nonEmpty } from './text'
 
 /**
  * shuttle-runner: keeps a Shuttle sandbox on this machine.
@@ -20,17 +24,31 @@ import { takeLock } from './lock'
  * What it prints on stdout is one JSON object per line, for whoever started it to follow.
  */
 
-interface Settings {
-  readonly url: string
-  readonly token: string
-  readonly deviceName?: string
-  readonly image?: string
-  readonly buildContext?: string
-  readonly cpus?: number
-  readonly memoryMb?: number
+const settingsSchema = z.object({
+  url: z.string(),
+  token: z.string(),
+  deviceName: z.string().nullish(),
+  image: z.string().nullish(),
+  buildContext: z.string().nullish(),
+  cpus: z.number().nullish(),
+  memoryMb: z.number().nullish(),
+})
+
+type Settings = z.infer<typeof settingsSchema>
+
+/** Who answers at `/runners/self`: the machine's owner and the machine itself. */
+const identitySchema = z.object({
+  userId: z.string(),
+  orgId: z.string(),
+  deviceId: z.string(),
+})
+
+interface ReportExtra {
+  readonly backend?: RunnerBackendInfo
+  readonly message?: string
 }
 
-function report(status: string, extra: Record<string, unknown> = {}): void {
+function report(status: string, extra: ReportExtra = {}): void {
   process.stdout.write(`${JSON.stringify({ status, ...extra })}\n`)
 }
 
@@ -57,7 +75,7 @@ async function firstLine(reader: NonNullable<typeof stdin>): Promise<string> {
 
 async function settings(): Promise<Settings> {
   if (stdin) {
-    return JSON.parse(await firstLine(stdin)) as Settings
+    return settingsSchema.parse(JSON.parse(await firstLine(stdin)))
   }
 
   const { env } = process
@@ -65,12 +83,24 @@ async function settings(): Promise<Settings> {
   return {
     url: env.SHUTTLE_URL ?? 'http://127.0.0.1:8790',
     token: env.SHUTTLE_RUNNER_TOKEN ?? '',
-    ...(env.SHUTTLE_DEVICE_NAME ? { deviceName: env.SHUTTLE_DEVICE_NAME } : {}),
-    ...(env.SHUTTLE_SANDBOX_IMAGE ? { image: env.SHUTTLE_SANDBOX_IMAGE } : {}),
-    ...(env.SHUTTLE_SANDBOX_BUILD_CONTEXT
-      ? { buildContext: env.SHUTTLE_SANDBOX_BUILD_CONTEXT }
-      : {}),
+    deviceName: nonEmpty(env.SHUTTLE_DEVICE_NAME),
+    image: nonEmpty(env.SHUTTLE_SANDBOX_IMAGE),
+    buildContext: nonEmpty(env.SHUTTLE_SANDBOX_BUILD_CONTEXT),
   }
+}
+
+/** The most the sandbox may use, when settings name a limit. */
+function limitsOf({ cpus, memoryMb }: Settings): SandboxSpec['limits'] {
+  const cpuLimit = cpus !== null && cpus !== undefined && cpus > 0 ? cpus : undefined
+
+  const memoryLimit =
+    memoryMb !== null && memoryMb !== undefined && memoryMb > 0 ? memoryMb : undefined
+
+  if (cpuLimit === undefined && memoryLimit === undefined) {
+    return undefined
+  }
+
+  return { cpus: cpuLimit, memoryMb: memoryLimit }
 }
 
 const config = await settings()
@@ -90,12 +120,14 @@ if (!self.ok) {
   process.exit(3)
 }
 
-const identity = (await self.json()) as { userId: string; orgId: string; deviceId: string }
+const parsedIdentity = identitySchema.safeParse(await self.json())
 
-if (!DEVICE_ID.test(identity.deviceId)) {
+if (!parsedIdentity.success || !DEVICE_ID.test(parsedIdentity.data.deviceId)) {
   report('error', { message: 'Shuttle answered with a device id this runner cannot use.' })
   process.exit(2)
 }
+
+const identity = parsedIdentity.data
 
 // One sandbox per person, organization and Shuttle on this machine.
 const key = createHash('sha256')
@@ -105,7 +137,7 @@ const key = createHash('sha256')
 
 const release = takeLock(key)
 
-if (!release) {
+if (release === null) {
   report('error', { message: 'Another Shuttle runner is already keeping this sandbox.' })
   process.exit(4)
 }
@@ -115,15 +147,8 @@ process.on('exit', release)
 const backend = await detectBackend({
   key,
   image: config.image ?? 'shuttle-sandbox:dev',
-  ...(config.buildContext ? { buildContext: config.buildContext } : {}),
-  ...(config.cpus || config.memoryMb
-    ? {
-        limits: {
-          ...(config.cpus ? { cpus: config.cpus } : {}),
-          ...(config.memoryMb ? { memoryMb: config.memoryMb } : {}),
-        },
-      }
-    : {}),
+  buildContext: nonEmpty(config.buildContext ?? undefined),
+  limits: limitsOf(config),
   log: (line) => report('preparing', { message: line }),
 }).catch((cause: unknown) => {
   report('error', { message: cause instanceof Error ? cause.message : String(cause) })
@@ -153,12 +178,11 @@ const link = connect({
   },
   device: {
     id: identity.deviceId,
-    name: config.deviceName ?? hostname(),
+    name: nonEmpty(config.deviceName ?? undefined) ?? hostname(),
     platform: process.platform,
     arch: process.arch,
   },
-  status: (status, detail) =>
-    report(status, { backend: backend.info, ...(detail ? { message: detail } : {}) }),
+  status: (status, detail) => report(status, { backend: backend.info, message: nonEmpty(detail) }),
 })
 
 let stopping = false

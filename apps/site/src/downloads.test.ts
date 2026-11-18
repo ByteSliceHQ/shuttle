@@ -5,10 +5,32 @@ import site, { releaseName, type SiteEnv } from './index'
 const heads: string[] = []
 const gets: string[] = []
 
+interface Pointer {
+  readonly file?: string
+}
+
+function isPointer(value: unknown): value is Pointer {
+  return typeof value === 'object' && value !== null
+}
+
+/** The pointer file's JSON, as the bucket's `json()` would answer. */
+function pointer(text: string): Pointer {
+  const value: unknown = JSON.parse(text)
+
+  if (!isPointer(value)) {
+    throw new Error('Not a pointer file.')
+  }
+
+  return value
+}
+
 function env(objects: Record<string, string>): SiteEnv {
   return {
     LATEST_MAC: 'Shuttle-0.0.1-arm64.dmg',
-    ASSETS: { fetch: async () => new Response('page') } as unknown as Fetcher,
+    // SAFETY: the worker under test only calls `fetch` on the assets binding.
+    ASSETS: { fetch: async () => new Response('page') } as never,
+    // SAFETY: the worker under test only calls `head` and `get` on the bucket, and the fakes
+    // below answer with the fields it reads.
     RELEASES: {
       head: async (name: string) => {
         heads.push(name)
@@ -36,10 +58,10 @@ function env(objects: Record<string, string>): SiteEnv {
                   name.endsWith('.yml') ? 'application/yaml' : 'application/octet-stream',
                 ),
               text: async () => value,
-              json: async () => JSON.parse(value),
+              json: async () => pointer(value),
             }
       },
-    } as unknown as R2Bucket,
+    } as never,
   }
 }
 

@@ -7,9 +7,18 @@ import { join, resolve } from 'node:path'
 import { claudeMcpArgs } from './claude'
 import { codexMcpOverrides } from './codex'
 import { installCursorMcp } from './cursor'
+import {
+  isJsonArray,
+  isJsonObject,
+  isString,
+  parseJson,
+  type JsonObject,
+  type JsonValue,
+} from './json'
 import { withProposals } from './main'
 import {
   handleMcpMessage,
+  type McpResponse,
   PROPOSAL_RECEIVED,
   PROPOSE_PULL_REQUEST,
   takeProposals,
@@ -26,40 +35,62 @@ function runDir(proposePullRequest: boolean): string {
       harness: 'codex',
       prompt: 'p',
       cwd: '/w',
-      ...(proposePullRequest ? { shuttleTools: { proposePullRequest: true } } : {}),
+      shuttleTools: proposePullRequest ? { proposePullRequest: true } : undefined,
     }),
   )
 
   return dir
 }
 
-const call = (dir: string, args: Record<string, unknown>) =>
-  handleMcpMessage(dir, {
-    jsonrpc: '2.0',
-    id: 2,
-    method: 'tools/call',
-    params: { name: PROPOSE_PULL_REQUEST, arguments: args },
-  }) as { result: { isError?: boolean; content: { text: string }[] } }
+/** The `result` of a reply that has one. */
+function resultOf(reply: McpResponse | null): JsonObject {
+  const result = reply?.result
+
+  if (!isJsonObject(result)) {
+    throw new Error('expected a reply with a result')
+  }
+
+  return result
+}
+
+/** The text of the first content item of a tool result. */
+function firstText(result: JsonObject): JsonValue | undefined {
+  const [first] = isJsonArray(result.content) ? result.content : []
+
+  return isJsonObject(first) ? first.text : undefined
+}
+
+const call = (dir: string, args: JsonObject) =>
+  resultOf(
+    handleMcpMessage(dir, {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: PROPOSE_PULL_REQUEST, arguments: args },
+    }),
+  )
 
 function listTools(dir: string): string[] {
-  return (
-    handleMcpMessage(dir, { jsonrpc: '2.0', id: 1, method: 'tools/list' }) as {
-      result: { tools: { name: string }[] }
-    }
-  ).result.tools.map((tool) => tool.name)
+  const { tools } = resultOf(handleMcpMessage(dir, { jsonrpc: '2.0', id: 1, method: 'tools/list' }))
+
+  return isJsonArray(tools)
+    ? tools.flatMap((tool) => (isJsonObject(tool) && isString(tool.name) ? [tool.name] : []))
+    : []
 }
 
 describe("Shuttle's MCP server", () => {
   test('introduces itself in the protocol version the agent asks for', () => {
-    const reply = handleMcpMessage(runDir(true), {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'initialize',
-      params: { protocolVersion: '2025-03-26' },
-    }) as { result: { protocolVersion: string; serverInfo: { name: string } } }
+    const result = resultOf(
+      handleMcpMessage(runDir(true), {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-03-26' },
+      }),
+    )
 
-    expect(reply.result.protocolVersion).toBe('2025-03-26')
-    expect(reply.result.serverInfo.name).toBe('shuttle')
+    expect(result.protocolVersion).toBe('2025-03-26')
+    expect(isJsonObject(result.serverInfo) ? result.serverInfo.name : undefined).toBe('shuttle')
   })
 
   test('offers propose_pull_request only to a turn the Worker allowed it', () => {
@@ -72,8 +103,8 @@ describe("Shuttle's MCP server", () => {
     const dir = runDir(true)
     const reply = call(dir, { title: 'Add attachments', body: 'Tested.', draft: false })
 
-    expect(reply.result.isError).toBeUndefined()
-    expect(reply.result.content[0]?.text).toBe(PROPOSAL_RECEIVED)
+    expect(reply.isError).toBeUndefined()
+    expect(firstText(reply)).toBe(PROPOSAL_RECEIVED)
 
     const taken = takeProposals(dir)
 
@@ -83,8 +114,8 @@ describe("Shuttle's MCP server", () => {
   })
 
   test('refuses a proposal without a title, or from a turn that may not propose', () => {
-    expect(call(runDir(true), { body: 'no title' }).result.isError).toBe(true)
-    expect(call(runDir(false), { title: 'x', body: '' }).result.isError).toBe(true)
+    expect(call(runDir(true), { body: 'no title' }).isError).toBe(true)
+    expect(call(runDir(false), { title: 'x', body: '' }).isError).toBe(true)
   })
 
   test('answers notifications with nothing and unknown methods with an error', () => {
@@ -121,7 +152,7 @@ describe("Shuttle's MCP server", () => {
       lines.push(...parts.filter(Boolean))
     })
 
-    const send = (message: object) => child.stdin.write(`${JSON.stringify(message)}\n`)
+    const send = (message: JsonValue) => child.stdin.write(`${JSON.stringify(message)}\n`)
 
     send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } })
     send({ jsonrpc: '2.0', method: 'notifications/initialized' })
@@ -140,10 +171,15 @@ describe("Shuttle's MCP server", () => {
 
     child.stdin.end()
 
-    const replies = lines.map((line) => JSON.parse(line) as { id: number; result: unknown })
+    const replies = lines.map((line) => parseJson(line))
+    const second = replies[1]
 
-    expect(replies.map((reply) => reply.id)).toEqual([1, 2, 3])
-    expect(JSON.stringify(replies[1]?.result)).toContain(PROPOSE_PULL_REQUEST)
+    expect(replies.map((reply) => (isJsonObject(reply) ? reply.id : undefined))).toEqual([1, 2, 3])
+
+    expect(JSON.stringify(isJsonObject(second) ? second.result : undefined)).toContain(
+      PROPOSE_PULL_REQUEST,
+    )
+
     expect(takeProposals(dir)[0]).toMatchObject({ title: 'T', body: 'B', draft: true })
   })
 })

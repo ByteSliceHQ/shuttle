@@ -21,7 +21,7 @@ export const Route = createFileRoute('/sign-in')({
     const tenant = await context.queryClient.query({ ...tenantQuery, staleTime: 0 })
 
     if (tenant) {
-      throw redirect({ to: '/', search })
+      redirect({ to: '/', search, throw: true })
     }
   },
   loader: ({ context }) =>
@@ -34,5 +34,12 @@ function SignInPage() {
   const router = useRouter()
 
   // Running the route again finds the sign-in and sends the person on into the app.
-  return <SignInScreen invited={invite !== undefined} onSignedIn={() => router.invalidate()} />
+  return (
+    <SignInScreen
+      invited={invite !== undefined}
+      onSignedIn={() => {
+        void router.invalidate()
+      }}
+    />
+  )
 }

@@ -17,6 +17,7 @@ import {
 import { Button } from '../../components/ui/button'
 import { EmptyState } from '../../components/ui/panel'
 import { cn } from '../../lib/cn'
+import { hasText } from '../../lib/text'
 import { statusOf, useApi, useShuttleHost } from '../../shuttle'
 import { FILE_OPTIONS, SURFACE_STYLE } from './diff-style'
 import { invalidateWorktree, patchOf } from './sandbox'
@@ -72,7 +73,7 @@ const SHOWN_INLINE = new Set<DiagnosticSeverity>(['error', 'warning'])
 
 /** `TS2322`, or whatever the server calls the rule. */
 function diagnosticCode(diagnostic: FileDiagnostic): string | null {
-  if (!diagnostic.code) {
+  if (!hasText(diagnostic.code)) {
     return null
   }
 
@@ -87,13 +88,18 @@ function toMarkers(diagnostics: readonly FileDiagnostic[]): EditModule.Marker[] 
   return diagnostics.map((diagnostic) => {
     const code = diagnosticCode(diagnostic)
 
-    return {
+    const marker: EditModule.Marker = {
       start: { line: diagnostic.line - 1, character: diagnostic.column - 1 },
       end: { line: diagnostic.endLine - 1, character: diagnostic.endColumn - 1 },
       severity: diagnostic.severity,
-      message: code ? `${diagnostic.message} (${code})` : diagnostic.message,
-      ...(diagnostic.source ? { source: diagnostic.source } : {}),
+      message: code !== null ? `${diagnostic.message} (${code})` : diagnostic.message,
     }
+
+    if (hasText(diagnostic.source)) {
+      marker.source = diagnostic.source
+    }
+
+    return marker
   })
 }
 
@@ -135,7 +141,7 @@ function LineProblems({ problems }: { problems: readonly FileDiagnostic[] }) {
             {problem.severity}
           </span>
           <span className="text-foreground min-w-0 whitespace-pre-wrap">{problem.message}</span>
-          {diagnosticCode(problem) ? (
+          {diagnosticCode(problem) !== null ? (
             <span className="text-muted-foreground shrink-0">{diagnosticCode(problem)}</span>
           ) : null}
         </div>
@@ -206,18 +212,19 @@ export default function FilePane({
   /** The editor's unsaved text as of a moment after typing stopped. Null until something is typed. */
   const [typed, setTyped] = useState<string | null>(null)
   const typing = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const editor = useRef<EditModule.Editor<'file', FileDiagnostic[], undefined> | null>(null)
+  const editor = useRef<EditModule.Editor<'file', FileDiagnostic[]> | null>(null)
 
   useEffect(() => () => clearTimeout(typing.current), [])
 
   // A deleted file has only its changes to show, an unchanged one only itself, and an edit
   // happens on the whole file.
-  const view: FileView = editing || !status ? 'file' : status === 'D' ? 'diff' : chosenView
+  const view: FileView =
+    editing || status === undefined ? 'file' : status === 'D' ? 'diff' : chosenView
 
   // Each of these is read again whenever the tab shows the file, and whenever the session's
   // events say its files may have changed (see `ArtifactPane`).
   const atCommit = against?.startsWith('range:') ?? false
-  const measured = against && against !== 'session' ? { against } : {}
+  const measured = hasText(against) && against !== 'session' ? { against } : {}
 
   const fileQuery = useQuery(
     api.sandbox.file.queryOptions({
@@ -264,10 +271,10 @@ export default function FilePane({
 
   const error =
     (current === 'missing' ? null : fileQuery.error) ??
-    (view === 'diff' && !base ? (baseUnknown ? patchQuery.error : baseQuery.error) : null)
+    (view === 'diff' && base === null ? (baseUnknown ? patchQuery.error : baseQuery.error) : null)
 
-  const content = current && current !== 'missing' ? current.content : null
-  const checkable = content !== null && !(current !== 'missing' && current?.binary)
+  const content = current !== null && current !== 'missing' ? current.content : null
+  const checkable = content !== null && !(current !== 'missing' && current?.binary === true)
 
   // Ask the language server about the file: as saved while reading, as typed while editing.
   const savedCheck = useQuery(
@@ -316,7 +323,7 @@ export default function FilePane({
 
   const editorOptions = useMemo(
     () => ({
-      onAttach: (attached: EditModule.Editor<'file', FileDiagnostic[], undefined>) => {
+      onAttach: (attached: EditModule.Editor<'file', FileDiagnostic[]>) => {
         editor.current = attached
         // The editor attaches after the problems are known, so it is given them here too.
         attached.setMarkers(markers.current)
@@ -353,7 +360,9 @@ export default function FilePane({
 
   const oldFile = useMemo(
     () =>
-      base && base !== 'unknown' && base.content !== null ? { name, contents: base.content } : null,
+      base !== null && base !== 'unknown' && base.content !== null
+        ? { name, contents: base.content }
+        : null,
     [name, base],
   )
 
@@ -436,7 +445,7 @@ export default function FilePane({
       .catch(() => setEditorError('The editor could not be loaded'))
   }
 
-  if (error && (!current || (view === 'diff' && !base))) {
+  if (error !== null && (current === null || (view === 'diff' && base === null))) {
     return (
       <EmptyState icon={<FileQuestion />} title="Could not open file">
         {error.message}
@@ -444,7 +453,7 @@ export default function FilePane({
     )
   }
 
-  if (!current || (view === 'diff' && !base)) {
+  if (current === null || (view === 'diff' && base === null)) {
     return (
       <div className="text-muted-foreground flex h-full items-center justify-center text-xs">
         Loading…
@@ -487,7 +496,7 @@ export default function FilePane({
       }}
     >
       <div className="flex h-7 shrink-0 items-center gap-2 border-b px-2.5 text-[11px]">
-        {status ? (
+        {status !== undefined ? (
           <span className={cn('shrink-0 font-medium', STATUS_CLASS[status])}>
             {STATUS_LABEL[status]}
           </span>
@@ -496,16 +505,16 @@ export default function FilePane({
           <span className="text-muted-foreground min-w-0 truncate" role="status">
             {saveError ?? (dirty ? 'Unsaved changes' : 'Editing')}
           </span>
-        ) : saveError ? (
+        ) : hasText(saveError) ? (
           <span className="text-destructive min-w-0 truncate" role="alert">
             {saveError}
           </span>
-        ) : blocked ? (
+        ) : hasText(blocked) ? (
           <span className="text-muted-foreground min-w-0 truncate" title={blocked}>
             {blocked}
           </span>
         ) : null}
-        {problemCount ? (
+        {hasText(problemCount) ? (
           <span className="text-destructive shrink-0" role="status">
             {problemCount}
           </span>
@@ -539,7 +548,7 @@ export default function FilePane({
                   ]}
                 />
               ) : null}
-              {status && status !== 'D' ? (
+              {status !== undefined && status !== 'D' ? (
                 <Switch
                   label="Show"
                   value={view}
@@ -550,7 +559,7 @@ export default function FilePane({
                   ]}
                 />
               ) : null}
-              {blocked ? null : (
+              {hasText(blocked) ? null : (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -593,7 +602,7 @@ export default function FilePane({
               onEditComplete={() => decision.current}
             />
           ) : base === 'unknown' ? (
-            patch?.trim() ? (
+            patch !== null && patch.trim() !== '' ? (
               <PatchDiff patch={patch} options={diffOptions} />
             ) : (
               <EmptyState icon={<FileCode2 />} title="No changes">

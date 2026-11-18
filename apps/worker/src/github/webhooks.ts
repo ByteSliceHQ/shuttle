@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 import type { ShuttleEnv } from '../env'
 import { base64Url } from './client'
 
@@ -119,7 +121,12 @@ export async function verifyWebhookSignature(
 ): Promise<boolean> {
   const secret = env.GITHUB_WEBHOOK_SECRET
 
-  if (!secret || !signatureHeader?.startsWith('sha256=')) {
+  if (
+    secret === undefined ||
+    secret === '' ||
+    signatureHeader === null ||
+    !signatureHeader.startsWith('sha256=')
+  ) {
     return false
   }
 
@@ -136,28 +143,95 @@ export async function verifyWebhookSignature(
   return timingSafeEqual(expected, signatureHeader)
 }
 
-function asObject(value: unknown): Record<string, unknown> | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
+/*
+ * GitHub's payloads are read leniently: a field that is missing or not the expected kind reads as
+ * absent, and the code below chooses the fallback. An object that is not an object reads as absent.
+ */
+const Text = z.string().optional().catch(undefined)
+const Count = z.number().optional().catch(undefined)
+const Flag = z.boolean().optional().catch(undefined)
+const Line = z.number().nullish().catch(undefined)
+
+function lenientObject<Shape extends z.ZodRawShape>(shape: Shape) {
+  return z.object(shape).optional().catch(undefined)
 }
 
-function asString(value: unknown, fallback = ''): string {
-  return typeof value === 'string' ? value : fallback
+const UserSchema = lenientObject({ login: Text, avatar_url: Text })
+
+/** A review comment as GitHub's REST API and its webhooks both carry it. */
+export const ReviewCommentSchema = z.object({
+  id: Count,
+  in_reply_to_id: Count,
+  path: Text,
+  line: Line,
+  original_line: Line,
+  start_line: Line,
+  original_start_line: Line,
+  side: Text,
+  body: Text,
+  user: UserSchema,
+  created_at: Text,
+  updated_at: Text,
+  html_url: Text,
+})
+
+export type ReviewCommentPayload = z.infer<typeof ReviewCommentSchema>
+
+/** What the webhook events Shuttle reads carry between them. */
+export const WebhookPayloadSchema = z.object({
+  action: Text,
+  installation: lenientObject({ id: Count }),
+  repository: lenientObject({ full_name: Text }),
+  pull_request: lenientObject({
+    number: Count,
+    title: Text,
+    body: Text,
+    html_url: Text,
+    draft: Flag,
+    updated_at: Text,
+    additions: Count,
+    deletions: Count,
+    user: UserSchema,
+    head: lenientObject({
+      ref: Text,
+      sha: Text,
+      repo: lenientObject({ fork: Flag }),
+    }),
+    base: lenientObject({ ref: Text, sha: Text }),
+    stack: lenientObject({ number: Count, position: Count, size: Count }),
+  }),
+  review: lenientObject({ state: Text, submitted_at: Text }),
+  check_suite: lenientObject({ conclusion: Text, status: Text, head_sha: Text }),
+  comment: lenientObject(ReviewCommentSchema.shape),
+  thread: lenientObject({ comments: z.array(lenientObject({ id: Count })).catch([]) }),
+})
+
+export type WebhookPayload = z.infer<typeof WebhookPayloadSchema>
+
+export type WebhookBody =
+  | { readonly kind: 'payload'; readonly payload: WebhookPayload }
+  | { readonly kind: 'invalid-json' }
+  | { readonly kind: 'non-object-payload' }
+
+/** Reads a delivery's raw body into the payload the events are normalized from. */
+export function parseWebhookBody(rawBody: string): WebhookBody {
+  try {
+    const parsed = WebhookPayloadSchema.safeParse(JSON.parse(rawBody))
+
+    return parsed.success
+      ? { kind: 'payload', payload: parsed.data }
+      : { kind: 'non-object-payload' }
+  } catch {
+    return { kind: 'invalid-json' }
+  }
 }
 
-function asNumber(value: unknown, fallback = 0): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+function installationIdFrom(payload: WebhookPayload): number {
+  return payload.installation?.id ?? 0
 }
 
-function installationIdFrom(payload: Record<string, unknown>): number {
-  const installation = asObject(payload.installation)
-  return asNumber(installation?.id)
-}
-
-function fullNameFromRepo(payload: Record<string, unknown>): string {
-  const repo = asObject(payload.repository)
-  return asString(repo?.full_name)
+function fullNameFromRepo(payload: WebhookPayload): string {
+  return payload.repository?.full_name ?? ''
 }
 
 function mapCheckConclusion(
@@ -171,6 +245,7 @@ function mapCheckConclusion(
   switch (conclusion) {
     case 'success':
       return 'passing'
+    case null:
     case 'neutral':
     case 'skipped':
       return 'neutral'
@@ -202,66 +277,62 @@ export interface WebhookComment {
 }
 
 /** Reads a review comment in the shape GitHub's REST API and its webhooks both use. */
-export function commentFromWebhook(comment: Record<string, unknown>): WebhookComment {
-  const commentId = asNumber(comment.id)
-  const user = asObject(comment.user)
-  const line = typeof comment.line === 'number' ? comment.line : null
-  const original = typeof comment.original_line === 'number' ? comment.original_line : null
+export function commentFromWebhook(comment: ReviewCommentPayload): WebhookComment {
+  const commentId = comment.id ?? 0
+  const replyTo = comment.in_reply_to_id ?? 0
+  const line = comment.line ?? null
+  const original = comment.original_line ?? null
   const now = new Date().toISOString()
-
-  const start =
-    typeof comment.start_line === 'number'
-      ? comment.start_line
-      : typeof comment.original_start_line === 'number'
-        ? comment.original_start_line
-        : null
+  const start = comment.start_line ?? comment.original_start_line ?? null
 
   return {
     commentId,
     // A reply names the comment it answers; GitHub threads are one level deep.
-    rootId: asNumber(comment.in_reply_to_id) || commentId,
-    path: asString(comment.path),
+    rootId: replyTo === 0 ? commentId : replyTo,
+    path: comment.path ?? '',
     // GitHub drops the line once the code under a comment changes, keeping where it was.
     line: line ?? original,
-    ...(start === null ? {} : { startLine: start }),
-    side: asString(comment.side).toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT',
+    startLine: start ?? undefined,
+    side: (comment.side ?? '').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT',
     outdated: line === null,
-    body: asString(comment.body),
-    author: { login: asString(user?.login, 'unknown'), avatarUrl: asString(user?.avatar_url) },
-    createdAt: Date.parse(asString(comment.created_at, now)),
-    updatedAt: Date.parse(asString(comment.updated_at, now)),
-    url: asString(comment.html_url),
+    body: comment.body ?? '',
+    author: {
+      login: comment.user?.login ?? 'unknown',
+      avatarUrl: comment.user?.avatar_url ?? '',
+    },
+    createdAt: Date.parse(comment.created_at ?? now),
+    updatedAt: Date.parse(comment.updated_at ?? now),
+    url: comment.html_url ?? '',
   }
 }
+
+const UpsertActionSchema = z.enum([
+  'opened',
+  'ready_for_review',
+  'synchronize',
+  'edited',
+  'reopened',
+  'converted_to_draft',
+])
 
 export function normalizeWebhook(
   eventName: string,
   deliveryId: string,
-  payload: unknown,
+  body: WebhookPayload,
 ): NormalizedWebhook {
-  const body = asObject(payload)
-
-  if (!body) {
-    return { kind: 'ignored', deliveryId, reason: 'non-object-payload' }
-  }
-
   switch (eventName) {
     case 'pull_request': {
-      const action = asString(body.action)
-      const pull = asObject(body.pull_request)
+      const action = body.action ?? ''
+      const pull = body.pull_request
 
-      if (!pull) {
+      if (pull === undefined) {
         return { kind: 'ignored', deliveryId, reason: 'missing-pull_request' }
       }
 
       const installationId = installationIdFrom(body)
       const fullName = fullNameFromRepo(body)
-      const number = asNumber(pull.number)
-      const updatedAt = Date.parse(asString(pull.updated_at, new Date().toISOString()))
-      const user = asObject(pull.user)
-      const head = asObject(pull.head)
-      const base = asObject(pull.base)
-      const headRepo = asObject(head?.repo)
+      const number = pull.number ?? 0
+      const updatedAt = Date.parse(pull.updated_at ?? new Date().toISOString())
 
       if (action === 'closed') {
         return {
@@ -274,16 +345,9 @@ export function normalizeWebhook(
         }
       }
 
-      const upsertActions = new Set([
-        'opened',
-        'ready_for_review',
-        'synchronize',
-        'edited',
-        'reopened',
-        'converted_to_draft',
-      ])
+      const upsertAction = UpsertActionSchema.safeParse(action)
 
-      if (!upsertActions.has(action)) {
+      if (!upsertAction.success) {
         return { kind: 'ignored', deliveryId, reason: `pull_request.${action}` }
       }
 
@@ -293,48 +357,42 @@ export function normalizeWebhook(
         installationId,
         fullName,
         number,
-        action: action as
-          | 'opened'
-          | 'ready_for_review'
-          | 'synchronize'
-          | 'edited'
-          | 'reopened'
-          | 'converted_to_draft',
-        title: asString(pull.title),
-        body: asString(pull.body),
-        url: asString(pull.html_url),
-        draft: Boolean(pull.draft),
-        authorLogin: asString(user?.login, 'unknown'),
-        authorAvatarUrl: asString(user?.avatar_url),
-        headRef: asString(head?.ref),
-        headSha: asString(head?.sha),
-        baseRef: asString(base?.ref),
-        baseSha: asString(base?.sha),
-        additions: asNumber(pull.additions),
-        deletions: asNumber(pull.deletions),
+        action: upsertAction.data,
+        title: pull.title ?? '',
+        body: pull.body ?? '',
+        url: pull.html_url ?? '',
+        draft: pull.draft === true,
+        authorLogin: pull.user?.login ?? 'unknown',
+        authorAvatarUrl: pull.user?.avatar_url ?? '',
+        headRef: pull.head?.ref ?? '',
+        headSha: pull.head?.sha ?? '',
+        baseRef: pull.base?.ref ?? '',
+        baseSha: pull.base?.sha ?? '',
+        additions: pull.additions ?? 0,
+        deletions: pull.deletions ?? 0,
         updatedAt,
-        isFork: Boolean(headRepo?.fork),
+        isFork: pull.head?.repo?.fork === true,
         stack: stackFromWebhook(pull),
       }
     }
 
     case 'pull_request_review': {
-      if (asString(body.action) !== 'submitted') {
+      if (body.action !== 'submitted') {
         return {
           kind: 'ignored',
           deliveryId,
-          reason: `pull_request_review.${asString(body.action)}`,
+          reason: `pull_request_review.${body.action ?? ''}`,
         }
       }
 
-      const pull = asObject(body.pull_request)
-      const review = asObject(body.review)
+      const pull = body.pull_request
+      const review = body.review
 
-      if (!pull || !review) {
+      if (pull === undefined || review === undefined) {
         return { kind: 'ignored', deliveryId, reason: 'missing-review' }
       }
 
-      const state = asString(review.state).toUpperCase()
+      const state = (review.state ?? '').toUpperCase()
       let verdict: 'approved' | 'changes_requested' | 'commented'
 
       switch (state) {
@@ -354,22 +412,22 @@ export function normalizeWebhook(
         deliveryId,
         installationId: installationIdFrom(body),
         fullName: fullNameFromRepo(body),
-        number: asNumber(pull.number),
+        number: pull.number ?? 0,
         verdict,
-        updatedAt: Date.parse(asString(review.submitted_at, new Date().toISOString())),
+        updatedAt: Date.parse(review.submitted_at ?? new Date().toISOString()),
       }
     }
 
     case 'check_suite': {
-      const suite = asObject(body.check_suite)
+      const suite = body.check_suite
 
-      if (!suite) {
+      if (suite === undefined) {
         return { kind: 'ignored', deliveryId, reason: 'missing-check_suite' }
       }
 
-      const conclusion = typeof suite.conclusion === 'string' ? suite.conclusion : null
-      const status = asString(suite.status, 'queued')
-      const headSha = asString(suite.head_sha)
+      const conclusion = suite.conclusion ?? null
+      const status = suite.status ?? 'queued'
+      const headSha = suite.head_sha ?? ''
 
       return {
         kind: 'checks.updated',
@@ -383,12 +441,12 @@ export function normalizeWebhook(
     }
 
     case 'pull_request_review_comment': {
-      const action = asString(body.action)
-      const pull = asObject(body.pull_request)
-      const comment = asObject(body.comment)
-      const commentId = asNumber(comment?.id)
+      const action = body.action ?? ''
+      const pull = body.pull_request
+      const comment = body.comment
+      const commentId = comment?.id ?? 0
 
-      if (!pull || !comment || !commentId) {
+      if (pull === undefined || comment === undefined || commentId === 0) {
         return { kind: 'ignored', deliveryId, reason: 'missing-comment' }
       }
 
@@ -396,7 +454,7 @@ export function normalizeWebhook(
         deliveryId,
         installationId: installationIdFrom(body),
         fullName: fullNameFromRepo(body),
-        number: asNumber(pull.number),
+        number: pull.number ?? 0,
       }
 
       if (action === 'deleted') {
@@ -411,13 +469,15 @@ export function normalizeWebhook(
     }
 
     case 'pull_request_review_thread': {
-      const action = asString(body.action)
-      const pull = asObject(body.pull_request)
-      const thread = asObject(body.thread)
-      const comments = Array.isArray(thread?.comments) ? thread.comments : []
-      const rootId = asNumber(asObject(comments[0])?.id)
+      const action = body.action ?? ''
+      const pull = body.pull_request
+      const rootId = body.thread?.comments[0]?.id ?? 0
 
-      if (!pull || !rootId || (action !== 'resolved' && action !== 'unresolved')) {
+      if (
+        pull === undefined ||
+        rootId === 0 ||
+        (action !== 'resolved' && action !== 'unresolved')
+      ) {
         return { kind: 'ignored', deliveryId, reason: `pull_request_review_thread.${action}` }
       }
 
@@ -426,10 +486,10 @@ export function normalizeWebhook(
         deliveryId,
         installationId: installationIdFrom(body),
         fullName: fullNameFromRepo(body),
-        number: asNumber(pull.number),
+        number: pull.number ?? 0,
         rootId,
         resolved: action === 'resolved',
-        updatedAt: Date.parse(asString(pull.updated_at, new Date().toISOString())),
+        updatedAt: Date.parse(pull.updated_at ?? new Date().toISOString()),
       }
     }
 
@@ -443,23 +503,19 @@ export function normalizeWebhook(
 }
 
 function stackFromWebhook(
-  pull: Record<string, unknown> | null,
+  pull: NonNullable<WebhookPayload['pull_request']>,
 ): { number: number; position: number; size: number } | null {
-  if (!pull) {
+  const stack = pull.stack
+
+  if (stack === undefined) {
     return null
   }
 
-  const stack = asObject(pull.stack)
+  const number = stack.number ?? 0
+  const position = stack.position ?? 0
+  const size = stack.size ?? 0
 
-  if (!stack) {
-    return null
-  }
-
-  const number = asNumber(stack.number)
-  const position = asNumber(stack.position)
-  const size = asNumber(stack.size)
-
-  if (!number || !position || !size) {
+  if (number === 0 || position === 0 || size === 0) {
     return null
   }
 

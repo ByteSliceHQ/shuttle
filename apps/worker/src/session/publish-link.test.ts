@@ -22,6 +22,14 @@ const TextInput = z.object({
   workers: z.array(z.string()).optional(),
 })
 
+const ApprovalPayload = z.object({ approvalId: z.string() })
+const ChildThreadPayload = z.object({ childThreadId: z.string() })
+const ToolResultPayload = z.object({ toolCallId: z.string().optional() })
+
+const SessionPublishState = z.object({
+  pendingPrPublish: z.object({ threadId: z.string().nullable() }).nullable().optional(),
+})
+
 async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 3_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
 
@@ -90,13 +98,11 @@ describe('PR publish thread links', () => {
 
       const proposal = await proposed()
 
-      const approvalId = String(
-        (proposal?.payload as { approvalId?: string } | undefined)?.approvalId,
-      )
+      const approvalId = ApprovalPayload.parse(proposal?.payload).approvalId
 
       const conductorThreadId = (await looms.getEvents(runId))
         .filter((event) => event.type === 'shuttle.conductor.spawned')
-        .map((event) => (event.payload as { childThreadId: string }).childThreadId)[0]
+        .map((event) => ChildThreadPayload.parse(event.payload).childThreadId)[0]
 
       expect(conductorThreadId).toBeDefined()
       expect(proposal?.threadId).toBe(conductorThreadId)
@@ -104,8 +110,9 @@ describe('PR publish thread links', () => {
       const pendingPublish = async () => {
         const run = await looms.getRun(runId)
         const root = run.rootThreadId ? run.threads[run.rootThreadId] : undefined
-        return (root?.state as { pendingPrPublish?: { threadId: string | null } | null })
-          ?.pendingPrPublish
+        return root === undefined
+          ? undefined
+          : SessionPublishState.parse(root.state).pendingPrPublish
       }
 
       await waitFor(async () => (await pendingPublish()) != null)
@@ -144,7 +151,7 @@ describe('PR publish thread links', () => {
           (event) =>
             event.type === 'agent.tool.result' &&
             event.threadId === conductorThreadId &&
-            (event.payload as { toolCallId?: string }).toolCallId === proposeCall.id,
+            ToolResultPayload.parse(event.payload).toolCallId === proposeCall.id,
         )
 
       await waitFor(async () => (await toolResult()) !== undefined)
@@ -179,9 +186,7 @@ describe('PR publish thread links', () => {
 
       await waitFor(async () => (await proposed()) !== undefined)
 
-      const approvalId = String(
-        (((await proposed())?.payload ?? {}) as { approvalId?: string }).approvalId,
-      )
+      const approvalId = ApprovalPayload.parse((await proposed())?.payload).approvalId
 
       await looms.signal(runId, [
         decision({ approvalId, choice: { actionId: 'discard', outcome: 'reject' } }),
@@ -191,7 +196,7 @@ describe('PR publish thread links', () => {
         (await looms.getEvents(runId)).find(
           (event) =>
             event.type === 'agent.tool.result' &&
-            (event.payload as { toolCallId?: string }).toolCallId === proposeCall.id,
+            ToolResultPayload.parse(event.payload).toolCallId === proposeCall.id,
         )
 
       await waitFor(async () => (await toolResult()) !== undefined)

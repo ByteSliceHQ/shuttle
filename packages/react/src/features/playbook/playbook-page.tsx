@@ -8,6 +8,7 @@ import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { EmptyState } from '../../components/ui/panel'
 import { cn, shortId } from '../../lib/cn'
+import { hasText } from '../../lib/text'
 import { Link, useShuttleHost } from '../../shuttle'
 import { decideApproval } from '../sessions/signals'
 import { playbookQuery } from './playbook-query'
@@ -159,7 +160,7 @@ function Section({
         <span className="text-muted-foreground [&_svg]:size-3.5">{icon}</span>
         <h2 className="text-[13px] font-medium">{title}</h2>
         <span className="text-muted-foreground font-mono text-[11px] tabular-nums">
-          {count || ''}
+          {count > 0 ? count : ''}
         </span>
       </div>
       {count === 0 ? (
@@ -193,7 +194,7 @@ function LessonCard({
     >
       <p className="text-[13.5px] leading-relaxed">{lesson.text}</p>
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        {lesson.scope ? <Badge variant="outline">{lesson.scope}</Badge> : null}
+        {hasText(lesson.scope) ? <Badge variant="outline">{lesson.scope}</Badge> : null}
         {lesson.evidence.map((item) => (
           <Link
             key={`${item.runId}_${item.seq}`}
@@ -204,9 +205,9 @@ function LessonCard({
             {shortId(item.runId)}#{item.seq}
           </Link>
         ))}
-        {actions ? <div className="ml-auto flex gap-1.5">{actions}</div> : null}
+        {actions !== undefined ? <div className="ml-auto flex gap-1.5">{actions}</div> : null}
       </div>
-      {error ? <p className="text-status-failed mt-2 text-xs">{error}</p> : null}
+      {hasText(error) ? <p className="text-status-failed mt-2 text-xs">{error}</p> : null}
     </li>
   )
 }

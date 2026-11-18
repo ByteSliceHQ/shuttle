@@ -30,7 +30,9 @@ export function SessionAgents({
     <aside aria-label="Agents" className="bg-sidebar flex h-full min-h-0 flex-col">
       <PanelHeader className="pr-2">
         <Users className="text-muted-foreground size-3.5" />
-        <PanelTitle meta={session.identities.size || undefined}>Agents</PanelTitle>
+        <PanelTitle meta={session.identities.size > 0 ? session.identities.size : undefined}>
+          Agents
+        </PanelTitle>
         {onClose ? (
           <Button
             variant="ghost"
