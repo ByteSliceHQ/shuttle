@@ -14,7 +14,7 @@
     "check-types": "bun x tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@swirls/looms": "^0.17.0",
+    "@swirls/looms": "^0.18.1",
     "effect": "4.0.0-rc.112"
   },
   "devDependencies": {

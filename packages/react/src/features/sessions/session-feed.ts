@@ -150,6 +150,8 @@ export interface PublishedPull {
   readonly number: number
   readonly url: string
   readonly draft: boolean
+  /** What publishing did to it. Absent in events from before it was recorded. */
+  readonly outcome?: 'opened' | 'updated' | 'unchanged'
   /** Agent thread that proposed the PR. */
   readonly threadId?: string
   /** Shuttle stack membership; absent when the PR can't be placed in a stack. */
@@ -1043,6 +1045,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
         const number = jsonNumber(pull.number)
         const url = jsonText(pull.url)
         const layer = jsonNumber(pull.layer)
+        const outcome = jsonText(pull.outcome)
 
         if (!fullName || number === undefined || !url) {
           return []
@@ -1054,6 +1057,9 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
             number,
             url,
             draft: pull.draft === true,
+            ...(outcome === 'opened' || outcome === 'updated' || outcome === 'unchanged'
+              ? { outcome }
+              : {}),
             ...(threadId ? { threadId } : {}),
             ...(layer !== undefined ? { stack: { id: stackId, layer } } : {}),
           } satisfies PublishedPull,

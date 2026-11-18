@@ -11,7 +11,7 @@ import { useNow } from '../../lib/use-now'
 import { useShuttleHost } from '../../shuttle'
 import type { AgentIdentity } from './agents'
 import { agentRole } from './agents'
-import type { FeedItem } from './session-feed'
+import type { FeedItem, PublishedPull } from './session-feed'
 import { decideStructuredApproval } from './signals'
 
 export interface PullPublishCardContext {
@@ -34,9 +34,10 @@ export function PullPublishCard({
 
   const [title, setTitle] = useState(jsonText(item.defaults?.title) ?? '')
   const [body, setBody] = useState(jsonText(item.defaults?.body) ?? '')
+  const existing = existingPull(item)
 
   const decide = useMutation({
-    mutationFn: (actionId: 'draft' | 'publish' | 'discard') =>
+    mutationFn: (actionId: 'draft' | 'publish' | 'update' | 'discard') =>
       actionId === 'discard'
         ? decideStructuredApproval(host, context.runId, item.approvalId, {
             actionId: 'discard',
@@ -48,7 +49,7 @@ export function PullPublishCard({
             payload: {
               title: title.trim() || 'Shuttle changes',
               body,
-              draft: actionId === 'draft',
+              draft: actionId === 'update' ? (existing?.draft ?? true) : actionId === 'draft',
             },
           }),
   })
@@ -92,6 +93,25 @@ export function PullPublishCard({
           />
         ) : (
           <div className="mt-3 flex flex-col gap-2">
+            {existing ? (
+              <p className="text-muted-foreground text-[11px]">
+                Pushes this layer’s changes to{' '}
+                {existing.url ? (
+                  <a
+                    href={existing.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-foreground/90 font-mono underline-offset-2 hover:underline"
+                  >
+                    {existing.label}
+                  </a>
+                ) : (
+                  <span className="text-foreground/90 font-mono">{existing.label}</span>
+                )}
+                {existing.draft ? ', which stays a draft' : ''}, and replaces its title and
+                description with these.
+              </p>
+            ) : null}
             {jsonText(item.defaults?.parentPullLabel) ? (
               <p className="text-muted-foreground text-[11px]">
                 Stacks on{' '}
@@ -137,24 +157,38 @@ export function PullPublishCard({
               >
                 Discard
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={pending}
-                onClick={() => decide.mutate('draft')}
-              >
-                Publish as draft
-              </Button>
-              <Button
-                type="button"
-                variant="brand"
-                size="sm"
-                disabled={pending}
-                onClick={() => decide.mutate('publish')}
-              >
-                Publish
-              </Button>
+              {existing ? (
+                <Button
+                  type="button"
+                  variant="brand"
+                  size="sm"
+                  disabled={pending}
+                  onClick={() => decide.mutate('update')}
+                >
+                  Push update
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={pending}
+                    onClick={() => decide.mutate('draft')}
+                  >
+                    Publish as draft
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="brand"
+                    size="sm"
+                    disabled={pending}
+                    onClick={() => decide.mutate('publish')}
+                  >
+                    Publish
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -163,27 +197,42 @@ export function PullPublishCard({
   )
 }
 
+/** The pull request this card would push to, when the layer already has one. */
+function existingPull(
+  item: Extract<FeedItem, { kind: 'question' }>,
+): { label: string; url: string | null; draft: boolean } | null {
+  const label = jsonText(item.defaults?.existingPullLabel)
+
+  return label
+    ? {
+        label,
+        url: jsonText(item.defaults?.existingPullUrl) ?? null,
+        draft: item.defaults?.existingPullDraft === true,
+      }
+    : null
+}
+
 function publishHeading(item: Extract<FeedItem, { kind: 'question' }>): string {
+  const existing = existingPull(item)
+
   if (!item.decision) {
-    return 'Publish pull requests'
+    return existing ? `Update ${existing.label}` : 'Publish pull requests'
   }
 
   if (item.decision.answer === null) {
-    return 'Pull requests discarded'
+    return existing ? 'Update discarded' : 'Pull requests discarded'
   }
 
   if (!item.publish) {
-    return 'Publish approved'
+    return existing ? 'Update approved' : 'Publish approved'
   }
 
   switch (item.publish.status) {
-    case 'published': {
-      const count = item.publish.pulls.length
-      return `Opened ${count} pull request${count === 1 ? '' : 's'}`
-    }
+    case 'published':
+      return publishedHeading(item.publish.pulls)
 
     case 'failed':
-      return 'Couldn’t publish pull requests'
+      return existing ? `Couldn’t update ${existing.label}` : 'Couldn’t publish pull requests'
 
     default: {
       const exhaustive: never = item.publish
@@ -192,10 +241,41 @@ function publishHeading(item: Extract<FeedItem, { kind: 'question' }>): string {
   }
 }
 
+function pullCount(n: number): string {
+  return `${n} pull request${n === 1 ? '' : 's'}`
+}
+
+function publishedHeading(pulls: readonly PublishedPull[]): string {
+  const opened = pulls.filter((pull) => pull.outcome !== 'updated' && pull.outcome !== 'unchanged')
+  const updated = pulls.filter((pull) => pull.outcome === 'updated')
+
+  if (opened.length > 0 && updated.length > 0) {
+    return `Opened ${pullCount(opened.length)}, updated ${pullCount(updated.length)}`
+  }
+
+  if (opened.length > 0) {
+    return `Opened ${pullCount(opened.length)}`
+  }
+
+  if (updated.length > 0) {
+    return updated.length === 1
+      ? `Updated #${updated[0]?.number}`
+      : `Updated ${pullCount(updated.length)}`
+  }
+
+  return 'Pull requests already up to date'
+}
+
 /** Publishing commits and opens PRs in a few seconds; minutes of silence means no result is coming. */
 const PUBLISH_STALE_MS = 5 * 60_000
 
-function PublishPending({ decidedAt }: { decidedAt: number }) {
+function PublishPending({
+  item,
+  decidedAt,
+}: {
+  item: Extract<FeedItem, { kind: 'question' }>
+  decidedAt: number
+}) {
   const now = useNow(15_000)
 
   if (now - decidedAt > PUBLISH_STALE_MS) {
@@ -209,7 +289,7 @@ function PublishPending({ decidedAt }: { decidedAt: number }) {
   return (
     <p className="text-muted-foreground mt-2 flex items-center gap-1.5 text-xs">
       <LoaderCircle className="size-3 animate-spin" />
-      Committing changes and opening pull requests…
+      {existingPull(item) ? 'Pushing changes…' : 'Committing changes and opening pull requests…'}
     </p>
   )
 }
@@ -228,7 +308,7 @@ function PublishOutcome({
   }
 
   if (!item.publish) {
-    return <PublishPending decidedAt={item.decision?.ts ?? item.ts} />
+    return <PublishPending item={item} decidedAt={item.decision?.ts ?? item.ts} />
   }
 
   if (item.publish.status === 'failed') {
@@ -259,7 +339,7 @@ function PublishOutcome({
         ))}
       </ul>
       <p className="text-muted-foreground text-[11px]">
-        Opened by{' '}
+        {item.publish.pulls.every((pull) => pull.outcome === 'updated') ? 'Updated' : 'Opened'} by{' '}
         <button
           type="button"
           onClick={onInspect}
