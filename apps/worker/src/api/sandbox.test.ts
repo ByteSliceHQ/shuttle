@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
+import type { SandboxWorkspace } from '@shuttle/api'
+
 import type { ShuttleEnv } from '../env'
 import { localSandboxName } from '../sandbox/names'
 import type { Actor } from '../tenancy/access'
@@ -25,6 +27,8 @@ interface World {
   online?: boolean
   adopt?: { ok: boolean; error?: string }
   mode?: string
+  /** More of what the sandbox says about the demo repository's changes. */
+  summary?: Record<string, unknown>
 }
 
 /** An env whose session and sandbox objects answer from `world`, and record what was done. */
@@ -33,6 +37,7 @@ function envWith(world: World = {}, overrides: Partial<ShuttleEnv> = {}) {
   const placed: unknown[] = []
   const later: unknown[] = []
   const commands: string[] = []
+  const measured: unknown[] = []
 
   const run = {
     getSandboxName: async () => world.home ?? null,
@@ -75,10 +80,21 @@ function envWith(world: World = {}, overrides: Partial<ShuttleEnv> = {}) {
 
       return { exitCode: 0, stdout: world.stdout ?? '', stderr: '' }
     },
-    workspaceSummary: async () => ({
-      repos: [{ name: 'demo', files: ['a.ts'], changes: [{ path: 'a.ts', status: 'M' }] }],
-      strays: [{ path: '/workspace/notes', files: 2 }],
-    }),
+    workspaceSummary: async (_runId: string, repos: unknown) => {
+      measured.push(repos)
+
+      return {
+        repos: [
+          {
+            name: 'demo',
+            files: ['a.ts'],
+            changes: [{ path: 'a.ts', status: 'M' }],
+            ...world.summary,
+          },
+        ],
+        strays: [{ path: '/workspace/notes', files: 2 }],
+      }
+    },
     fileDiff: async () => ({ diff: '@@ one file @@' }),
     baseFile: async () => ({ content: null }),
     adoptStray: async () => world.adopt ?? { ok: true },
@@ -91,7 +107,7 @@ function envWith(world: World = {}, overrides: Partial<ShuttleEnv> = {}) {
     ...overrides,
   })
 
-  return { env, files, placed, later, commands }
+  return { env, files, placed, later, commands, measured }
 }
 
 async function call(env: ShuttleEnv, method: string, path: string, body?: unknown) {
@@ -238,10 +254,66 @@ describe('what a session changed', () => {
           defaultBranch: 'main',
           files: ['a.ts'],
           changes: [{ path: 'a.ts', status: 'M' }],
+          head: null,
+          dirty: false,
+          sessionBaseSha: null,
+          commits: [],
+          comparison: {
+            against: 'session',
+            baseSha: null,
+            baseMode: null,
+            headSha: null,
+            error: null,
+          },
         },
       ],
       strays: [{ path: '/workspace/notes', files: 2 }],
     })
+  })
+
+  test('each repository is measured the way it was asked for', async () => {
+    const { env, measured } = envWith({
+      summary: {
+        head: { branch: 'shuttle/x/demo', sha: 'c2' },
+        dirty: true,
+        sessionBaseSha: 'b0',
+        commits: [{ sha: 'c2', subject: 'two', at: 2000, branches: ['shuttle/x/demo'] }],
+        measure: { baseSha: 'c2', baseMode: 'merge-base', headSha: null, error: null },
+      },
+    })
+
+    const { status, body } = await call(env, 'GET', 'workspace?against%5Bdemo%5D=uncommitted')
+
+    expect(status).toBe(200)
+    expect(measured).toEqual([[expect.objectContaining({ name: 'demo', against: 'uncommitted' })]])
+
+    expect((body as SandboxWorkspace).repos[0]).toMatchObject({
+      head: { branch: 'shuttle/x/demo', sha: 'c2' },
+      dirty: true,
+      commits: [{ sha: 'c2', subject: 'two' }],
+      comparison: { against: 'uncommitted', baseSha: 'c2', error: null },
+    })
+  })
+
+  test('a comparison that is not one is refused', async () => {
+    const { status } = await call(envWith().env, 'GET', 'workspace?against%5Bdemo%5D=ref:a..b')
+
+    expect(status).toBe(400)
+  })
+
+  test('a branch that is not there says so', async () => {
+    const { env, commands } = envWith({
+      summary: { measure: { baseSha: null, baseMode: null, headSha: null, error: 'missing' } },
+    })
+
+    const { body } = await call(env, 'GET', 'workspace?against%5Bdemo%5D=ref:develop')
+
+    const [repo] = (body as SandboxWorkspace).repos
+
+    expect(repo?.comparison?.error).toContain('develop')
+    expect(repo?.changes).toEqual([{ path: 'a.ts', status: 'M' }])
+    // The scratch repository has nowhere to fetch from.
+    expect(commands).toEqual([])
   })
 
   test('a sandbox that fails says why', async () => {

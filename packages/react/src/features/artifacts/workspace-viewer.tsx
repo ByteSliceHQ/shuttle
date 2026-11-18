@@ -1,14 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronRight,
   File,
   Files,
   Folder,
   FolderOpen,
-  GitBranch,
-  GitPullRequest,
-  Moon,
-  Package,
   PanelRight,
   Search,
   TriangleAlert,
@@ -16,7 +12,7 @@ import {
 } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { ChangeStatus, SandboxWorkspace } from '@shuttle/api'
+import type { ChangeStatus } from '@shuttle/api'
 import { useProjection, useRunStore } from '@swirls/looms/react'
 
 import { Button } from '../../components/ui/button'
@@ -24,16 +20,9 @@ import { EmptyState, Kbd } from '../../components/ui/panel'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '../../components/ui/resizable'
 import { ScrollArea } from '../../components/ui/scroll-area'
 import { cn } from '../../lib/cn'
-import { fullDateTime, relativeTime } from '../../lib/time'
-import { useNow } from '../../lib/use-now'
 import { useWidthBucket } from '../../lib/use-width-bucket'
-import { useApi, useOrgPeople, useShuttleHost, useTenant } from '../../shuttle'
-import {
-  authoredPullsForSession,
-  pullInbox,
-  reviewedPullForSession,
-  usePullsRunId,
-} from '../pulls/pulls'
+import { useApi, useShuttleHost } from '../../shuttle'
+import { pullInbox, usePullsRunId } from '../pulls/pulls'
 import {
   changeAt,
   changeCount,
@@ -44,7 +33,9 @@ import {
   type WorkspaceNode,
 } from '../workspace/workspace-tree'
 import { FileQuickOpen, quickOpenShortcut } from './file-quick-open'
-import { invalidateWorktree, type WorkspaceRepo } from './sandbox'
+import { invalidateWorktree } from './sandbox'
+import { pullComparison, pullShown, runPulls, SESSION } from './workspace-comparison'
+import { ComparisonBar, RepoTabs, RunPullsRow } from './workspace-comparison-bar'
 
 /** The file pane brings the code and diff renderer with it, so it loads when a file is first opened. */
 const FilePane = lazy(() => import('./file-pane'))
@@ -92,6 +83,44 @@ function readOpenFiles(runId: string): OpenFiles {
   return NONE_OPEN
 }
 
+function compareKey(runId: string): string {
+  return `shuttle:compare:${runId}`
+}
+
+/**
+ * What this browser tab compares each repository with, and which repository it has in front, so
+ * a reload keeps them. Comparisons other than the session's own are the only ones kept.
+ */
+interface CompareState {
+  readonly against: Readonly<Record<string, string>>
+  readonly repo: string | null
+}
+
+function readCompare(runId: string): CompareState {
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(compareKey(runId)) ?? 'null') as unknown
+
+    if (stored && typeof stored === 'object') {
+      const against =
+        'against' in stored && stored.against && typeof stored.against === 'object'
+          ? Object.fromEntries(
+              Object.entries(stored.against).filter(
+                (entry): entry is [string, string] => typeof entry[1] === 'string',
+              ),
+            )
+          : {}
+
+      const repo = 'repo' in stored && typeof stored.repo === 'string' ? stored.repo : null
+
+      return { against, repo }
+    }
+  } catch {
+    // Nothing stored, or storage is unavailable.
+  }
+
+  return { against: {}, repo: null }
+}
+
 function withOpened(open: OpenFiles, path: string): OpenFiles {
   if (open.paths.includes(path)) {
     return { ...open, active: path }
@@ -113,15 +142,15 @@ function withClosed(open: OpenFiles, path: string): OpenFiles {
 
 const STATUS_LABEL: Record<ChangeStatus, string> = { A: 'Added', M: 'Modified', D: 'Deleted' }
 
+/** The repository a workspace path such as `web/src/app.ts` is in. */
+function repoOfPath(path: string): string {
+  return path.split('/')[0] ?? path
+}
+
 const STATUS_CLASS: Record<ChangeStatus, string> = {
   A: 'text-status-completed',
   M: 'text-status-waiting',
   D: 'text-destructive',
-}
-
-/** A repository as people know it: its GitHub name, or "Scratch" for a folder with none linked. */
-function repoLabel(repo: WorkspaceRepo): string {
-  return repo.fullName ?? 'Scratch'
 }
 
 /**
@@ -146,16 +175,42 @@ export function WorkspaceViewer({
 }) {
   const api = useApi()
 
+  const [compare, setCompare] = useState<CompareState>(() => {
+    const stored = readCompare(runId)
+
+    return initialPath ? { ...stored, repo: repoOfPath(initialPath) } : stored
+  })
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(compareKey(runId), JSON.stringify(compare))
+    } catch {
+      // Storage is unavailable; the comparison lasts until the page reloads.
+    }
+  }, [runId, compare])
+
   // The workspace is read again every few seconds while the tab's window is in front, and at
-  // once when a save, a stray moved in, or the session's events say its files changed.
-  const { data: workspace, error } = useQuery(
+  // once when a save, a stray moved in, or the session's events say its files changed. Each
+  // repository is measured as this tab compares it; what was shown stays while a new comparison
+  // is measured.
+  const against = Object.keys(compare.against).length > 0 ? compare.against : undefined
+
+  const {
+    data: workspace,
+    error,
+    isPlaceholderData,
+  } = useQuery(
     api.sandbox.workspace.queryOptions({
-      input: { id: runId },
+      input: against ? { id: runId, against } : { id: runId },
       staleTime: 0,
+      placeholderData: keepPreviousData,
       refetchInterval: (query) =>
         query.state.data && query.state.data.source !== 'sandbox' ? SAVED_POLL_MS : POLL_MS,
     }),
   )
+
+  const inbox = useProjection(useRunStore(usePullsRunId()), pullInbox)
+  const pulls = useMemo(() => runPulls(inbox, runId), [inbox, runId])
 
   const [filter, setFilter] = useState<WorkspaceFilter | null>(initialFilter ?? null)
   const [expanded, setExpanded] = useState<ReadonlySet<string> | null>(null)
@@ -193,11 +248,19 @@ export function WorkspaceViewer({
   }, [runId, open])
 
   const repos = useMemo(() => workspace?.repos ?? [], [workspace])
-  const changes = changeCount(repos)
+
+  // The repository in front: the one picked, else the first with changes, else the first.
+  const activeRepo =
+    repos.find((repo) => repo.name === compare.repo) ??
+    repos.find((repo) => repo.changes.length > 0) ??
+    repos[0]
+
+  const activeRepos = useMemo(() => (activeRepo ? [activeRepo] : []), [activeRepo])
+  const changes = changeCount(activeRepos)
 
   // Starts on what the session has done when it has done anything, and on everything otherwise.
-  const shown: WorkspaceFilter = filter ?? (changes > 0 ? 'changed' : 'all')
-  const tree = useMemo(() => workspaceTree(repos, shown), [repos, shown])
+  const shown: WorkspaceFilter = filter ?? (changeCount(repos) > 0 ? 'changed' : 'all')
+  const tree = useMemo(() => workspaceTree(activeRepos, shown), [activeRepos, shown])
   const paths = useMemo(() => workspaceFiles(repos), [repos])
   const openFolders = expanded ?? initiallyExpanded(tree)
 
@@ -217,7 +280,25 @@ export function WorkspaceViewer({
     )
   }
 
-  const empty = paths.length === 0 && changes === 0
+  const empty = paths.length === 0 && changeCount(repos) === 0
+  const live = workspace.source === 'sandbox'
+
+  const showRepo = (name: string) => {
+    setCompare((current) => ({ ...current, repo: name }))
+    setExpanded(null)
+  }
+
+  const compareWith = (repoName: string, next: string) => {
+    setCompare((current) => {
+      const { [repoName]: _previous, ...rest } = current.against
+
+      return { repo: repoName, against: next === SESSION ? rest : { ...rest, [repoName]: next } }
+    })
+
+    // What is listed changes, so the tree opens afresh on it.
+    setExpanded(null)
+    setFilter('changed')
+  }
 
   const openFile = (path: string) => {
     if (
@@ -230,6 +311,11 @@ export function WorkspaceViewer({
 
     setUnsaved(false)
     setOpen((current) => withOpened(current, path))
+
+    // A file from another repository brings that repository to the front.
+    if (activeRepo && repoOfPath(path) !== activeRepo.name) {
+      showRepo(repoOfPath(path))
+    }
 
     // With room for only one of them, picking a file moves to it.
     if (!sideBySide) {
@@ -249,27 +335,45 @@ export function WorkspaceViewer({
     setExpanded(next)
   }
 
-  // One repository needs no heading of its own in the tree: the bar above already names it.
-  const single = repos.length === 1 ? repos[0] : undefined
-  const roots = single ? (tree[0]?.children ?? []) : tree
+  // The repository in front is the tab above, so the tree starts inside it.
+  const roots = tree[0]?.children ?? []
+  const activeAgainst = activeRepo?.comparison?.against ?? SESSION
 
   const explorer = (
     <div className="flex h-full min-h-0 flex-col">
-      <button
-        type="button"
-        onClick={() => setSearching(true)}
-        className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex h-8 shrink-0 items-center gap-1.5 border-b px-2.5 text-left text-[11.5px] outline-none focus-visible:ring-2 focus-visible:ring-inset"
-      >
-        <Search className="size-3.5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">Go to file…</span>
-        <Kbd>{quickOpenShortcut()}</Kbd>
-      </button>
+      <div className="flex h-8 shrink-0 items-center border-b">
+        <button
+          type="button"
+          onClick={() => setSearching(true)}
+          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center gap-1.5 px-2.5 text-left text-[11.5px] outline-none focus-visible:ring-2 focus-visible:ring-inset"
+        >
+          <Search className="size-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">Go to file…</span>
+          <Kbd>{quickOpenShortcut()}</Kbd>
+        </button>
+        <Segmented
+          label="Files to show"
+          value={shown}
+          onChange={(next) => {
+            setFilter(next)
+            setExpanded(null)
+          }}
+          options={[
+            { value: 'changed', label: 'Changed', count: changes },
+            { value: 'all', label: 'All' },
+          ]}
+        />
+      </div>
       <ScrollArea className="min-h-0 flex-1">
         {roots.length === 0 || (shown === 'changed' && changes === 0) ? (
           <p className="text-muted-foreground px-3 py-4 text-[12px] leading-relaxed text-pretty">
-            {shown === 'changed'
-              ? 'Nothing has changed since the session started.'
-              : 'No files yet. They appear here as agents write them.'}
+            {shown !== 'changed'
+              ? 'No files yet. They appear here as agents write them.'
+              : activeRepo?.comparison?.error
+                ? 'Nothing to list until the comparison can be measured.'
+                : activeAgainst === SESSION
+                  ? 'Nothing has changed since the session started.'
+                  : 'Nothing differs in this comparison.'}
           </p>
         ) : (
           <ul className="py-1.5 text-[12px]" role="tree" aria-label="Workspace files">
@@ -278,8 +382,6 @@ export function WorkspaceViewer({
                 key={node.path}
                 node={node}
                 depth={0}
-                repos={repos}
-                runId={runId}
                 expanded={openFolders}
                 activePath={open.active}
                 onToggle={toggle}
@@ -302,12 +404,19 @@ export function WorkspaceViewer({
     }
   }
 
+  // The comparison of the repository the open file is in.
+  const fileAgainst = active
+    ? (repos.find((repo) => repo.name === repoOfPath(active))?.comparison?.against ?? SESSION)
+    : SESSION
+
   const editBlock =
     workspace.source !== 'sandbox'
       ? 'A saved copy cannot be edited. Send a message to wake the sandbox.'
-      : workspace.working
-        ? 'Agents are working. Edit once they have finished.'
-        : null
+      : fileAgainst.startsWith('range:')
+        ? 'This shows the file at a commit. Go back to all changes to edit it.'
+        : workspace.working
+          ? 'Agents are working. Edit once they have finished.'
+          : null
 
   const contents = (
     <div className="bg-background flex h-full min-h-0 min-w-0 flex-col">
@@ -332,9 +441,10 @@ export function WorkspaceViewer({
             }
           >
             <FilePane
-              key={active}
+              key={`${active}\n${fileAgainst}`}
               runId={runId}
               path={active}
+              against={fileAgainst}
               status={changeAt(repos, active)}
               editBlock={editBlock}
               onDirtyChange={setUnsaved}
@@ -351,17 +461,33 @@ export function WorkspaceViewer({
 
   return (
     <div ref={containerRef} className="flex h-full min-h-0 flex-col">
-      <WorkspaceBar
-        workspace={workspace}
-        runId={runId}
-        single={single}
-        changes={changes}
-        filter={shown}
-        onFilter={(next) => {
-          setFilter(next)
-          setExpanded(null)
-        }}
+      <RunPullsRow
+        pulls={pulls}
+        repos={repos}
+        shown={
+          activeRepo ? (pullShown(activeAgainst, pulls, activeRepo)?.pull.number ?? null) : null
+        }
+        onShow={(run, repo) => compareWith(repo.name, pullComparison(run, repo))}
       />
+      {activeRepo ? (
+        <>
+          <RepoTabs
+            workspace={workspace}
+            repos={repos}
+            active={activeRepo}
+            onActive={showRepo}
+            pulls={pulls}
+          />
+          <ComparisonBar
+            runId={runId}
+            repo={activeRepo}
+            live={live}
+            pulls={pulls}
+            pending={isPlaceholderData}
+            onPick={(next) => compareWith(activeRepo.name, next)}
+          />
+        </>
+      ) : null}
       {workspace.strays.map((stray) => (
         <StrayNotice key={stray.path} runId={runId} stray={stray} />
       ))}
@@ -427,7 +553,7 @@ function Segmented<T extends string>({
     <div
       role="radiogroup"
       aria-label={label}
-      className="ml-auto flex shrink-0 rounded-md border p-px"
+      className="mr-1.5 flex shrink-0 rounded-md border p-px"
     >
       {options.map((option) => (
         <button
@@ -448,152 +574,6 @@ function Segmented<T extends string>({
         </button>
       ))}
     </div>
-  )
-}
-
-/**
- * The line under the tabs: whether this is the live workspace or a saved copy, whose sandbox it
- * is in when that is not yours, the repository when there is only one, and the filter.
- */
-function WorkspaceBar({
-  workspace,
-  runId,
-  single,
-  changes,
-  filter,
-  onFilter,
-}: {
-  workspace: SandboxWorkspace
-  runId: string
-  single: WorkspaceRepo | undefined
-  changes: number
-  filter: WorkspaceFilter
-  onFilter: (filter: WorkspaceFilter) => void
-}) {
-  const now = useNow()
-  const me = useTenant().user.id
-  const people = useOrgPeople()
-  const holder = workspace.holderId && workspace.holderId !== me ? workspace.holderId : null
-
-  const state =
-    workspace.source === 'saved'
-      ? workspace.savedAt
-        ? `Saved ${relativeTime(workspace.savedAt, now)}`
-        : 'Saved copy'
-      : workspace.source === 'asleep'
-        ? 'Asleep'
-        : holder
-          ? `Live · ${people.get(holder) ?? 'a teammate'}`
-          : 'Live'
-
-  const explained =
-    workspace.source === 'saved'
-      ? `The sandbox is asleep. This is the work as it was last saved${workspace.savedAt ? `, ${fullDateTime(workspace.savedAt)}` : ''}.`
-      : workspace.source === 'asleep'
-        ? 'The sandbox is asleep and nothing has been saved yet.'
-        : holder
-          ? `Read live from ${people.get(holder) ?? 'a teammate'}'s sandbox, where the session is working.`
-          : 'Read live from the sandbox the session is working in.'
-
-  return (
-    <div className="text-muted-foreground flex h-8 shrink-0 items-center gap-2 border-b px-2.5 text-[11px]">
-      <span className="flex shrink-0 items-center gap-1.5" title={explained}>
-        {workspace.source === 'sandbox' ? (
-          <span aria-hidden className="bg-status-completed size-1.5 rounded-full" />
-        ) : (
-          <Moon aria-hidden className="size-3" />
-        )}
-        <span className="text-foreground font-medium">{state}</span>
-      </span>
-      {single ? <RepoFacts repo={single} runId={runId} /> : null}
-      <Segmented
-        label="Files to show"
-        value={filter}
-        onChange={onFilter}
-        options={[
-          { value: 'all', label: 'All' },
-          { value: 'changed', label: 'Changed', count: changes },
-        ]}
-      />
-    </div>
-  )
-}
-
-/** A repository's name, the branch its changes are measured from, and its pull requests. */
-function RepoFacts({
-  repo,
-  runId,
-  counted,
-}: {
-  repo: WorkspaceRepo
-  runId: string
-  counted?: boolean
-}) {
-  const inbox = useProjection(useRunStore(usePullsRunId()), pullInbox)
-
-  const pulls = repo.fullName
-    ? authoredPullsForSession(inbox, runId).filter((pull) => pull.fullName === repo.fullName)
-    : []
-
-  // A review session has a pull request checked out, not a branch cut from the default one.
-  const reviewed = reviewedPullForSession(inbox, runId)
-  const reviewing = repo.fullName && reviewed?.fullName === repo.fullName ? reviewed : undefined
-  const Icon = repo.fullName ? GitBranch : Package
-
-  return (
-    <span className="flex min-w-0 items-center gap-1.5">
-      <Icon aria-hidden className="size-3 shrink-0" />
-      <span className="text-foreground min-w-0 truncate" title={repoLabel(repo)}>
-        {repoLabel(repo)}
-      </span>
-      {reviewing ? (
-        <span
-          className="flex min-w-0 items-center gap-1"
-          title={`Pull request ${reviewing.number}: ${reviewing.title}\nChecked out at ${reviewing.headRef}. Changes are measured from ${reviewing.baseRef}.`}
-        >
-          <GitPullRequest aria-hidden className="size-3 shrink-0" />
-          <span className="shrink-0 tabular-nums">{reviewing.number}</span>
-          <span className="min-w-0 truncate">
-            {reviewing.headRef} → {reviewing.baseRef}
-          </span>
-        </span>
-      ) : repo.fullName ? (
-        <span className="shrink-0" title={`Changes are measured from ${repo.defaultBranch}`}>
-          {repo.defaultBranch}
-        </span>
-      ) : (
-        <span
-          className="shrink-0"
-          title="This folder has no repository linked, so the work is not on GitHub."
-        >
-          not on GitHub
-        </span>
-      )}
-      {counted && repo.changes.length > 0 ? (
-        <span className="text-foreground shrink-0 tabular-nums">+{repo.changes.length}</span>
-      ) : null}
-      {pulls.map((pull) =>
-        // Inside a tree row, which is itself a button, the number is shown but is not a link.
-        counted ? (
-          <span key={pull.number} className="flex shrink-0 items-center gap-0.5">
-            <GitPullRequest aria-hidden className="size-3" />
-            {pull.number}
-          </span>
-        ) : (
-          <a
-            key={pull.number}
-            href={pull.url}
-            target="_blank"
-            rel="noreferrer"
-            className="hover:text-foreground focus-visible:ring-ring/50 flex shrink-0 items-center gap-0.5 rounded-sm outline-none focus-visible:ring-2"
-            title={`Pull request ${pull.number}${pull.draft ? ' (draft)' : ''}`}
-          >
-            <GitPullRequest aria-hidden className="size-3" />
-            {pull.number}
-          </a>
-        ),
-      )}
-    </span>
   )
 }
 
@@ -741,8 +721,6 @@ function OpenFileStrip({
 function TreeNode({
   node,
   depth,
-  repos,
-  runId,
   expanded,
   activePath,
   onToggle,
@@ -750,8 +728,6 @@ function TreeNode({
 }: {
   node: WorkspaceNode
   depth: number
-  repos: readonly WorkspaceRepo[]
-  runId: string
   expanded: ReadonlySet<string>
   activePath: string | null
   onToggle: (path: string) => void
@@ -795,7 +771,6 @@ function TreeNode({
     )
   }
 
-  const repo = node.kind === 'repo' ? repos.find((item) => item.name === node.name) : undefined
   const FolderIcon = open ? FolderOpen : Folder
 
   return (
@@ -803,11 +778,7 @@ function TreeNode({
       <button
         type="button"
         onClick={() => onToggle(node.path)}
-        className={cn(
-          rowClass,
-          'hover:bg-accent/50',
-          repo && 'text-muted-foreground mt-1 h-7 text-[11px] first:mt-0',
-        )}
+        className={cn(rowClass, 'hover:bg-accent/50')}
         style={{ paddingLeft: 8 + depth * 12 }}
         title={node.path}
       >
@@ -817,17 +788,11 @@ function TreeNode({
             open && 'rotate-90',
           )}
         />
-        {repo ? (
-          <RepoFacts repo={repo} runId={runId} counted />
-        ) : (
-          <>
-            <FolderIcon className="text-muted-foreground size-3.5 shrink-0" />
-            <span className="min-w-0 flex-1 truncate">{node.name}</span>
-            {node.changed > 0 ? (
-              <span aria-hidden className="bg-status-waiting size-1.5 shrink-0 rounded-full" />
-            ) : null}
-          </>
-        )}
+        <FolderIcon className="text-muted-foreground size-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{node.name}</span>
+        {node.changed > 0 ? (
+          <span aria-hidden className="bg-status-waiting size-1.5 shrink-0 rounded-full" />
+        ) : null}
       </button>
       {open ? (
         <ul role="group">
@@ -836,8 +801,6 @@ function TreeNode({
               key={child.path}
               node={child}
               depth={depth + 1}
-              repos={repos}
-              runId={runId}
               expanded={expanded}
               activePath={activePath}
               onToggle={onToggle}

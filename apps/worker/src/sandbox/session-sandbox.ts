@@ -320,11 +320,11 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
     return parseWorkspaceSummary(result.stdout)
   }
 
-  /** One file's changes since the session started, as a unified diff. */
+  /** One file's changes, from where `repo.against` measures (the session's start), as a unified diff. */
   async fileDiff(runId: string, repo: SummaryRepo, path: string): Promise<{ diff: string }> {
     const result = await (
       await this.workspace()
-    ).exec(fileDiffScript(repo.defaultBranch, path), {
+    ).exec(fileDiffScript(repo.defaultBranch, path, repo.against), {
       cwd: worktreeRepoPath(runId, repo.name),
       timeoutMs: SUMMARY_TIMEOUT_MS,
     })
@@ -332,15 +332,19 @@ export class SessionSandbox extends DurableObject<ShuttleEnv> {
     return { diff: result.stdout }
   }
 
-  /** One file as it was when the session started. Null when it did not exist then. */
+  /**
+   * One file as it was where `repo.against` measures from (the session's start), or, as `head`,
+   * at the commit it measures to. Null when it did not exist there.
+   */
   async baseFile(
     runId: string,
     repo: SummaryRepo,
     path: string,
+    version: 'base' | 'head' = 'base',
   ): Promise<{ content: string | null }> {
     const result = await (
       await this.workspace()
-    ).exec(baseFileScript(repo.defaultBranch, path), {
+    ).exec(baseFileScript(repo.defaultBranch, path, repo.against, version), {
       cwd: worktreeRepoPath(runId, repo.name),
       timeoutMs: SUMMARY_TIMEOUT_MS,
     })

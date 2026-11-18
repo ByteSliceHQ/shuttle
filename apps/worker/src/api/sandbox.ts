@@ -1,6 +1,12 @@
 import { ORPCError } from '@orpc/server'
 
-import { FileDiagnostics, type SandboxPlace } from '@shuttle/api'
+import {
+  FileDiagnostics,
+  parseComparison,
+  type SandboxBranch,
+  type SandboxPlace,
+  type SandboxWorkspaceRepo,
+} from '@shuttle/api'
 
 import { LSP_CLI_PATH, LSP_DEFAULT_WAIT_MS } from '../../bridge/lsp/protocol'
 import { codeStorageClient, codeStorageConfigured } from '../codestorage/client'
@@ -21,6 +27,7 @@ import {
   userOfSandbox,
   userSandboxName,
 } from '../sandbox/names'
+import { repoAccess } from '../sandbox/repo-access'
 import {
   findSavedWork,
   latestSave,
@@ -34,7 +41,13 @@ import {
   type SavedWorkClient,
 } from '../sandbox/saved-work'
 import { worktreeRepoPath, type LinkedSandboxRepo } from '../sandbox/workspace'
-import { repoDiffScript, type WorkspaceRepoSummary } from '../sandbox/workspace-summary'
+import {
+  branchesScript,
+  fetchBranchScript,
+  repoDiffScript,
+  type SummaryRepo,
+  type WorkspaceRepoSummary,
+} from '../sandbox/workspace-summary'
 import type { Actor } from '../tenancy/access'
 import { previewKeyFor } from '../tenancy/previews'
 import { orgOfRun } from '../tenancy/run-id'
@@ -318,6 +331,110 @@ function parseDiagnosticsReply(stdout: string): FileDiagnostics {
     : { status: 'unavailable', reason: 'This sandbox has no language server.' }
 }
 
+/** Longest a branch fetched for a comparison, or the list of branches, is waited for. */
+const FETCH_TIMEOUT_MS = 30_000
+
+/** How long a branch that could not be fetched is not asked for again, in milliseconds. */
+const FETCH_RETRY_MS = 60_000
+
+/** Branches that could not be fetched lately, so the workspace's polling does not ask every time. */
+const failedFetches = new Map<string, number>()
+
+/** The `-c` option that sends a repository's credential with one git command. */
+async function gitAuth(env: ShuttleEnv, runId: string, repo: LinkedSandboxRepo): Promise<string> {
+  const { basicAuth } = await repoAccess(env, repo, orgOfRun(runId))
+
+  return `-c http.extraheader=${shellQuote(`Authorization: Basic ${basicAuth}`)}`
+}
+
+/** The branches a comparison names that may be on GitHub and not yet in the sandbox. */
+function fetchableRefs(against: string): string[] {
+  const parsed = parseComparison(against)
+
+  const refs =
+    parsed?.kind === 'ref'
+      ? [parsed.ref]
+      : parsed?.kind === 'range'
+        ? [parsed.base, parsed.head]
+        : []
+
+  // A commit is fetched with the branch that holds it, not by itself.
+  return refs.filter((ref) => !/^[0-9a-f]{7,40}$/.test(ref))
+}
+
+/**
+ * Fetches the branches `against` names into a repository's sandbox, for a comparison that found
+ * them missing. True when any fetch was tried, so the comparison is worth measuring again.
+ */
+async function fetchForComparison(
+  env: ShuttleEnv,
+  stub: SandboxStub,
+  runId: string,
+  repo: LinkedSandboxRepo,
+  against: string,
+): Promise<boolean> {
+  if (isDemoRepo(repo)) {
+    return false
+  }
+
+  const now = Date.now()
+
+  const refs = fetchableRefs(against).filter(
+    (ref) => (failedFetches.get(`${runId}:${repo.name}:${ref}`) ?? 0) < now - FETCH_RETRY_MS,
+  )
+
+  if (refs.length === 0) {
+    return false
+  }
+
+  const auth = await gitAuth(env, runId, repo)
+
+  for (const ref of refs) {
+    const result = await stub
+      .exec(fetchBranchScript(auth, ref), {
+        cwd: worktreeRepoPath(runId, repo.name),
+        timeoutMs: FETCH_TIMEOUT_MS,
+      })
+      .catch(() => ({ exitCode: 1 }))
+
+    if (result.exitCode !== 0) {
+      failedFetches.set(`${runId}:${repo.name}:${ref}`, now)
+    }
+  }
+
+  return true
+}
+
+/** What the workspace says about one repository measured in the sandbox. */
+function measuredRepo(
+  repo: LinkedSandboxRepo,
+  against: string,
+  found: WorkspaceRepoSummary | undefined,
+): SandboxWorkspaceRepo {
+  const measure = found?.measure
+  const name = describeRepo(repo)
+
+  return {
+    ...name,
+    files: found?.files ?? [],
+    changes: found?.changes ?? [],
+    head: found?.head ?? null,
+    dirty: found?.dirty ?? false,
+    sessionBaseSha: found?.sessionBaseSha ?? null,
+    commits: found?.commits ?? [],
+    comparison: {
+      against,
+      baseSha: measure?.baseSha ?? null,
+      baseMode: measure?.baseMode ?? null,
+      headSha: measure?.headSha ?? null,
+      error:
+        measure?.error === 'missing'
+          ? `${fetchableRefs(against).join(' or ') || 'That commit'} is not in ${name.fullName ?? 'this repository'}, or the sandbox could not fetch it.`
+          : null,
+    },
+  }
+}
+
 export const sandboxRouter = {
   files: sandbox.files.handler(async ({ input, context: { env } }) => {
     const runId = input.id
@@ -356,7 +473,7 @@ export const sandboxRouter = {
   file: sandbox.file.handler(async ({ input, context: { env } }) => {
     const runId = input.id
     const sessionRoot = `/workspace/.wt/${runId}`
-    const base = input.version === 'base'
+    const base = input.version === 'base' || input.version === 'head'
     const home = await sessionSandbox(env, runId)
 
     if (await isAsleep(home)) {
@@ -371,6 +488,11 @@ export const sandboxRouter = {
 
         if (relative === null) {
           throw badRequest('path is required and must be in the session worktree')
+        }
+
+        // A saved copy measures from the session's start, and has no commit to show for a range.
+        if (input.version === 'head') {
+          throw notFound('Wake the sandbox to read this file at that commit')
         }
 
         if (base) {
@@ -393,7 +515,8 @@ export const sandboxRouter = {
       })
     }
 
-    // The file as it was when the session started. `content` is null when it did not exist then.
+    // The file where its changes are measured from, or, for a range, at the commit they are
+    // measured to. `content` is null when it did not exist there.
     if (base) {
       const file = await repoFile(env, runId, input.path)
 
@@ -402,7 +525,12 @@ export const sandboxRouter = {
       }
 
       return reporting(async () => {
-        const { content } = await home.stub.baseFile(runId, file.repo, file.inRepo)
+        const { content } = await home.stub.baseFile(
+          runId,
+          { ...file.repo, against: input.against },
+          file.inRepo,
+          input.version === 'head' ? 'head' : 'base',
+        )
 
         return { path: file.relative, content, source: 'sandbox' as const }
       })
@@ -469,7 +597,11 @@ export const sandboxRouter = {
       }
 
       return reporting(async () => {
-        const { diff } = await home.stub.fileDiff(runId, file.repo, file.inRepo)
+        const { diff } = await home.stub.fileDiff(
+          runId,
+          { ...file.repo, against: input.against },
+          file.inRepo,
+        )
 
         return { path: file.relative, diff, source: 'sandbox' as const }
       })
@@ -495,6 +627,54 @@ export const sandboxRouter = {
       }
 
       return { diffs, source: 'sandbox' as const }
+    })
+  }),
+
+  branches: sandbox.branches.handler(async ({ input, context: { env } }) => {
+    const runId = input.id
+    const repo = (await sessionRepos(env, runId)).find((item) => item.name === input.repo)
+
+    if (!repo) {
+      throw notFound('No such repository in this session')
+    }
+
+    const home = await sessionSandbox(env, runId)
+
+    return reporting(async () => {
+      // Listing branches never wakes a sandbox.
+      if (await isAsleep(home)) {
+        return { branches: [] }
+      }
+
+      const auth = isDemoRepo(repo) ? '' : await gitAuth(env, runId, repo)
+
+      const result = await home.stub.exec(branchesScript(auth), {
+        cwd: worktreeRepoPath(runId, repo.name),
+        timeoutMs: FETCH_TIMEOUT_MS,
+      })
+
+      const branches = new Map<string, SandboxBranch>()
+
+      for (const line of result.stdout.split('\n')) {
+        const [kind, name] = [line.slice(0, line.indexOf(' ')), line.slice(line.indexOf(' ') + 1)]
+
+        if (name && (kind === 'REMOTE' || kind === 'LOCAL')) {
+          branches.set(name, {
+            name,
+            remote: kind === 'REMOTE' || branches.get(name)?.remote === true,
+          })
+        }
+      }
+
+      // The default branch first, then GitHub's, then the sandbox's own.
+      return {
+        branches: [...branches.values()].toSorted(
+          (a, b) =>
+            Number(b.name === repo.defaultBranch) - Number(a.name === repo.defaultBranch) ||
+            Number(b.remote) - Number(a.remote) ||
+            a.name.localeCompare(b.name),
+        ),
+      }
     })
   }),
 
@@ -526,10 +706,35 @@ export const sandboxRouter = {
         }
       }
 
-      // The session's workspace as it stands in the sandbox it is in.
+      // The session's workspace as it stands in the sandbox it is in, each repository measured
+      // the way it was asked for.
       const repos = await sessionRepos(env, runId)
-      const summary = await home.stub.workspaceSummary(runId, repos)
+      const againstOf = (repo: LinkedSandboxRepo) => input.against?.[repo.name] ?? 'session'
+
+      const asked = (list: readonly LinkedSandboxRepo[]): SummaryRepo[] =>
+        list.map((repo) => ({ ...repo, against: againstOf(repo) }))
+
+      const summary = await home.stub.workspaceSummary(runId, asked(repos))
       const found = new Map(summary.repos.map((repo) => [repo.name, repo]))
+
+      // A branch compared with may be on GitHub and not in the sandbox yet: fetch it and measure
+      // those repositories again.
+      const refetched: LinkedSandboxRepo[] = []
+
+      for (const repo of repos) {
+        if (
+          found.get(repo.name)?.measure?.error === 'missing' &&
+          (await fetchForComparison(env, home.stub, runId, repo, againstOf(repo)))
+        ) {
+          refetched.push(repo)
+        }
+      }
+
+      if (refetched.length > 0) {
+        for (const repo of (await home.stub.workspaceSummary(runId, asked(refetched))).repos) {
+          found.set(repo.name, repo)
+        }
+      }
 
       const activity = await loomsStub(env.LOOMS_RUN, runId)
         .getSessionActivitySnapshot()
@@ -540,11 +745,7 @@ export const sandboxRouter = {
         // People edit between turns, not under a running agent.
         working: activity?.activity === 'working',
         holderId: home.personal ? userOfSandbox(home.name) : null,
-        repos: repos.map((repo) => ({
-          ...describeRepo(repo),
-          files: found.get(repo.name)?.files ?? [],
-          changes: found.get(repo.name)?.changes ?? [],
-        })),
+        repos: repos.map((repo) => measuredRepo(repo, againstOf(repo), found.get(repo.name))),
         strays: summary.strays,
       }
     })
