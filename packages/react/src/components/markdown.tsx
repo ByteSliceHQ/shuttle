@@ -1,88 +1,53 @@
+import pierreDark from '@pierre/highlights/themes/pierre-dark'
+import { createHighlightsPlugin } from '@pierre/words/highlights'
+import { type Components, Markdown as Words } from '@pierre/words/react'
 import { memo } from 'react'
-import ReactMarkdown, { type Components } from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 
 import { cn } from '../lib/cn'
 
+/**
+ * Hooks get and return each element's whole HTML. Links leave the app, and a table scrolls in a
+ * frame of its own so it can still fill the width.
+ */
 const components: Components = {
-  p: ({ node: _node, ...props }) => <p className="my-2 first:mt-0 last:mb-0" {...props} />,
-  h1: ({ node: _node, ...props }) => (
-    <h3 className="text-foreground mt-4 mb-1.5 text-sm font-semibold first:mt-0" {...props} />
-  ),
-  h2: ({ node: _node, ...props }) => (
-    <h3 className="text-foreground mt-4 mb-1.5 text-sm font-semibold first:mt-0" {...props} />
-  ),
-  h3: ({ node: _node, ...props }) => (
-    <h4 className="text-foreground mt-3 mb-1 text-[13px] font-semibold first:mt-0" {...props} />
-  ),
-  h4: ({ node: _node, ...props }) => (
-    <h4 className="text-foreground mt-3 mb-1 text-[13px] font-semibold first:mt-0" {...props} />
-  ),
-  strong: ({ node: _node, ...props }) => (
-    <strong className="text-foreground font-semibold" {...props} />
-  ),
-  a: ({ node: _node, ...props }) => (
-    <a
-      className="text-brand underline-offset-2 hover:underline"
-      target="_blank"
-      rel="noreferrer"
-      {...props}
-    />
-  ),
-  ul: ({ node: _node, ...props }) => (
-    <ul className="marker:text-muted-foreground my-2 list-disc space-y-1 pl-5" {...props} />
-  ),
-  ol: ({ node: _node, ...props }) => (
-    <ol className="marker:text-muted-foreground my-2 list-decimal space-y-1 pl-5" {...props} />
-  ),
-  li: ({ node: _node, ...props }) => <li className="pl-0.5" {...props} />,
-  blockquote: ({ node: _node, ...props }) => (
-    <blockquote className="text-muted-foreground my-2 border-l-2 pl-3" {...props} />
-  ),
-  hr: () => <hr className="my-3" />,
-  pre: ({ node: _node, ...props }) => (
-    <pre
-      className="my-2 overflow-x-auto rounded-lg border bg-black/25 p-3 font-mono text-[12px] leading-relaxed [&_code]:bg-transparent [&_code]:p-0"
-      {...props}
-    />
-  ),
-  code: ({ node: _node, className, ...props }) => (
-    <code
-      className={cn(
-        'text-foreground rounded bg-white/6 px-1 py-px font-mono text-[0.88em]',
-        className,
-      )}
-      {...props}
-    />
-  ),
-  table: ({ node: _node, ...props }) => (
-    <div className="my-2 overflow-x-auto rounded-lg border">
-      <table className="w-full text-xs" {...props} />
-    </div>
-  ),
-  th: ({ node: _node, ...props }) => (
-    <th className="bg-card border-b px-2.5 py-1.5 text-left font-medium" {...props} />
-  ),
-  td: ({ node: _node, ...props }) => (
-    <td className="border-b px-2.5 py-1.5 align-top [tr:last-child_&]:border-b-0" {...props} />
-  ),
+  a: (html) => html.replace('<a ', '<a target="_blank" rel="noreferrer" '),
+  table: (html) => `<div data-markdown="table-frame">${html}</div>`,
 }
 
-const remarkPlugins = [remarkGfm]
+const controls = { code: { copy: true, download: false } }
 
-/** Agent output is markdown; render it with the conversation's type scale. */
+/**
+ * Code fences use `@pierre/highlights`, the highlighter `@pierre/diffs` runs on, with the diff
+ * viewer's theme. An open fence keeps a live tokenizer, so a streamed line re-highlights alone.
+ */
+const plugins = { code: createHighlightsPlugin({ theme: pierreDark }) }
+
+/**
+ * Agent output is markdown; render it with the conversation's type scale. `@pierre/words`
+ * renders it, and `theme.css` styles its `data-markdown` elements. While `streaming` is true,
+ * unfinished syntax is completed as it arrives, new text fades in, and a caret follows it.
+ */
 export const Markdown = memo(function Markdown({
   text,
   className,
+  streaming = false,
 }: {
   text: string
   className?: string
+  streaming?: boolean
 }) {
   return (
-    <div className={cn('break-words', className)}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
-        {text}
-      </ReactMarkdown>
-    </div>
+    <Words
+      className={cn('break-words', className)}
+      isAnimating={streaming}
+      animated={streaming}
+      caret={streaming ? 'block' : undefined}
+      components={components}
+      controls={controls}
+      plugins={plugins}
+      lineNumbers={false}
+    >
+      {text}
+    </Words>
   )
 })

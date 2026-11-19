@@ -961,7 +961,11 @@ function ThinkingTrace({
       </button>
       {open ? (
         <div className="thinking-trace-body border-border/80 mt-1.5 mb-1 max-h-52 overflow-y-auto border-l py-0.5 pl-3">
-          <Markdown text={text} className="text-muted-foreground text-[12.5px] leading-relaxed" />
+          <Markdown
+            text={text}
+            streaming={activelyThinking}
+            className="text-muted-foreground text-[12.5px] leading-relaxed"
+          />
         </div>
       ) : null}
     </div>
@@ -1078,10 +1082,8 @@ function AgentBubble({
         {replyText !== '' && !folded ? (
           <Markdown
             text={text}
-            className={cn(
-              'text-foreground/95 mt-1 text-[13.5px] leading-relaxed',
-              streaming && 'caret',
-            )}
+            streaming={streaming}
+            className="text-foreground/95 mt-1 text-[13.5px] leading-relaxed"
           />
         ) : null}
         {replyText !== '' && !streaming && !folded && context?.onOpenArtifact ? (
@@ -1403,6 +1405,7 @@ function ToolActivity({
           {liveThinking !== '' ? (
             <Markdown
               text={liveThinking}
+              streaming
               className="text-muted-foreground text-[12.5px] leading-relaxed"
             />
           ) : null}
