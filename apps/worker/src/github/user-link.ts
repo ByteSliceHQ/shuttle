@@ -1,8 +1,9 @@
 import { z } from 'zod'
 
+import type { GithubAccount } from '@shuttle/git/github/client'
+
 import type { ShuttleEnv } from '../env'
 import { connectInstallation } from '../tenancy/installations'
-import type { GithubAccount } from './client'
 
 /**
  * Linking a GitHub App installation to a Shuttle organization by proving who is asking.

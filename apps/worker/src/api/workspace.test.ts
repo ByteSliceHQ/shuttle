@@ -8,13 +8,13 @@ import {
   WorkspaceTree,
   type SessionTabsState,
 } from '@shuttle/api'
+import type { FolderSyncReport as SyncReport } from '@shuttle/engine/pulls/folder-sync'
+import type { Actor, SessionAccess } from '@shuttle/engine/tenancy/access'
+import { sessionTabs, workspaceTree } from '@shuttle/engine/workspace/module'
 import type { EventEnvelope, EventInput, JsonValue } from '@swirls/looms/core'
 
 import type { ShuttleEnv } from '../env'
-import type { FolderSyncReport as SyncReport } from '../pulls/folder-sync'
-import type { Actor, SessionAccess } from '../tenancy/access'
 import { fakeEnv } from '../testing/fake-env'
-import { sessionTabs, workspaceTree } from '../workspace/module'
 import { handleApi } from './handler'
 
 const actor: Actor = {

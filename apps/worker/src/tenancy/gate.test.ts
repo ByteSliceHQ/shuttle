@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 
+import type { Actor, SessionAccess } from '@shuttle/engine/tenancy/access'
+import { personalRunId, reflectionRunId, scopedRunId } from '@shuttle/engine/tenancy/run-id'
 import { describeRoute, type AuthDecision } from '@swirls/looms/runtime'
 
 import { fakeEnv } from '../testing/fake-env'
-import type { Actor, SessionAccess } from './access'
 import { authorizeLoomsRoute, authorizeRun, runIdOfPath } from './gate'
-import { personalRunId, reflectionRunId, scopedRunId } from './run-id'
 
 const ORG_A = 'orgA0000000000000000000000000000'
 const ORG_B = 'orgB0000000000000000000000000000'

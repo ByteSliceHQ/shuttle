@@ -5,7 +5,10 @@ import { join, resolve } from 'node:path'
 
 import { BASE_IMAGE, bridgeDigest, stageBridge, TOOL_VERSIONS, TOOLS_SCRIPT } from './provision'
 
-const dockerfile = readFileSync(resolve(import.meta.dir, '../../worker/Dockerfile'), 'utf8')
+const dockerfile = readFileSync(
+  resolve(import.meta.dir, '../../../packages/sandbox/Dockerfile'),
+  'utf8',
+)
 
 test('installs the versions the cloud image is built with', () => {
   for (const [name, version] of Object.entries(TOOL_VERSIONS)) {

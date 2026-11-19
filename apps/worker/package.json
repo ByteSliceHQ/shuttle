@@ -11,7 +11,7 @@
     "deploy": "bun run --cwd ../web build && bun scripts/deploy-config.ts && wrangler deploy --config wrangler.deploy.jsonc",
     "build": "bun x tsc -p tsconfig.json --noEmit",
     "check-types": "bun x tsc -p tsconfig.json --noEmit",
-    "test": "bun test src scripts bridge",
+    "test": "bun test src scripts",
     "deploy:config": "bun run --cwd ../web build && bun scripts/deploy-config.ts"
   },
   "dependencies": {
@@ -24,7 +24,10 @@
     "@pierre/sdk": "^0.1.2",
     "@shuttle/api": "workspace:*",
     "@shuttle/core": "workspace:*",
+    "@shuttle/engine": "workspace:*",
+    "@shuttle/git": "workspace:*",
     "@shuttle/runner-protocol": "workspace:*",
+    "@shuttle/sandbox": "workspace:*",
     "@swirls/looms": "0.19.0",
     "ai": "^7.0.0",
     "better-auth": "^1.7.23",

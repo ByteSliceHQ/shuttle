@@ -2,14 +2,14 @@ import { describe, expect, test } from 'bun:test'
 
 import { z } from 'zod'
 
+import type { CredentialPayload } from '@shuttle/engine/credentials/store'
+import type { Actor } from '@shuttle/engine/tenancy/access'
+import { signInFilesPresent } from '@shuttle/engine/vendor/harnesses'
+import type { BridgeEvent } from '@shuttle/sandbox/bridge/protocol'
 import type { JsonValue } from '@swirls/looms/core'
 
-import type { BridgeEvent } from '../../bridge/protocol'
-import type { CredentialPayload } from '../credentials/store'
 import type { SessionSandboxStub, ShuttleEnv } from '../env'
-import type { Actor } from '../tenancy/access'
 import { fakeEnv } from '../testing/fake-env'
-import { signInFilesPresent } from '../vendor/harnesses'
 import { explainDeadRun, removeSignInFiles } from './connections'
 import { handleApi } from './handler'
 

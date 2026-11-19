@@ -1,0 +1,450 @@
+import { z } from 'zod'
+
+import type { LinkedRepo } from '@shuttle/core/workspace'
+
+import type { GitEnv } from '../env'
+
+interface CachedToken {
+  readonly token: string
+  readonly expiresAt: number
+}
+
+const installationTokens = new Map<number, CachedToken>()
+
+export interface GithubAccount {
+  readonly login: string
+  readonly type: string
+  readonly avatarUrl: string
+}
+
+export interface GithubInstallation {
+  readonly id: number
+  readonly account: GithubAccount
+  readonly permissions: Readonly<Record<string, string>>
+  readonly htmlUrl: string
+}
+
+const GraphqlDataSchema = z.json()
+
+/** The JSON a GraphQL response carries as its `data`. */
+export type GraphqlData = z.infer<typeof GraphqlDataSchema>
+
+/** What a GraphQL document is run with. */
+export type GraphqlVariables = Readonly<Record<string, string | number | null>>
+
+/** GraphQL can answer 200 with errors; keep the error types and any partial data. */
+export class GithubGraphqlError extends Error {
+  constructor(
+    message: string,
+    readonly types: readonly string[],
+    readonly data: GraphqlData,
+  ) {
+    super(message)
+    this.name = 'GithubGraphqlError'
+  }
+}
+
+function requireGithubConfig(env: Pick<GitEnv, 'GITHUB_APP_ID' | 'GITHUB_APP_PRIVATE_KEY'>) {
+  const appId = env.GITHUB_APP_ID
+  const privateKey = env.GITHUB_APP_PRIVATE_KEY
+
+  if (appId === undefined || appId === '' || privateKey === undefined || privateKey === '') {
+    throw new Error('GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY are required')
+  }
+
+  return { appId, privateKey }
+}
+
+function pemToArrayBuffer(pem: string): ArrayBuffer {
+  const normalized = pem
+    .replace(/\\n/g, '\n')
+    .replace(/-----BEGIN [^-]+-----/g, '')
+    .replace(/-----END [^-]+-----/g, '')
+    .replace(/\s+/g, '')
+
+  const binary = atob(normalized)
+  const bytes = new Uint8Array(binary.length)
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+
+  return bytes.buffer
+}
+
+export function base64Url(bytes: ArrayBuffer | Uint8Array): string {
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+  let binary = ''
+
+  for (const byte of view) {
+    binary += String.fromCharCode(byte)
+  }
+
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+/** Build a short-lived GitHub App JWT (RS256) with WebCrypto. */
+export async function createAppJwt(
+  env: Pick<GitEnv, 'GITHUB_APP_ID' | 'GITHUB_APP_PRIVATE_KEY'>,
+  now = Date.now(),
+): Promise<string> {
+  const { appId, privateKey } = requireGithubConfig(env)
+  const header = { alg: 'RS256', typ: 'JWT' }
+  const issuedAt = Math.floor(now / 1000) - 60
+
+  const payload = {
+    iat: issuedAt,
+    exp: issuedAt + 9 * 60,
+    iss: appId,
+  }
+
+  const encodedHeader = base64Url(new TextEncoder().encode(JSON.stringify(header)))
+  const encodedPayload = base64Url(new TextEncoder().encode(JSON.stringify(payload)))
+  const signingInput = `${encodedHeader}.${encodedPayload}`
+
+  const key = await crypto.subtle.importKey(
+    'pkcs8',
+    pemToArrayBuffer(privateKey),
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+
+  const signature = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    key,
+    new TextEncoder().encode(signingInput),
+  )
+
+  return `${signingInput}.${base64Url(signature)}`
+}
+
+export async function githubFetch(
+  env: GitEnv,
+  path: string,
+  init: RequestInit & { token?: string; apiVersion?: string } = {},
+): Promise<Response> {
+  const headers = new Headers(init.headers)
+  headers.set('Accept', 'application/vnd.github+json')
+  headers.set('X-GitHub-Api-Version', init.apiVersion ?? '2022-11-28')
+  headers.set('User-Agent', 'shuttle-looms')
+
+  if (init.token !== undefined && init.token !== '') {
+    headers.set('Authorization', `Bearer ${init.token}`)
+  } else {
+    headers.set('Authorization', `Bearer ${await createAppJwt(env)}`)
+  }
+
+  const { token: _token, apiVersion: _apiVersion, ...rest } = init
+  return fetch(`https://api.github.com${path}`, { ...rest, headers })
+}
+
+/** Optional user/PAT from env — covers PR sync/create when the App lacks scopes. */
+export function githubUserToken(env: GitEnv): string | null {
+  const token = env.GITHUB_TOKEN?.trim()
+  return token === undefined || token === '' ? null : token
+}
+
+function isGithubForbidden(cause: unknown): boolean {
+  if (cause instanceof GithubGraphqlError) {
+    return cause.types.includes('FORBIDDEN')
+  }
+
+  if (cause instanceof Error) {
+    return /(?:^|\D)403(?:\D|$)|resource not accessible by integration/i.test(cause.message)
+  }
+
+  return false
+}
+
+const GraphqlEnvelopeSchema = z.object({
+  data: GraphqlDataSchema.optional(),
+  errors: z.array(z.object({ message: z.string(), type: z.string().optional() })).optional(),
+})
+
+/** Runs a GraphQL document and decodes its `data` with `schema`. */
+export async function githubGraphqlWithToken<T>(
+  query: string,
+  variables: GraphqlVariables,
+  token: string,
+  schema: z.ZodType<T>,
+): Promise<T> {
+  const response = await fetch('https://api.github.com/graphql', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'shuttle-looms',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+    body: JSON.stringify({ query, variables }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`GitHub GraphQL failed: ${response.status}`)
+  }
+
+  const body = GraphqlEnvelopeSchema.parse(await response.json())
+
+  if (body.errors !== undefined && body.errors.length > 0) {
+    throw new GithubGraphqlError(
+      `GitHub GraphQL errors: ${body.errors.map((error) => error.message).join('; ')}`,
+      body.errors.flatMap((error) =>
+        error.type !== undefined && error.type !== '' ? [error.type] : [],
+      ),
+      body.data ?? null,
+    )
+  }
+
+  if (body.data === undefined || body.data === null) {
+    throw new Error('GitHub GraphQL response missing data')
+  }
+
+  return schema.parse(body.data)
+}
+
+export async function githubGraphql<T>(
+  env: GitEnv,
+  query: string,
+  variables: GraphqlVariables,
+  installationId: number,
+  schema: z.ZodType<T>,
+): Promise<T> {
+  try {
+    return await githubGraphqlWithToken(
+      query,
+      variables,
+      await getInstallationToken(env, installationId),
+      schema,
+    )
+  } catch (cause) {
+    const user = githubUserToken(env)
+
+    if (user === null || !isGithubForbidden(cause)) {
+      throw cause
+    }
+
+    return githubGraphqlWithToken(query, variables, user, schema)
+  }
+}
+
+const InstallationTokenSchema = z.object({
+  token: z.string().optional(),
+  expires_at: z.string().optional(),
+})
+
+export async function getInstallationToken(env: GitEnv, installationId: number): Promise<string> {
+  const cached = installationTokens.get(installationId)
+
+  if (cached && cached.expiresAt > Date.now() + 5 * 60_000) {
+    return cached.token
+  }
+
+  const response = await githubFetch(env, `/app/installations/${installationId}/access_tokens`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to mint installation token: ${response.status}`)
+  }
+
+  const body = InstallationTokenSchema.parse(await response.json())
+
+  if (
+    body.token === undefined ||
+    body.token === '' ||
+    body.expires_at === undefined ||
+    body.expires_at === ''
+  ) {
+    throw new Error('Installation token response missing token or expires_at')
+  }
+
+  installationTokens.set(installationId, {
+    token: body.token,
+    expiresAt: Date.parse(body.expires_at),
+  })
+
+  return body.token
+}
+
+const InstallationSchema = z.object({
+  id: z.number(),
+  account: z
+    .object({
+      login: z.string().optional(),
+      type: z.string().optional(),
+      avatar_url: z.string().optional(),
+    })
+    .optional(),
+  permissions: z.record(z.string(), z.string()).optional(),
+  html_url: z.string().optional(),
+})
+
+export async function getInstallation(
+  env: GitEnv,
+  installationId: number,
+): Promise<GithubInstallation | null> {
+  const response = await githubFetch(env, `/app/installations/${installationId}`)
+
+  if (response.status === 404) {
+    return null
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to load installation: ${response.status}`)
+  }
+
+  const body = InstallationSchema.parse(await response.json())
+
+  return {
+    id: body.id,
+    account: {
+      login: body.account?.login ?? 'unknown',
+      type: body.account?.type ?? 'Organization',
+      avatarUrl: body.account?.avatar_url ?? '',
+    },
+    permissions: body.permissions ?? {},
+    htmlUrl: body.html_url ?? '',
+  }
+}
+
+const InstallationReposSchema = z.object({
+  repositories: z
+    .array(
+      z.object({
+        name: z.string(),
+        full_name: z.string(),
+        private: z.boolean(),
+        default_branch: z.string().optional(),
+        owner: z.object({ login: z.string().optional() }).optional(),
+      }),
+    )
+    .optional(),
+})
+
+export async function listInstallationRepos(
+  env: GitEnv,
+  installationId: number,
+): Promise<LinkedRepo[]> {
+  const token = await getInstallationToken(env, installationId)
+  const repos: LinkedRepo[] = []
+  let page = 1
+
+  while (page <= 10) {
+    const response = await githubFetch(
+      env,
+      `/installation/repositories?per_page=100&page=${page}`,
+      { token },
+    )
+
+    if (!response.ok) {
+      throw new Error(`Failed to list installation repositories: ${response.status}`)
+    }
+
+    const body = InstallationReposSchema.parse(await response.json())
+
+    const batch = body.repositories ?? []
+
+    for (const repo of batch) {
+      repos.push({
+        installationId,
+        owner: repo.owner?.login ?? repo.full_name.split('/')[0] ?? '',
+        name: repo.name,
+        fullName: repo.full_name,
+        defaultBranch: repo.default_branch ?? 'main',
+        private: repo.private,
+      })
+    }
+
+    if (batch.length < 100) {
+      break
+    }
+
+    page += 1
+  }
+
+  return repos
+}
+
+export async function fetchRepoTarball(
+  env: GitEnv,
+  repo: LinkedRepo,
+  ref?: string,
+): Promise<ArrayBuffer> {
+  const token = await getInstallationToken(env, repo.installationId)
+  const target = ref ?? repo.defaultBranch
+
+  const response = await githubFetch(
+    env,
+    `/repos/${repo.owner}/${repo.name}/tarball/${encodeURIComponent(target)}`,
+    { token, redirect: 'follow' },
+  )
+
+  if (!response.ok) {
+    throw new Error(`Failed to download tarball for ${repo.fullName}: ${response.status}`)
+  }
+
+  return response.arrayBuffer()
+}
+
+/** A GitHub response that names an object by its `sha`. */
+export const ShaBodySchema = z.object({ sha: z.string().optional() })
+
+/** Resolve the commit SHA for a branch or tag. */
+export async function resolveRefSha(env: GitEnv, repo: LinkedRepo, ref: string): Promise<string> {
+  const token = await getInstallationToken(env, repo.installationId)
+  const encoded = encodeURIComponent(ref)
+
+  const response = await githubFetch(env, `/repos/${repo.owner}/${repo.name}/commits/${encoded}`, {
+    token,
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to resolve ref ${ref} for ${repo.fullName}: ${response.status}`)
+  }
+
+  const body = ShaBodySchema.parse(await response.json())
+
+  if (body.sha === undefined || body.sha === '') {
+    throw new Error(`Ref ${ref} for ${repo.fullName} missing sha`)
+  }
+
+  return body.sha
+}
+
+export async function signState(env: GitEnv, payload: string): Promise<string> {
+  const secret = env.GITHUB_STATE_SECRET ?? env.GITHUB_APP_PRIVATE_KEY
+
+  if (secret === undefined || secret === '') {
+    throw new Error('GITHUB_STATE_SECRET is required')
+  }
+
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+
+  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload))
+  return `${payload}.${base64Url(signature)}`
+}
+
+export async function verifyState(env: GitEnv, state: string): Promise<string | null> {
+  const separator = state.lastIndexOf('.')
+
+  if (separator <= 0) {
+    return null
+  }
+
+  const payload = state.slice(0, separator)
+  const expected = await signState(env, payload)
+  return expected === state ? payload : null
+}
+
+/** Clear cached tokens (tests). */
+export function clearInstallationTokenCache(): void {
+  installationTokens.clear()
+}

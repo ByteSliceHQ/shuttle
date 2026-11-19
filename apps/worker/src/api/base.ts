@@ -1,9 +1,9 @@
 import { implement, ORPCError } from '@orpc/server'
 
 import { contract } from '@shuttle/api'
+import type { Actor } from '@shuttle/engine/tenancy/access'
 
 import type { ShuttleEnv } from '../env'
-import type { Actor } from '../tenancy/access'
 
 /**
  * What every API handler is given. `index.ts` has already signed the request in as `actor` and,

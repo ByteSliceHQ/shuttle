@@ -1,28 +1,33 @@
 import { ORPCError } from '@orpc/server'
 
 import { PlaybookState } from '@shuttle/api'
-import { ACTOR_HEADER } from '@swirls/looms/runtime'
-
-import { headAsset, type AssetRef } from '../assets/store'
-import { getAuth } from '../auth/auth'
+import { headAsset, type AssetRef } from '@shuttle/engine/assets/store'
+import { playbookRunId, workspaceRunId } from '@shuttle/engine/config'
+import { isVendorHarness } from '@shuttle/engine/harness'
+import { loomsStub } from '@shuttle/engine/looms-stub'
+import { requestPullRequest, say } from '@shuttle/engine/session/signals'
+import { parseTeam } from '@shuttle/engine/team'
+import {
+  canShareSession,
+  isPublicSession,
+  type Actor,
+  type SessionAccess,
+} from '@shuttle/engine/tenancy/access'
+import { scopedRunId } from '@shuttle/engine/tenancy/run-id'
+import { vendorHarnessInfo } from '@shuttle/engine/vendor/harnesses'
+import { parseVendorModelChoice } from '@shuttle/engine/vendor/models'
+import { archiveSession, renameSession } from '@shuttle/engine/workspace/module'
 import {
   codeStorageClient,
   codeStorageConfigured,
   deleteScratchRepo,
   scratchRepoName,
-} from '../codestorage/client'
-import { playbookRunId, workspaceRunId } from '../config'
+} from '@shuttle/git/codestorage/client'
+import { ACTOR_HEADER } from '@swirls/looms/runtime'
+
+import { getAuth } from '../auth/auth'
 import type { ShuttleEnv } from '../env'
-import { isVendorHarness } from '../harness'
-import { loomsStub } from '../looms-stub'
-import { requestPullRequest, say } from '../session/signals'
-import { parseTeam } from '../team'
-import { canShareSession, isPublicSession, type Actor, type SessionAccess } from '../tenancy/access'
-import { scopedRunId } from '../tenancy/run-id'
-import { vendorHarnessInfo } from '../vendor/harnesses'
-import { parseVendorModelChoice } from '../vendor/models'
 import { moveListings, signalListings } from '../workspace/listings'
-import { archiveSession, renameSession } from '../workspace/module'
 import { api, badRequest, forbidden, notFound } from './base'
 
 const sessions = api.sessions

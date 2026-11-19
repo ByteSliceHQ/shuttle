@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
-import { isOrgId } from '../tenancy/run-id'
+import { isOrgId } from '@shuttle/engine/tenancy/run-id'
+
 import { signUp, testAuth, TEST_WEB_ORIGIN } from '../testing/auth'
 import { orgRole, resolveActor } from './actor'
 

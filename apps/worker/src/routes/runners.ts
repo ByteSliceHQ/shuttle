@@ -1,7 +1,7 @@
 import { RUNNER_CONNECT_PATH } from '@shuttle/runner-protocol'
+import { localSandboxName } from '@shuttle/sandbox/names'
 
 import { sandboxStub, type ShuttleEnv } from '../env'
-import { localSandboxName } from '../sandbox/names'
 import { bearerToken, deviceOfToken } from '../tenancy/devices'
 
 /**

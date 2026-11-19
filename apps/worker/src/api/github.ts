@@ -1,10 +1,11 @@
 import { z } from 'zod'
 
-import { ensureWorkspaceQuietly } from '../bootstrap'
-import { workspaceRunId } from '../config'
+import { ensureWorkspaceQuietly } from '@shuttle/engine/bootstrap'
+import { workspaceRunId } from '@shuttle/engine/config'
+import { loomsStub } from '@shuttle/engine/looms-stub'
+import { listInstallationRepos } from '@shuttle/git/github/app'
+
 import type { ShuttleEnv } from '../env'
-import { listInstallationRepos } from '../github/app'
-import { loomsStub } from '../looms-stub'
 import { api } from './base'
 
 /** The part of the workspace tree projection that names the connected installations. */

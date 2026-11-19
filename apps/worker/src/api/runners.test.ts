@@ -3,10 +3,10 @@ import { describe, expect, test } from 'bun:test'
 import { z } from 'zod'
 
 import { DeviceId } from '@shuttle/api'
+import type { Actor } from '@shuttle/engine/tenancy/access'
 import { DEVICE_ID } from '@shuttle/runner-protocol'
 import type { JsonValue } from '@swirls/looms/core'
 
-import type { Actor } from '../tenancy/access'
 import { listDevices } from '../tenancy/devices'
 import { migratedD1 } from '../testing/fake-d1'
 import { fakeEnv } from '../testing/fake-env'

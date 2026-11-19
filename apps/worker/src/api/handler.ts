@@ -1,7 +1,8 @@
 import { OpenAPIHandler } from '@orpc/openapi/fetch'
 import { ORPCError } from '@orpc/server'
 
-import { MAX_ASSET_BYTES, formatBytes } from '../assets/store'
+import { MAX_ASSET_BYTES, formatBytes } from '@shuttle/engine/assets/store'
+
 import { trustedWebOrigins } from '../auth/auth'
 import { api, type ApiContext } from './base'
 import { connectionsRouter } from './connections'

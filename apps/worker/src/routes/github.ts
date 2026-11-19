@@ -1,7 +1,23 @@
-import { ensurePullsQuietly, ensureWorkspaceQuietly } from '../bootstrap'
-import { pullsRunId, workspaceRunId } from '../config'
+import { ensurePullsQuietly, ensureWorkspaceQuietly } from '@shuttle/engine/bootstrap'
+import { pullsRunId, workspaceRunId } from '@shuttle/engine/config'
+import { loomsStub } from '@shuttle/engine/looms-stub'
+import {
+  ingestWebhook,
+  removeComment,
+  setThreadResolution,
+  upsertComment,
+} from '@shuttle/engine/pulls/signals'
+import type { Actor } from '@shuttle/engine/tenancy/access'
+import { isOrgId } from '@shuttle/engine/tenancy/run-id'
+import { connectGithub } from '@shuttle/engine/workspace/module'
+import { getInstallation, signState, verifyState } from '@shuttle/git/github/app'
+import {
+  normalizeWebhook,
+  parseWebhookBody,
+  verifyWebhookSignature,
+} from '@shuttle/git/github/webhooks'
+
 import type { ShuttleEnv } from '../env'
-import { getInstallation, signState, verifyState } from '../github/app'
 import {
   exchangeGithubCode,
   githubAuthorizeUrl,
@@ -9,13 +25,7 @@ import {
   linkInstallations,
   listAccessibleInstallations,
 } from '../github/user-link'
-import { normalizeWebhook, parseWebhookBody, verifyWebhookSignature } from '../github/webhooks'
-import { loomsStub } from '../looms-stub'
-import { ingestWebhook, removeComment, setThreadResolution, upsertComment } from '../pulls/signals'
-import type { Actor } from '../tenancy/access'
 import { claimInstallation, orgsOfInstallation } from '../tenancy/installations'
-import { isOrgId } from '../tenancy/run-id'
-import { connectGithub } from '../workspace/module'
 
 /**
  * Routes GitHub itself calls or sends the browser back to. They carry no sign-in: a webhook is

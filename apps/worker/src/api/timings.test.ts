@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test'
 
+import type { Actor } from '@shuttle/engine/tenancy/access'
 import type { JsonValue } from '@swirls/looms/core'
 
-import type { Actor } from '../tenancy/access'
 import { fakeEnv } from '../testing/fake-env'
 import { handleApi } from './handler'
 

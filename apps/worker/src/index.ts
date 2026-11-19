@@ -1,52 +1,28 @@
 import { z } from 'zod'
 
-import {
-  durableObjectLauncher,
-  LoomsDurableObject,
-  routeToDurableObject,
-  type LoomsDurableObjectConfig,
-} from '@swirls/looms/cloudflare'
-import { forwardedActorAuth } from '@swirls/looms/runtime'
-
-import { handleApi } from './api/handler'
-import { handlePublicApi } from './api/public'
-import { shuttleAttributes } from './attributes'
-import { resolveActor } from './auth/actor'
-import { AUTH_BASE_PATH, AuthUnavailableError, getAuth } from './auth/auth'
-import { refuseSignUp } from './auth/signup-code'
+import { shuttleAttributes } from '@shuttle/engine/attributes'
 import {
   readStoredLlmModel,
   resolveProjectors,
   workspaceRunId,
   writeStoredLlmModel,
-} from './config'
+} from '@shuttle/engine/config'
 import {
   createCredentialStore,
   type CredentialPayload,
   type CredentialStore,
   type CredentialSummary,
-} from './credentials/store'
-import type { ShuttleEnv } from './env'
-import { sandboxStub } from './env'
-import { EventFirehose } from './firehose/durable-object'
+} from '@shuttle/engine/credentials/store'
+import { EventFirehose } from '@shuttle/engine/firehose/durable-object'
 import {
   DEFAULT_HARNESS,
   readPinnedHarness,
   writeStoredHarness,
   type HarnessId,
   type VendorHarnessId,
-} from './harness'
-import { httpsRedirect, withHsts } from './https'
-import { loomsStub } from './looms-stub'
-import { shuttleModules } from './modules'
-import { handleAssetRoutes } from './routes/assets'
-import { handleFirehoseRoutes } from './routes/firehose'
-import { handleGithubPublicRoutes, handleGithubRoutes } from './routes/github'
-import { handleRunnerTokenRoutes } from './routes/runners'
-import { handleSandboxRoutes } from './routes/sandbox'
-import { sandboxesArePersonal } from './sandbox/names'
-import { isOwnHost, parsePreviewHost } from './sandbox/preview-host'
-import { SessionSandbox } from './sandbox/session-sandbox'
+} from '@shuttle/engine/harness'
+import { loomsStub } from '@shuttle/engine/looms-stub'
+import { shuttleModules } from '@shuttle/engine/modules'
 import {
   readSandboxBinding,
   readSandboxPlacement,
@@ -54,7 +30,7 @@ import {
   writeSandboxPlacement,
   type SandboxBinding,
   type SandboxPlacement,
-} from './session/bind-sandbox'
+} from '@shuttle/engine/session/bind-sandbox'
 import {
   LAST_MOVE_KEY,
   PENDING_PLACEMENT_KEY,
@@ -62,16 +38,23 @@ import {
   SANDBOX_HOME_KEY,
   type PendingPlacement,
   type SessionMove,
-} from './session/handoff'
-import { readSessionStacks } from './session/session-stacks'
-import type { SessionStacks } from './session/stack-state'
-import { DEFAULT_TEAM, readPinnedTeam, writeStoredTeam, type Team, type TeamInput } from './team'
-import { readSessionAccess, writeSessionAccess, type SessionAccess } from './tenancy/access'
-import { authorizeLoomsRoute, authorizeRun, runIdOfPath } from './tenancy/gate'
-import { runOfPreviewKey } from './tenancy/previews'
-import { orgOfRun } from './tenancy/run-id'
-import { runTimingObserver } from './timing'
-import { CONNECTABLE_HARNESSES } from './vendor/harnesses'
+} from '@shuttle/engine/session/handoff'
+import { readSessionStacks } from '@shuttle/engine/session/session-stacks'
+import type { SessionStacks } from '@shuttle/engine/session/stack-state'
+import {
+  DEFAULT_TEAM,
+  readPinnedTeam,
+  writeStoredTeam,
+  type Team,
+  type TeamInput,
+} from '@shuttle/engine/team'
+import {
+  readSessionAccess,
+  writeSessionAccess,
+  type SessionAccess,
+} from '@shuttle/engine/tenancy/access'
+import { orgOfRun } from '@shuttle/engine/tenancy/run-id'
+import { CONNECTABLE_HARNESSES } from '@shuttle/engine/vendor/harnesses'
 import {
   readVendorCatalogue,
   readVendorModelChoice,
@@ -82,11 +65,38 @@ import {
   type VendorModelChoice,
   type VendorModelChoiceInput,
   type VendorModelChoices,
-} from './vendor/models'
+} from '@shuttle/engine/vendor/models'
+import { deriveActivityFromRunState } from '@shuttle/engine/workspace/activity-state'
+import type { SessionActivity } from '@shuttle/engine/workspace/module'
+import { sandboxNameFor } from '@shuttle/engine/workspace/thread'
+import { httpsRedirect, withHsts } from '@shuttle/sandbox/https'
+import { sandboxesArePersonal } from '@shuttle/sandbox/names'
+import { isOwnHost, parsePreviewHost } from '@shuttle/sandbox/preview-host'
+import { SessionSandbox } from '@shuttle/sandbox/session-sandbox'
+import {
+  durableObjectLauncher,
+  LoomsDurableObject,
+  routeToDurableObject,
+  type LoomsDurableObjectConfig,
+} from '@swirls/looms/cloudflare'
+import { forwardedActorAuth } from '@swirls/looms/runtime'
+
+import { handleApi } from './api/handler'
+import { handlePublicApi } from './api/public'
+import { resolveActor } from './auth/actor'
+import { AUTH_BASE_PATH, AuthUnavailableError, getAuth } from './auth/auth'
+import { refuseSignUp } from './auth/signup-code'
+import type { ShuttleEnv } from './env'
+import { sandboxStub } from './env'
+import { handleAssetRoutes } from './routes/assets'
+import { handleFirehoseRoutes } from './routes/firehose'
+import { handleGithubPublicRoutes, handleGithubRoutes } from './routes/github'
+import { handleRunnerTokenRoutes } from './routes/runners'
+import { handleSandboxRoutes } from './routes/sandbox'
+import { authorizeLoomsRoute, authorizeRun, runIdOfPath } from './tenancy/gate'
+import { runOfPreviewKey } from './tenancy/previews'
+import { runTimingObserver } from './timing'
 import { isWebAppRequest } from './web-app'
-import { deriveActivityFromRunState } from './workspace/activity-state'
-import type { SessionActivity } from './workspace/module'
-import { sandboxNameFor } from './workspace/thread'
 
 export { EventFirehose, SessionSandbox }
 

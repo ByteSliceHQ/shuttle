@@ -1,14 +1,14 @@
 import { z } from 'zod'
 
+import { ensureNamedWorkspace } from '@shuttle/engine/bootstrap'
+import { loomsStub } from '@shuttle/engine/looms-stub'
+import type { SessionAccess } from '@shuttle/engine/tenancy/access'
+import { listingChanges, listingRunIds } from '@shuttle/engine/tenancy/listings'
+import type { SessionActivity } from '@shuttle/engine/workspace/scope'
+import { listSession, shareSession, unlistSession } from '@shuttle/engine/workspace/signals'
 import type { EventInput } from '@swirls/looms/core'
 
-import { ensureNamedWorkspace } from '../bootstrap'
 import type { ShuttleEnv } from '../env'
-import { loomsStub } from '../looms-stub'
-import type { SessionAccess } from '../tenancy/access'
-import { listingChanges, listingRunIds } from '../tenancy/listings'
-import type { SessionActivity } from './scope'
-import { listSession, shareSession, unlistSession } from './signals'
 
 /** A session as a workspace's tree shows it. */
 export interface ListedSession {

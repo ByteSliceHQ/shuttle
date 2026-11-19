@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
-import { parsePreviewHost } from '../sandbox/preview-host'
+import { parsePreviewHost } from '@shuttle/sandbox/preview-host'
+
 import { migratedD1 } from '../testing/fake-d1'
 import { isPreviewKey, previewKeyFor, runOfPreviewKey } from './previews'
 
