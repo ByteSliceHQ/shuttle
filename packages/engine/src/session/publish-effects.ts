@@ -2,6 +2,7 @@ import { Predicate } from 'effect'
 
 import { emit, invoke, isJsonObject, type JsonValue, type RuntimeEffect } from '@swirls/looms/core'
 
+import { hasExpired } from '../ports/approvals'
 import { shuttleModule } from './scope'
 import { stacksAsJson, type PendingPrPublish } from './stack-state'
 
@@ -20,6 +21,8 @@ export interface ApprovalDecision {
 export interface PublishSessionSlice {
   readonly pendingPrPublish: PendingPrPublish | null
   readonly discardedPrApprovalId: string | null
+  /** Why the gate was closed without publishing, for the message the agent is told. */
+  readonly discardedPrReason?: 'rejected' | 'expired' | null
   readonly stacks: Parameters<typeof stacksAsJson>[0]
 }
 
@@ -27,6 +30,8 @@ export interface PublishSessionSlice {
 export function withPrApprovalDecision<S extends PublishSessionSlice>(
   state: S,
   payload: ApprovalDecision,
+  /** When the decision was recorded, to hold it against the approval's expiry. */
+  at: number = Date.now(),
 ): S | null {
   const approvalId = payload.approvalId
   const pending = state.pendingPrPublish
@@ -35,8 +40,22 @@ export function withPrApprovalDecision<S extends PublishSessionSlice>(
     return null
   }
 
+  if (hasExpired(pending.expiresAt, at)) {
+    return {
+      ...state,
+      pendingPrPublish: null,
+      discardedPrApprovalId: approvalId,
+      discardedPrReason: 'expired',
+    }
+  }
+
   if (payload.outcome !== 'approve') {
-    return { ...state, pendingPrPublish: null, discardedPrApprovalId: approvalId }
+    return {
+      ...state,
+      pendingPrPublish: null,
+      discardedPrApprovalId: approvalId,
+      discardedPrReason: 'rejected',
+    }
   }
 
   const fields = asObject(payload.payload)
@@ -104,7 +123,10 @@ export function appendPrPublishEffects(state: PublishSessionSlice, effects: Runt
       emit(
         shuttleModule.input('pr.discarded', {
           approvalId: state.discardedPrApprovalId,
-          message: 'The user discarded this pull request proposal; nothing was published.',
+          message:
+            state.discardedPrReason === 'expired'
+              ? 'This pull request proposal was not approved in time and has expired; nothing was published.'
+              : 'The user discarded this pull request proposal; nothing was published.',
         }),
         `pr_discarded_${state.discardedPrApprovalId}`,
       ),

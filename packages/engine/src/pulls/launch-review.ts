@@ -3,12 +3,16 @@ import { Schema } from 'effect'
 import { workspaceRunId } from '../config'
 import type { EngineEnv } from '../env'
 import { loomsStub } from '../looms-stub'
+import { admitSessionStart, openSessionStart, type SessionStartPort } from '../ports/session-start'
 import { orgOfRun } from '../tenancy/run-id'
 import { requestSession } from '../workspace/signals'
 import { pullsModule } from './scope'
 import { reviewerLinked } from './signals'
 
-export function createLaunchReviewEffect(env: EngineEnv) {
+export function createLaunchReviewEffect(
+  env: EngineEnv,
+  sessionStart: SessionStartPort = openSessionStart,
+) {
   return pullsModule.effect({
     type: 'pulls.launchReviewSession',
     placement: 'local',
@@ -21,6 +25,14 @@ export function createLaunchReviewEffect(env: EngineEnv) {
       baseSha: Schema.String,
     }),
     execute: async (input, ctx) => {
+      // Nobody asked for this review, so nobody is named; the host still decides if it may start.
+      await admitSessionStart(sessionStart, {
+        kind: 'auto-review',
+        orgId: orgOfRun(ctx.runId) ?? '',
+        acting: null,
+        repos: [input.fullName],
+      })
+
       const stub = loomsStub(env.LOOMS_RUN, workspaceRunId(env, orgOfRun(ctx.runId)))
 
       await stub.signal([

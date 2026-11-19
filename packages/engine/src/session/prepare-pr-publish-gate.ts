@@ -5,6 +5,8 @@ import { worktreeRepoPath } from '@shuttle/sandbox/workspace'
 
 import type { EngineEnv } from '../env'
 import { sandboxStub } from '../env'
+import { expiryOf, neverExpire, type ApprovalPolicy } from '../ports/approvals'
+import { orgOfRun } from '../tenancy/run-id'
 import { readSandboxBinding, sandboxNameForSession } from './bind-sandbox'
 import { prepareSessionSandbox } from './handoff'
 import { shuttleModule } from './scope'
@@ -59,7 +61,11 @@ function isPresent(value: string | undefined | null): value is string {
   return value !== undefined && value !== null && value !== ''
 }
 
-export function createPreparePrPublishGateEffect(env: EngineEnv, storage?: DurableObjectStorage) {
+export function createPreparePrPublishGateEffect(
+  env: EngineEnv,
+  storage?: DurableObjectStorage,
+  approvals: ApprovalPolicy = neverExpire,
+) {
   return shuttleModule.effect({
     type: 'shuttle.preparePrPublishGate',
     placement: 'local',
@@ -154,6 +160,12 @@ export function createPreparePrPublishGateEffect(env: EngineEnv, storage?: Durab
 
       const shownTitle = title === '' ? 'Shuttle changes' : title
 
+      const expiresAt = expiryOf(
+        approvals,
+        { kind: 'publish-pull-request', approvalId: input.approvalId, orgId: orgOfRun(ctx.runId) },
+        Date.now(),
+      )
+
       return [
         shuttleModule.input('pr.proposed', {
           approvalId: input.approvalId,
@@ -166,6 +178,7 @@ export function createPreparePrPublishGateEffect(env: EngineEnv, storage?: Durab
           layer: layer ?? undefined,
           parentPull,
           restacks: [...restacks],
+          expiresAt,
         }),
         {
           type: 'approval.requested' as const,

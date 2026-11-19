@@ -1,3 +1,5 @@
+import type { GitAccess } from './access'
+
 /**
  * What the Git and GitHub code reads from a host's configuration. All of it is optional: a host
  * that sets none of it can still use the parts that do not need GitHub.
@@ -16,4 +18,9 @@ export interface GitEnv {
   /** Code Storage organization name and signing key. */
   readonly PIERRE_ORG?: string
   readonly PIERRE_PRIVATE_KEY?: string
+  /**
+   * The host's own Git and GitHub access. When set, installation tokens come from it and the
+   * GitHub App settings above are not used for them. See `access.ts`.
+   */
+  readonly GIT_ACCESS?: GitAccess
 }

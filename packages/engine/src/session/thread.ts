@@ -104,6 +104,10 @@ export interface SessionState {
   readonly goal: string
   readonly repoUrl: string | null
   readonly folderId: string | null
+  /** What the host that started the session attached to it. Absent for sessions Shuttle started. */
+  readonly hostMetadata?: Readonly<Record<string, string>>
+  /** Approvals asked and not yet answered, by id. Absent in sessions from before it was kept. */
+  readonly openApprovals?: Readonly<Record<string, OpenApproval>>
   readonly workspaceRunId: string | null
   readonly sandboxName: string | null
   readonly repos: readonly LinkedSessionRepo[]
@@ -297,6 +301,70 @@ function applyChildTerminal(
   }
 }
 
+/** A question the session has put to a person and is waiting on. */
+export interface OpenApproval {
+  readonly title: string
+  readonly description: string | null
+}
+
+function readHostMetadata(
+  value: JsonValue | undefined,
+): Readonly<Record<string, string>> | undefined {
+  if (!isJsonObject(value)) {
+    return undefined
+  }
+
+  const entries = Object.entries(value).flatMap(([key, entry]) =>
+    Predicate.isString(entry) ? [[key, entry] as const] : [],
+  )
+
+  return entries.length === 0 ? undefined : Object.fromEntries(entries)
+}
+
+/** Keeps `openApprovals` to the approvals that have been asked and not yet answered. */
+function trackOpenApprovals<
+  S extends { readonly openApprovals?: Readonly<Record<string, OpenApproval>> },
+>(state: S, event: { readonly type: string; readonly payload: JsonValue }): S {
+  if (
+    event.type !== 'approval.requested' &&
+    event.type !== 'approval.decided' &&
+    event.type !== 'approval.timed_out'
+  ) {
+    return state
+  }
+
+  const payload = asObject(event.payload)
+  const approvalId = Predicate.isString(payload.approvalId) ? payload.approvalId : null
+
+  if (approvalId === null) {
+    return state
+  }
+
+  const open = state.openApprovals ?? {}
+
+  if (event.type === 'approval.requested') {
+    return {
+      ...state,
+      openApprovals: {
+        ...open,
+        [approvalId]: {
+          title: Predicate.isString(payload.title) ? payload.title : 'Needs your decision',
+          description: Predicate.isString(payload.description) ? payload.description : null,
+        },
+      },
+    }
+  }
+
+  if (!(approvalId in open)) {
+    return state
+  }
+
+  return {
+    ...state,
+    openApprovals: Object.fromEntries(Object.entries(open).filter(([id]) => id !== approvalId)),
+  }
+}
+
 export function createSessionThread(): ThreadDefinition<SessionState> {
   return shuttleModule.thread<SessionState>({
     kind: 'shuttle-session',
@@ -371,6 +439,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         goal: asString(input.goal) ?? 'Improve the repository',
         repoUrl: asString(input.repoUrl),
         folderId: asString(input.folderId),
+        hostMetadata: readHostMetadata(input.hostMetadata),
         workspaceRunId: asString(input.workspaceRunId),
         sandboxName: asString(input.sandboxName),
         repos,
@@ -399,7 +468,9 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
         mailboxEpoch: 0,
       }
     },
-    step(state, event) {
+    step(incoming, event) {
+      const state = trackOpenApprovals(incoming, event)
+
       switch (event.type) {
         case 'runtime.thread.started': {
           return state
@@ -439,7 +510,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             ? event.payload.approvalId
             : ''
 
-          const prNext = withPrApprovalDecision(state, event.payload)
+          const prNext = withPrApprovalDecision(state, event.payload, event.ts)
 
           if (prNext) {
             return prNext

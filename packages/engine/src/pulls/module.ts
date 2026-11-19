@@ -1,6 +1,7 @@
 import { defineModule } from '@swirls/looms/core'
 
 import type { EngineEnv } from '../env'
+import { openSessionStart, type SessionStartPort } from '../ports/session-start'
 import { pullsDefinition } from './definitions'
 import { createLaunchReviewEffect } from './launch-review'
 import { pullInbox } from './projections'
@@ -23,10 +24,13 @@ import { pullThreads } from './threads'
 
 export interface PullsModuleOptions {
   readonly env: EngineEnv
+  /** Asked before a review session is started. Defaults to allowing every one. */
+  readonly sessionStart?: SessionStartPort
 }
 
 export function pulls(options: PullsModuleOptions) {
   const { env } = options
+  const sessionStart = options.sessionStart ?? openSessionStart
 
   return defineModule(pullsModule, () => ({
     definitions: [pullsDefinition],
@@ -51,7 +55,7 @@ export function pulls(options: PullsModuleOptions) {
       requestReview,
     },
     effects: {
-      launchReviewSession: createLaunchReviewEffect(env),
+      launchReviewSession: createLaunchReviewEffect(env, sessionStart),
     },
   }))
 }

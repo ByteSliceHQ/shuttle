@@ -46,6 +46,8 @@ export interface PendingPrPublish {
   readonly parentPull: { readonly fullName: string; readonly number: number } | null
   readonly restacks: readonly number[]
   readonly status: 'awaiting_approval' | 'publishing'
+  /** When a decision stops being accepted. Absent or null: never. */
+  readonly expiresAt?: number | null
 }
 
 export interface StackSessionSlice {
@@ -165,6 +167,7 @@ export function withPrProposal<S extends StackSessionSlice>(
       parentPull,
       restacks,
       status: 'awaiting_approval',
+      expiresAt: Predicate.isNumber(proposal.expiresAt) ? proposal.expiresAt : null,
     },
   }
 }

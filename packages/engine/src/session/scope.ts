@@ -132,6 +132,8 @@ export const shuttleCatalog = defineEventCatalog('shuttle', {
     ),
     /** PR numbers that will be force-updated because a lower layer changed. */
     restacks: Schema.optional(Schema.Array(Schema.Finite)),
+    /** When the host's approval policy stops accepting a decision. Absent or null: never. */
+    expiresAt: Schema.optional(Schema.NullOr(Schema.Finite)),
   }),
   'pr.published': Schema.Struct({
     approvalId: Schema.String,

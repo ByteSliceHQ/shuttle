@@ -23,6 +23,7 @@ import {
 } from '@shuttle/engine/harness'
 import { loomsStub } from '@shuttle/engine/looms-stub'
 import { shuttleModules } from '@shuttle/engine/modules'
+import { actorOfActing } from '@shuttle/engine/ports/identity'
 import {
   readSandboxBinding,
   readSandboxPlacement,
@@ -83,11 +84,11 @@ import { forwardedActorAuth } from '@swirls/looms/runtime'
 
 import { handleApi } from './api/handler'
 import { handlePublicApi } from './api/public'
-import { resolveActor } from './auth/actor'
 import { AUTH_BASE_PATH, AuthUnavailableError, getAuth } from './auth/auth'
 import { refuseSignUp } from './auth/signup-code'
 import type { ShuttleEnv } from './env'
 import { sandboxStub } from './env'
+import { workerHost, workerIdentity } from './host'
 import { handleAssetRoutes } from './routes/assets'
 import { handleFirehoseRoutes } from './routes/firehose'
 import { handleGithubPublicRoutes, handleGithubRoutes } from './routes/github'
@@ -111,7 +112,7 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
     }
 
     return {
-      modules: shuttleModules(env, runId, { storage: this.ctx.storage }),
+      modules: shuttleModules(workerHost(env), runId, { storage: this.ctx.storage }),
       launcher: durableObjectLauncher(env.LOOMS_RUN),
       attributes: shuttleAttributes,
       projectors: resolveProjectors(env, { runId, storage: this.ctx.storage }),
@@ -444,7 +445,8 @@ async function route(
     return runner
   }
 
-  const actor = await resolveActor(getAuth(env), request)
+  const acting = await workerIdentity(env).resolve(request)
+  const actor = acting === null ? null : actorOfActing(acting)
 
   if (!actor) {
     return Response.json({ error: 'Sign in to continue' }, { status: 401 })
@@ -485,7 +487,7 @@ async function route(
   const response = await routeToDurableObject(env.LOOMS_RUN, request, {
     modules: () => {
       // Definitions listing does not need a session-specific sandbox binding.
-      return shuttleModules(env, 'definitions')
+      return shuttleModules(workerHost(env), 'definitions')
     },
     authorize: (_request, loomsRoute) => authorizeLoomsRoute(env, actor, loomsRoute),
   })

@@ -141,6 +141,12 @@ export async function githubFetch(
 
 /** Optional user/PAT from env — covers PR sync/create when the App lacks scopes. */
 export function githubUserToken(env: GitEnv): string | null {
+  if (env.GIT_ACCESS !== undefined) {
+    const hosted = env.GIT_ACCESS.userToken?.()?.trim()
+
+    return hosted === undefined || hosted === '' ? null : hosted
+  }
+
   const token = env.GITHUB_TOKEN?.trim()
   return token === undefined || token === '' ? null : token
 }
@@ -235,6 +241,10 @@ const InstallationTokenSchema = z.object({
 })
 
 export async function getInstallationToken(env: GitEnv, installationId: number): Promise<string> {
+  if (env.GIT_ACCESS !== undefined) {
+    return env.GIT_ACCESS.installationToken(installationId)
+  }
+
   const cached = installationTokens.get(installationId)
 
   if (cached && cached.expiresAt > Date.now() + 5 * 60_000) {

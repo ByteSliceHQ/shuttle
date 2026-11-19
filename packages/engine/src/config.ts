@@ -23,6 +23,7 @@ import { createFirehoseProjector } from './firehose/projector'
 import { isVendorHarness, readPinnedHarness, writeStoredHarness } from './harness'
 import { createReasoningLlm, createStubThinkingLlm, getTurnThread, reasoningEffortFor } from './llm'
 import { loomsStub } from './looms-stub'
+import { billedToLabel, type CredentialPort } from './ports/credentials'
 import { present } from './present'
 import { readSandboxBinding, sandboxNameForSession } from './session/bind-sandbox'
 import { prepareSessionSandbox } from './session/handoff'
@@ -143,6 +144,7 @@ export async function resolveTeam(
  */
 export function resolveLlm(
   env: EngineEnv,
+  credentialPort: CredentialPort,
   storage?: DurableObjectStorage,
   runId?: string,
 ): LlmAdapter {
@@ -227,7 +229,12 @@ export function resolveLlm(
       // Sets the sandbox up, and first moves the session into it if it was working elsewhere.
       await prepareSessionSandbox(env, storage, runId, binding)
 
-      const credentials = loomsStub(env.LOOMS_RUN, workspaceRunId(env, orgOfRun(runId)))
+      const orgId = orgOfRun(runId)
+      const credentials = loomsStub(env.LOOMS_RUN, workspaceRunId(env, orgId))
+
+      // Whose credential this turn runs on is the port's to say. A standalone Shuttle says: the
+      // person it is working for, and nobody's when no one has asked for anything.
+      const credentialOwner = credentialPort.ownerOf({ runId, orgId, harness, sponsorId })
 
       // Read last, so a model picked while the sandbox was being prepared still applies. A
       // session with no choice of its own uses the most recent one made anywhere.
@@ -249,7 +256,7 @@ export function resolveLlm(
               : { threadId: getTurnThread(args.signal) ?? crypto.randomUUID() },
           // The turn runs on the sign-in of the person it is working for, and on no one else's.
           // A session Shuttle started itself, which nobody has spoken in, has no one's.
-          billedTo: sponsorId ?? undefined,
+          billedTo: credentialOwner === null ? undefined : billedToLabel(credentialOwner),
           signInStaysInSandbox: sandboxIsPersonal(sandboxName, env),
           signInPresent: async () =>
             (await sandbox.exec(signInFilesPresent(vendorHarnessInfo(harness).credentialFiles)))
@@ -265,10 +272,12 @@ export function resolveLlm(
             }),
           credentials: {
             get: async (id) =>
-              sponsorId === null ? null : credentials.getCredential(sponsorId, id),
+              credentialOwner === null
+                ? null
+                : credentialPort.get({ owner: credentialOwner, harness: id, orgId }),
             put: async (id, payload) => {
-              if (sponsorId !== null) {
-                await credentials.putCredential(sponsorId, id, payload)
+              if (credentialOwner !== null) {
+                await credentialPort.put({ owner: credentialOwner, harness: id, orgId }, payload)
               }
             },
           },

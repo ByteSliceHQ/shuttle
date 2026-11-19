@@ -15,7 +15,7 @@ import type { AttachmentRef } from '../session/scope'
 import { orgOfRun } from '../tenancy/run-id'
 import { isEventOf } from './event-guard'
 import type { LinkedRepo, SessionActivity } from './scope'
-import { workspaceModule } from './scope'
+import { NO_FOLDER, workspaceModule } from './scope'
 
 export type AutoReviewMode = 'off' | 'others' | 'all'
 
@@ -54,6 +54,8 @@ export interface WorkspaceSession {
   readonly playbookRunId: string | null
   readonly definitionName: string
   readonly pull: SessionPullRef | null
+  /** What the host that started the session attached to it. Absent for a session Shuttle started. */
+  readonly hostMetadata?: Readonly<Record<string, string>>
   /** The person who started the session. Null when Shuttle started it. */
   readonly ownerId: string | null
   /** People the owner shared the session with. */
@@ -92,6 +94,16 @@ function asString(value: JsonValue | undefined): string | null {
 
 function sandboxNameFor(folderId: string): string {
   return `folder:${folderId}`
+}
+
+/** A folder's sandbox is shared by its sessions. A session with no folder has one of its own. */
+function sandboxNameOfSession(session: {
+  readonly runId: string
+  readonly folderId: string
+}): string {
+  return session.folderId === NO_FOLDER
+    ? `session:${session.runId}`
+    : sandboxNameFor(session.folderId)
 }
 
 function activityEventSeq(
@@ -359,6 +371,7 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
                 playbookRunId: event.payload.playbookRunId,
                 definitionName: event.payload.definitionName ?? 'coding',
                 pull: event.payload.pull ?? null,
+                hostMetadata: event.payload.hostMetadata,
                 ownerId: event.payload.ownerId ?? null,
                 memberIds: [],
                 repos: event.payload.repos,
@@ -610,11 +623,12 @@ export function createWorkspaceThread(): ThreadDefinition<WorkspaceState> {
                 session.attachments !== undefined && session.attachments.length > 0
                   ? session.attachments
                   : undefined,
-              folderId: session.folderId,
+              folderId: session.folderId === NO_FOLDER ? undefined : session.folderId,
               workspaceRunId: ctx.runId,
+              hostMetadata: session.hostMetadata,
               ownerId:
                 session.ownerId === null || session.ownerId === '' ? undefined : session.ownerId,
-              sandboxName: sandboxNameFor(session.folderId),
+              sandboxName: sandboxNameOfSession(session),
               repos: repos.map((repo) => ({
                 installationId: repo.installationId,
                 owner: repo.owner,

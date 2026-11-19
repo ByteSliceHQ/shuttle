@@ -40,6 +40,8 @@ export const ShuttleSessionInputSchema = z.object({
   playbookVersion: z.number().optional(),
   lessons: z.array(LessonSchema).optional(),
   pull: PullRefSchema.optional(),
+  /** What the host that started the session attached to it. Carried, never read. */
+  hostMetadata: z.record(z.string(), z.string()).optional(),
 })
 
 export type ShuttleSessionInput = z.infer<typeof ShuttleSessionInputSchema>

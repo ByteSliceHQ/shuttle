@@ -127,6 +127,7 @@ export const requestSession = workspaceModule.signal({
         baseSha: Schema.String,
       }),
     ),
+    hostMetadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   }),
   build: (input) =>
     workspaceModule.input('session.requested', input, {
