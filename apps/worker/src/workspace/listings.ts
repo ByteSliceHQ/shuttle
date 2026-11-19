@@ -53,20 +53,48 @@ export async function readListedSession(
   workspaceRunIds: readonly string[],
   sessionRunId: string,
 ): Promise<ListedSession | null> {
-  for (const workspaceRunId of workspaceRunIds) {
-    const response = await loomsStub(env.LOOMS_RUN, workspaceRunId).fetch(
-      new Request(`https://shuttle.internal/runs/${workspaceRunId}/projections/workspaceTree`),
-    )
+  return (await readListedSessions(env, workspaceRunIds, [sessionRunId])).get(sessionRunId) ?? null
+}
 
-    if (!response.ok) {
-      continue
-    }
+/**
+ * Each session's entry in the first of `workspaceRunIds` that lists it, reading each workspace's
+ * tree once, all at the same time, however many sessions are asked for. A session no workspace
+ * lists is left out.
+ */
+export async function readListedSessions(
+  env: ShuttleEnv,
+  workspaceRunIds: readonly string[],
+  sessionRunIds: readonly string[],
+): Promise<Map<string, ListedSession>> {
+  const found = new Map<string, ListedSession>()
+  const wanted = new Set(sessionRunIds)
 
-    const body = WorkspaceTreeBodySchema.safeParse(await response.json())
-    const entry = body.success ? body.data.value?.sessions?.[sessionRunId] : undefined
+  // Every workspace is read at once; the first in `workspaceRunIds` that lists a session wins.
+  const trees = await Promise.all(
+    workspaceRunIds.map(async (workspaceRunId) => {
+      const response = await loomsStub(env.LOOMS_RUN, workspaceRunId).fetch(
+        new Request(`https://shuttle.internal/runs/${workspaceRunId}/projections/workspaceTree`),
+      )
 
-    if (entry?.folderId !== undefined) {
-      return {
+      if (!response.ok) {
+        return undefined
+      }
+
+      const body = WorkspaceTreeBodySchema.safeParse(await response.json())
+
+      return body.success ? (body.data.value?.sessions ?? undefined) : undefined
+    }),
+  )
+
+  for (const sessions of trees) {
+    for (const sessionRunId of wanted) {
+      const entry = sessions?.[sessionRunId]
+
+      if (found.has(sessionRunId) || entry?.folderId === undefined) {
+        continue
+      }
+
+      found.set(sessionRunId, {
         runId: sessionRunId,
         folderId: entry.folderId,
         goal: entry.goal ?? '',
@@ -76,11 +104,11 @@ export async function readListedSession(
         createdAt: entry.createdAt ?? 0,
         updatedAt: entry.updatedAt ?? 0,
         archived: entry.archived ?? false,
-      }
+      })
     }
   }
 
-  return null
+  return found
 }
 
 /** Sends `events` to every workspace that lists the session. */

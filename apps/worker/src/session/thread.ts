@@ -37,7 +37,12 @@ import {
 import type { JsonObjectBuilder } from './json-object'
 import { appendPrPublishEffects, withPrApprovalDecision } from './publish-effects'
 import { routeForEffects } from './route-effects'
-import { shuttleModule, type AttachmentRef, type MessageAuthor } from './scope'
+import {
+  shuttleModule,
+  type AttachmentRef,
+  type MessageAuthor,
+  type MessageReference,
+} from './scope'
 import {
   withPrProposal,
   withPrPublishSettled,
@@ -57,6 +62,7 @@ export interface PendingMessage {
   readonly targetThreadId?: string
   readonly author?: MessageAuthor
   readonly attachments?: readonly AttachmentRef[]
+  readonly references?: readonly MessageReference[]
 }
 
 export interface ActiveIntake {
@@ -67,6 +73,7 @@ export interface ActiveIntake {
   readonly targetThreadId?: string
   readonly author?: MessageAuthor
   readonly attachments?: readonly AttachmentRef[]
+  readonly references?: readonly MessageReference[]
 }
 
 export interface PendingRoute {
@@ -76,6 +83,7 @@ export interface PendingRoute {
   readonly text: string
   readonly author?: MessageAuthor
   readonly attachments?: readonly AttachmentRef[]
+  readonly references?: readonly MessageReference[]
 }
 
 export interface LinkedSessionRepo {
@@ -164,21 +172,27 @@ function asObject(value: JsonValue | undefined): { [key: string]: JsonValue } {
   return isJsonObject(value) ? value : {}
 }
 
-type AuthorAndAttachments = { author?: MessageAuthor; attachments?: readonly AttachmentRef[] }
+/** What a message carries besides its text, from one record of it to the next. */
+type Carried = {
+  author?: MessageAuthor
+  attachments?: readonly AttachmentRef[]
+  references?: readonly MessageReference[]
+}
 
-/** `author` and `attachments`, each only when there is one. */
-function withAuthorAndAttachments(
-  author: MessageAuthor | undefined,
-  attachments: readonly AttachmentRef[] | undefined,
-): AuthorAndAttachments {
-  const present: AuthorAndAttachments = {}
+/** `author`, `attachments` and `references`, each only when there is one. */
+function carried(source: Carried | undefined): Carried {
+  const present: Carried = {}
 
-  if (author !== undefined) {
-    present.author = author
+  if (source?.author !== undefined) {
+    present.author = source.author
   }
 
-  if (attachments !== undefined) {
-    present.attachments = attachments
+  if (source?.attachments !== undefined && source.attachments.length > 0) {
+    present.attachments = source.attachments
+  }
+
+  if (source?.references !== undefined && source.references.length > 0) {
+    present.references = source.references
   }
 
   return present
@@ -569,12 +583,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
                 text: payload.text,
                 forceKind: payload.forceKind,
                 targetThreadId: payload.targetThreadId,
-                ...withAuthorAndAttachments(
-                  author,
-                  payload.attachments !== undefined && payload.attachments.length > 0
-                    ? payload.attachments
-                    : undefined,
-                ),
+                ...carried(payload),
               },
             ],
             processedMessageIds: [...state.processedMessageIds, payload.messageId],
@@ -616,7 +625,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
               text: pending.text,
               forceKind: pending.forceKind,
               targetThreadId: pending.targetThreadId,
-              ...withAuthorAndAttachments(pending.author, pending.attachments),
+              ...carried(pending),
             },
           }
         }
@@ -638,7 +647,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
               kind: payload.kind,
               targetThreadId: payload.targetThreadId,
               text: payload.text,
-              ...withAuthorAndAttachments(bypassed?.author, bypassed?.attachments),
+              ...carried(bypassed),
             },
             mailboxEpoch: state.mailboxEpoch + 1,
           }
@@ -662,10 +671,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
                 kind,
                 targetThreadId: base.activeIntake.targetThreadId ?? null,
                 text: base.activeIntake.text,
-                ...withAuthorAndAttachments(
-                  base.activeIntake.author,
-                  base.activeIntake.attachments,
-                ),
+                ...carried(base.activeIntake),
               },
             }
           }
@@ -748,7 +754,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
                 ? queueForConductor(state.conductor, {
                     messageId: route.messageId,
                     text: route.text,
-                    ...withAuthorAndAttachments(route.author, route.attachments),
+                    ...carried(route),
                   })
                 : state.conductor,
           }

@@ -45,6 +45,7 @@ import { agentRole } from './agents'
 import { classifyHeuristic } from './intake-heuristic'
 import { provisionalRouteSummary, routeStyles } from './interjection-routes'
 import { MediaStrip } from './media-strip'
+import { CopyMessageButton, MentionText } from './mentions/text'
 import { PullPublishCard } from './pull-publish-card'
 import {
   deriveRouteWaitFallback,
@@ -86,9 +87,12 @@ type Row =
       readonly thinkingEndedAt?: number
     }
 
-/** Shows something in the artifacts pane, such as the workspace or a preview by port. */
+/**
+ * Shows something in the artifacts pane, such as the workspace, one file of it (by its path in the
+ * worktree) or a preview by port.
+ */
 export type OpenArtifact = (
-  kind: 'files' | 'browser' | 'terminal' | 'review' | 'media',
+  kind: 'files' | 'file' | 'browser' | 'terminal' | 'review' | 'media',
   target?: string,
 ) => void
 
@@ -553,6 +557,13 @@ function UserMessage({
             {item.goal ? 'Goal' : item.author && item.author.id !== me ? item.author.name : 'You'}
           </span>
           <span className="message-time tabular-nums">{clockTime(item.ts)}</span>
+          {item.text !== '' ? (
+            <CopyMessageButton
+              text={item.text}
+              references={item.references}
+              className="opacity-0 group-hover/user:opacity-100 [@media(hover:none)]:opacity-100"
+            />
+          ) : null}
         </div>
         {item.text !== '' ? (
           <div
@@ -563,7 +574,15 @@ function UserMessage({
                 : 'bg-secondary text-secondary-foreground',
             )}
           >
-            {item.text}
+            <MentionText
+              text={item.text}
+              references={item.references}
+              onOpenFile={
+                context.onOpenArtifact
+                  ? (path) => context.onOpenArtifact?.('file', path)
+                  : undefined
+              }
+            />
           </div>
         ) : null}
         {item.attachments ? (

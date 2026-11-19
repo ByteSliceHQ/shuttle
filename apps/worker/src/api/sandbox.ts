@@ -29,6 +29,7 @@ import {
   userSandboxName,
 } from '../sandbox/names'
 import { repoAccess } from '../sandbox/repo-access'
+import { edgeCache, sandboxPathsEtag, savedPaths, savedPathsEtag } from '../sandbox/saved-paths'
 import {
   findSavedWork,
   latestSave,
@@ -49,6 +50,7 @@ import {
   type SummaryRepo,
   type WorkspaceRepoSummary,
 } from '../sandbox/workspace-summary'
+import { parseWorktreePaths, worktreePathsScript } from '../sandbox/worktree-paths'
 import type { SessionStacks } from '../session/stack-state'
 import type { Actor } from '../tenancy/access'
 import { previewKeyFor } from '../tenancy/previews'
@@ -275,6 +277,9 @@ async function savedWork(env: ShuttleEnv, runId: string) {
 /** Longest a whole repository's diff is waited for. */
 const DIFF_TIMEOUT_MS = 20_000
 
+/** Longest listing a session's paths is waited for. */
+const PATHS_TIMEOUT_MS = 20_000
+
 /**
  * What the sandbox's language server says about one file, for the editor to draw: the file as
  * saved, or, given `draft`, text someone is typing and has not saved. `path` is
@@ -498,6 +503,47 @@ export const sandboxRouter = {
       const entries = relative.map((path) => ({ path, kind: 'file' as const }))
 
       return { root: sessionRoot, files: entries, mode: mode.mode, source: 'sandbox' as const }
+    })
+  }),
+
+  paths: sandbox.paths.handler(async ({ input, context: { env } }) => {
+    const runId = input.id
+    const home = await sessionSandbox(env, runId)
+
+    return reporting(async () => {
+      if (await isAsleep(home)) {
+        const { from, work } = await savedWork(env, runId)
+        const etag = savedPathsEtag(work?.saved ?? [])
+
+        if (input.etag === etag) {
+          return { ...from, repos: [], etag, unchanged: true }
+        }
+
+        const repos = work ? await savedPaths(work.client, work.saved, edgeCache()) : []
+
+        return { ...from, repos, etag }
+      }
+
+      const names = (await sessionRepos(env, runId)).map((repo) => repo.name)
+
+      const result = await home.stub.exec(worktreePathsScript(runId, names), {
+        timeoutMs: PATHS_TIMEOUT_MS,
+      })
+
+      if (result.exitCode !== 0) {
+        const reason = result.stderr.trim()
+
+        throw new Error(reason === '' ? `listing paths failed (exit ${result.exitCode})` : reason)
+      }
+
+      // The sandbox still lists the tree, but an unchanged list is not sent again.
+      const etag = await sandboxPathsEtag(result.stdout)
+
+      if (input.etag === etag) {
+        return { source: 'sandbox' as const, repos: [], etag, unchanged: true }
+      }
+
+      return { source: 'sandbox' as const, repos: parseWorktreePaths(result.stdout), etag }
     })
   }),
 

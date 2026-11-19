@@ -351,6 +351,57 @@ describe('shuttle session routing', () => {
     }
   })
 
+  test('a message keeps what it points at with @ on the way to the conductor', async () => {
+    const lines: string[] = []
+
+    const stubConductor = defineAgent({
+      name: 'conductor',
+      input: TextInput,
+      instructions: 'Conduct.',
+      conversational: true,
+      maxTurns: 500,
+      runTurn: ({ messages }) => {
+        lines.push(messages.findLast((message) => message.role === 'user')?.content ?? '')
+
+        return { message: { role: 'assistant', content: 'ok' }, done: true }
+      },
+    })
+
+    const looms = createSessionLooms(stubConductor)
+
+    try {
+      const { runId } = await startCodingSession(looms)
+
+      await waitFor(() => lines.length > 0)
+
+      await looms.signal(runId, [
+        say({
+          messageId: 'task-refs',
+          text: 'do what the other session did here',
+          forceKind: 'task',
+          references: [
+            { kind: 'file', path: 'web/src/app.ts' },
+            {
+              kind: 'session',
+              sessionId: 'o-orgA-session_2',
+              title: 'Fix login',
+              digest: 'Goal: fix login',
+            },
+          ],
+        }),
+      ])
+
+      await waitFor(() => lines.some((line) => line.includes('do what the other session did')))
+
+      const line = lines.find((entry) => entry.includes('do what the other session did'))
+
+      expect(line).toContain(`- web/src/app.ts: /workspace/.wt/${runId}/web/src/app.ts`)
+      expect(line).toContain('- "Fix login" (o-orgA-session_2)\n  Goal: fix login')
+    } finally {
+      await looms.stop()
+    }
+  })
+
   test('agents learn who a message is from once several people speak, and who the work is for', async () => {
     const turns: { text: string; sponsor: string | null }[] = []
 
