@@ -98,6 +98,8 @@ export interface MirrorInput {
   readonly stackId: number | null
   /** Layer the title and body describe; null means the current (or top) layer. */
   readonly layer: number | null
+  /** Shuttle user who approved the publish; the commits are credited to them. */
+  readonly authorUserId?: string | null
 }
 
 export interface MirroredStack {
@@ -207,6 +209,7 @@ export async function mirrorRepoStack(
       branch: planned.branch,
       files,
       message: isTarget ? input.title : `Shuttle layer ${planned.layer}`,
+      authorUserId: input.authorUserId ?? null,
     })
 
     remoteByLayer.set(planned.layer, { sha: committed.commitSha, branch: planned.branch })

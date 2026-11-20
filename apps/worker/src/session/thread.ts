@@ -35,7 +35,7 @@ import {
   queuedAttachments,
 } from './conductor'
 import type { JsonObjectBuilder } from './json-object'
-import { appendPrPublishEffects, withPrApprovalDecision } from './publish-effects'
+import { actorOfEvent, appendPrPublishEffects, withPrApprovalDecision } from './publish-effects'
 import { routeForEffects } from './route-effects'
 import { shuttleModule, type AttachmentRef, type MessageAuthor } from './scope'
 import {
@@ -439,7 +439,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             ? event.payload.approvalId
             : ''
 
-          const prNext = withPrApprovalDecision(state, event.payload)
+          const prNext = withPrApprovalDecision(state, event.payload, actorOfEvent(event))
 
           if (prNext) {
             return prNext

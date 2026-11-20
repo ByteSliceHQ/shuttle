@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { ShuttleEnv } from '../env'
 import type { LinkedRepo } from '../workspace/scope'
 import { getInstallationToken, githubFetch, ShaBodySchema } from './client'
+import { commitIdentityOf, type CommitIdentity } from './commit-identity'
 
 export type ChangesetFileStatus = 'added' | 'modified' | 'deleted'
 
@@ -21,6 +22,8 @@ export interface CommitChangesetInput {
   readonly branch: string
   readonly files: readonly ChangesetFile[]
   readonly message: string
+  /** Shuttle user to credit the commit to, through their linked GitHub account. */
+  readonly authorUserId?: string | null
 }
 
 export interface CommitChangesetResult {
@@ -70,7 +73,11 @@ async function createCommit(
   message: string,
   treeSha: string,
   parentSha: string,
+  author: CommitIdentity | null,
 ): Promise<string> {
+  // Without an author GitHub credits the commit to the App the token belongs to.
+  const credit = author === null ? {} : { author, committer: author }
+
   const response = await githubFetch(env, `/repos/${repo.owner}/${repo.name}/git/commits`, {
     method: 'POST',
     token,
@@ -79,6 +86,7 @@ async function createCommit(
       message,
       tree: treeSha,
       parents: [parentSha],
+      ...credit,
     }),
   })
 
@@ -247,6 +255,11 @@ export async function commitChangeset(
 
   const treeSha = treeBody.sha
 
+  const author =
+    input.authorUserId === undefined || input.authorUserId === null || input.authorUserId === ''
+      ? null
+      : await commitIdentityOf(env, input.authorUserId, token)
+
   const commitSha = await createCommit(
     env,
     input.repo,
@@ -254,6 +267,7 @@ export async function commitChangeset(
     input.message,
     treeSha,
     input.baseSha,
+    author,
   )
 
   await upsertBranchRef(env, input.repo, token, input.branch, commitSha)
