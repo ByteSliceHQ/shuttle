@@ -14,8 +14,6 @@ import { useState } from 'react'
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu'
 import { cn } from '../../lib/cn'
@@ -25,6 +23,7 @@ import { isSessionUnread, type SeenSessionsSnapshot } from '../sessions/seen-ses
 import { resolveFolderIndicator, resolveSessionIndicator } from '../sessions/session-activity'
 import { ActivityDot } from './activity-dot'
 import { InlineNameInput } from './inline-name-input'
+import { folderMenuEntries, RowContextMenu, RowDropdownMenuItems } from './row-menu'
 import { revealOnRowHover, SessionRow, sidebarRowClass, yieldOnRowHover } from './session-row'
 import {
   archiveWorkspaceFolder,
@@ -122,105 +121,113 @@ export function FolderGroup({
         )
       : null
 
+  const menuEntries = folderMenuEntries(
+    folder.archived,
+    () => setRenaming(true),
+    onLinkRepo,
+    () => archiveFolder.mutate(),
+  )
+
+  const row = (
+    <div className={cn(sidebarRowClass(folderActive), folder.archived && 'opacity-60')}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-label={`${open ? 'Collapse' : 'Expand'} ${folder.name}`}
+        className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 ml-0.5 flex size-6 shrink-0 items-center justify-center rounded-sm outline-none focus-visible:ring-2"
+      >
+        <ChevronRight
+          className={cn(
+            'ease-snappy size-3.5 transition-transform duration-150',
+            open && 'rotate-90',
+          )}
+        />
+      </button>
+
+      {renaming ? (
+        <div className="min-w-0 flex-1 pr-1">
+          <InlineNameInput
+            initialValue={folder.name}
+            label="Folder name"
+            onCancel={() => setRenaming(false)}
+            onCommit={(name) => {
+              setRenaming(false)
+              renameFolder.mutate(name)
+            }}
+          />
+        </div>
+      ) : (
+        <>
+          <Link
+            to={{ page: 'folder', folderId: folder.folderId }}
+            title={folder.name}
+            onClick={() => rememberLastFolder(folder.folderId)}
+            onDoubleClick={(event) => {
+              event.preventDefault()
+              setRenaming(true)
+            }}
+            className="focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md pr-1 outline-none focus-visible:ring-2"
+          >
+            <FolderIcon className="text-muted-foreground size-3.5 shrink-0" />
+            <span className="text-foreground/90 min-w-0 truncate font-medium" dir="auto">
+              {folder.name}
+            </span>
+          </Link>
+
+          <div className="relative mr-1 flex h-6 w-20 shrink-0 items-center justify-end">
+            <div className={cn('inline-flex items-center gap-1.5', yieldOnRowHover)}>
+              {collapsedRollup ? (
+                <ActivityDot tone={collapsedRollup.tone} label={collapsedRollup.label} />
+              ) : null}
+              <FolderMeta
+                folderId={folder.folderId}
+                repoCount={repoCount}
+                pullAttention={pullAttention}
+              />
+            </div>
+            <div className={cn('absolute inset-y-0 right-0 flex items-center', revealOnRowHover)}>
+              {folder.archived ? null : (
+                <Link
+                  to={{ page: 'folder', folderId: folder.folderId }}
+                  aria-label={`New session in ${folder.name}`}
+                  title="New session"
+                  onClick={() => rememberLastFolder(folder.folderId)}
+                  className="text-muted-foreground hover:text-foreground hover:bg-accent flex size-6 items-center justify-center rounded-sm"
+                >
+                  <Plus className="size-3.5" />
+                </Link>
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={`Actions for ${folder.name}`}
+                    className="text-muted-foreground hover:text-foreground hover:bg-accent data-[state=open]:bg-accent flex size-6 items-center justify-center rounded-sm outline-none"
+                  >
+                    <MoreHorizontal className="size-3.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-40">
+                  <RowDropdownMenuItems entries={menuEntries} />
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+
   return (
     <div className="mb-0.5">
-      <div className={cn(sidebarRowClass(folderActive), folder.archived && 'opacity-60')}>
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={open}
-          aria-label={`${open ? 'Collapse' : 'Expand'} ${folder.name}`}
-          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 ml-0.5 flex size-6 shrink-0 items-center justify-center rounded-sm outline-none focus-visible:ring-2"
-        >
-          <ChevronRight
-            className={cn(
-              'ease-snappy size-3.5 transition-transform duration-150',
-              open && 'rotate-90',
-            )}
-          />
-        </button>
-
-        {renaming ? (
-          <div className="min-w-0 flex-1 pr-1">
-            <InlineNameInput
-              initialValue={folder.name}
-              label="Folder name"
-              onCancel={() => setRenaming(false)}
-              onCommit={(name) => {
-                setRenaming(false)
-                renameFolder.mutate(name)
-              }}
-            />
-          </div>
-        ) : (
-          <>
-            <Link
-              to={{ page: 'folder', folderId: folder.folderId }}
-              title={folder.name}
-              onClick={() => rememberLastFolder(folder.folderId)}
-              onDoubleClick={(event) => {
-                event.preventDefault()
-                setRenaming(true)
-              }}
-              className="focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md pr-1 outline-none focus-visible:ring-2"
-            >
-              <FolderIcon className="text-muted-foreground size-3.5 shrink-0" />
-              <span className="text-foreground/90 min-w-0 truncate font-medium" dir="auto">
-                {folder.name}
-              </span>
-            </Link>
-
-            <div className="relative mr-1 flex h-6 w-20 shrink-0 items-center justify-end">
-              <div className={cn('inline-flex items-center gap-1.5', yieldOnRowHover)}>
-                {collapsedRollup ? (
-                  <ActivityDot tone={collapsedRollup.tone} label={collapsedRollup.label} />
-                ) : null}
-                <FolderMeta
-                  folderId={folder.folderId}
-                  repoCount={repoCount}
-                  pullAttention={pullAttention}
-                />
-              </div>
-              <div className={cn('absolute inset-y-0 right-0 flex items-center', revealOnRowHover)}>
-                {folder.archived ? null : (
-                  <Link
-                    to={{ page: 'folder', folderId: folder.folderId }}
-                    aria-label={`New session in ${folder.name}`}
-                    title="New session"
-                    onClick={() => rememberLastFolder(folder.folderId)}
-                    className="text-muted-foreground hover:text-foreground hover:bg-accent flex size-6 items-center justify-center rounded-sm"
-                  >
-                    <Plus className="size-3.5" />
-                  </Link>
-                )}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label={`Actions for ${folder.name}`}
-                      className="text-muted-foreground hover:text-foreground hover:bg-accent data-[state=open]:bg-accent flex size-6 items-center justify-center rounded-sm outline-none"
-                    >
-                      <MoreHorizontal className="size-3.5" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="min-w-40">
-                    <DropdownMenuItem onSelect={() => setRenaming(true)}>Rename</DropdownMenuItem>
-                    {folder.archived ? null : (
-                      <>
-                        <DropdownMenuItem onSelect={onLinkRepo}>Link repository…</DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onSelect={() => archiveFolder.mutate()}>
-                          Archive
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
+      {renaming ? (
+        row
+      ) : (
+        <RowContextMenu entries={menuEntries} className="min-w-40">
+          {row}
+        </RowContextMenu>
+      )}
 
       {open ? (
         <div className="ml-[1.125rem] border-l border-white/5 pl-1">
