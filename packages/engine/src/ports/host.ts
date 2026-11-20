@@ -2,10 +2,9 @@ import type { GitAccess } from '@shuttle/git/access'
 
 import type { EngineEnv } from '../env'
 import { neverExpire, type ApprovalPolicy } from './approvals'
-import type { CredentialPort } from './credentials'
+import { sponsorCredentials, type CredentialPort } from './credentials'
 import { noIdentity, type IdentityPort } from './identity'
 import { openSessionStart, type SessionStartPort } from './session-start'
-import { workspaceCredentials } from './workspace-credentials'
 
 /**
  * Everything a host can supply in place of Shuttle's own behaviour. Each port is optional: what
@@ -16,7 +15,10 @@ export interface HostPorts {
   readonly identity: IdentityPort
   /** What may start a session. Standalone: everything. */
   readonly sessionStart: SessionStartPort
-  /** Whose credential a vendor agent turn runs on. Standalone: the person it works for. */
+  /**
+   * Whose credential a vendor agent turn runs on, and the API keys the host holds. Standalone: the
+   * person it works for, on their own sign-in.
+   */
   readonly credentials: CredentialPort
   /** How long an approval waits. Standalone: forever. */
   readonly approvals: ApprovalPolicy
@@ -49,7 +51,7 @@ export function resolveHost(host: ShuttleHost): ResolvedHost {
     ports: {
       identity: supplied.identity ?? noIdentity,
       sessionStart: supplied.sessionStart ?? openSessionStart,
-      credentials: supplied.credentials ?? workspaceCredentials(host.env),
+      credentials: supplied.credentials ?? sponsorCredentials,
       approvals: supplied.approvals ?? neverExpire,
       git,
     },

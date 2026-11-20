@@ -35,13 +35,12 @@ export {
 
 export {
   billedToLabel,
-  credentialKey,
+  sponsorCredentials,
   type CredentialAccess,
   type CredentialOwner,
   type CredentialPort,
   type TurnCredentialRequest,
 } from './ports/credentials'
-export { workspaceCredentials } from './ports/workspace-credentials'
 
 export {
   expiryOf,
