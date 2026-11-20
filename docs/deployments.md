@@ -18,6 +18,13 @@ the configured D1 auth database, `shuttle-local` media bucket, `shuttle-releases
 Worker secrets, and the custom domains. The workflow keeps Worker secrets already stored in
 Cloudflare; it does not copy local `.dev.vars` files or create infrastructure.
 
+`SHUTTLE_DEPLOY_VARS` carries both the deployment's settings and its credentials.
+`apps/worker/scripts/deploy-config-lib.ts` lists the settings: those become readable Worker vars.
+Every other name becomes a Worker secret, which the deploy applies with `wrangler deploy
+--secrets-file` in the same upload as the code, so the values are not published in the Worker's
+settings or dashboard. A name added there is a secret by default. Because credentials were
+readable while they were stored as plain-text vars, rotate one after it first lands this way.
+
 Repository variables:
 
 `SHUTTLE_SIGN_DESKTOP` defaults to unset/false. Set it to `true` only after adding all Apple
@@ -36,17 +43,17 @@ Apple secrets below are optional until `SHUTTLE_SIGN_DESKTOP` is enabled.
 
 Repository secrets:
 
-| Name                                        | Value                                                                                                                                                                                                              |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `CLOUDFLARE_API_TOKEN`                      | Token allowed to deploy the Workers and assets, read/apply D1 migrations, and deploy configured container images when applicable. Include zone permissions if managing custom domains.                             |
-| `SHUTTLE_DEPLOY_VARS`                       | JSON object containing the current production Worker vars, including sandbox configuration and preview hostname. These override development defaults; the workflow sets `SHUTTLE_WEB_URL` from the variable above. |
-| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | R2 S3 credentials with object read/write access to `shuttle-releases`. Uploads use the account's S3 endpoint and multipart uploads for large bundles.                                                              |
-| `MAC_CSC_NAME`                              | Developer ID Application identity name, consistently used across releases.                                                                                                                                         |
-| `MAC_CSC_LINK`                              | Base64-encoded exported Developer ID Application `.p12` certificate, including its private key.                                                                                                                    |
-| `MAC_CSC_KEY_PASSWORD`                      | Password protecting that certificate.                                                                                                                                                                              |
-| `APPLE_ID`                                  | Apple account used for notarization.                                                                                                                                                                               |
-| `APPLE_APP_SPECIFIC_PASSWORD`               | App-specific notarization password for that account.                                                                                                                                                               |
-| `APPLE_TEAM_ID`                             | Apple Developer team ID matching the signing certificate.                                                                                                                                                          |
+| Name                                        | Value                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_API_TOKEN`                      | Token allowed to deploy the Workers and assets, read/apply D1 migrations, and deploy configured container images when applicable. Include zone permissions if managing custom domains.                                                                                                   |
+| `SHUTTLE_DEPLOY_VARS`                       | JSON object of the production deployment's settings and credentials. Settings named in `apps/worker/scripts/deploy-config-lib.ts` override development defaults as readable vars; every other name becomes a Worker secret. The workflow sets `SHUTTLE_WEB_URL` from the variable above. |
+| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | R2 S3 credentials with object read/write access to `shuttle-releases`. Uploads use the account's S3 endpoint and multipart uploads for large bundles.                                                                                                                                    |
+| `MAC_CSC_NAME`                              | Developer ID Application identity name, consistently used across releases.                                                                                                                                                                                                               |
+| `MAC_CSC_LINK`                              | Base64-encoded exported Developer ID Application `.p12` certificate, including its private key.                                                                                                                                                                                          |
+| `MAC_CSC_KEY_PASSWORD`                      | Password protecting that certificate.                                                                                                                                                                                                                                                    |
+| `APPLE_ID`                                  | Apple account used for notarization.                                                                                                                                                                                                                                                     |
+| `APPLE_APP_SPECIFIC_PASSWORD`               | App-specific notarization password for that account.                                                                                                                                                                                                                                     |
+| `APPLE_TEAM_ID`                             | Apple Developer team ID matching the signing certificate.                                                                                                                                                                                                                                |
 
 Cloudflare deployment fails clearly if its configuration is missing. When signing is explicitly
 enabled, missing Apple credentials fail the desktop job rather than silently falling back. The hosted app may already have
