@@ -25,28 +25,28 @@ signing and notarization secrets listed below. CI then signs and notarizes the a
 automatic updater, and publishes `latest-mac.yml`. Unsigned builds show a manual download link
 in the sidebar and never replace the signed update manifest.
 
-| Name                    | Value                                                                                                                                                                                                                                       |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SHUTTLE_WEB_URL`       | The production HTTPS app URL, also embedded in desktop builds.                                                                                                                                                                              |
-| `SHUTTLE_DEPLOY_VARS`   | JSON object containing the current production Worker vars, including sandbox configuration and preview hostname. These override development defaults; the workflow sets `SHUTTLE_WEB_URL` from the variable above. Do not put secrets here. |
-| `SHUTTLE_DEPLOY_ROUTES` | Optional JSON array of Wrangler custom-domain routes; defaults to `[]`.                                                                                                                                                                     |
-| `SHUTTLE_SANDBOX_IMAGE` | Optional fallback image embedded in desktop builds.                                                                                                                                                                                         |
+| Name                    | Value                                                                   |
+| ----------------------- | ----------------------------------------------------------------------- |
+| `SHUTTLE_WEB_URL`       | The production HTTPS app URL, also embedded in desktop builds.          |
+| `CLOUDFLARE_ACCOUNT_ID` | Account holding the Workers, D1 databases, and R2 buckets.              |
+| `SHUTTLE_DEPLOY_ROUTES` | Optional JSON array of Wrangler custom-domain routes; defaults to `[]`. |
+| `SHUTTLE_SANDBOX_IMAGE` | Optional fallback image embedded in desktop builds.                     |
 
 Apple secrets below are optional until `SHUTTLE_SIGN_DESKTOP` is enabled.
 
 Repository secrets:
 
-| Name                                        | Value                                                                                                                                                                                  |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CLOUDFLARE_API_TOKEN`                      | Token allowed to deploy the Workers and assets, read/apply D1 migrations, and deploy configured container images when applicable. Include zone permissions if managing custom domains. |
-| `CLOUDFLARE_ACCOUNT_ID`                     | Account holding the Workers, D1 databases, and R2 buckets.                                                                                                                             |
-| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | R2 S3 credentials with object read/write access to `shuttle-releases`. Uploads use the account's S3 endpoint and multipart uploads for large bundles.                                  |
-| `MAC_CSC_NAME`                              | Developer ID Application identity name, consistently used across releases.                                                                                                             |
-| `MAC_CSC_LINK`                              | Base64-encoded exported Developer ID Application `.p12` certificate, including its private key.                                                                                        |
-| `MAC_CSC_KEY_PASSWORD`                      | Password protecting that certificate.                                                                                                                                                  |
-| `APPLE_ID`                                  | Apple account used for notarization.                                                                                                                                                   |
-| `APPLE_APP_SPECIFIC_PASSWORD`               | App-specific notarization password for that account.                                                                                                                                   |
-| `APPLE_TEAM_ID`                             | Apple Developer team ID matching the signing certificate.                                                                                                                              |
+| Name                                        | Value                                                                                                                                                                                                              |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CLOUDFLARE_API_TOKEN`                      | Token allowed to deploy the Workers and assets, read/apply D1 migrations, and deploy configured container images when applicable. Include zone permissions if managing custom domains.                             |
+| `SHUTTLE_DEPLOY_VARS`                       | JSON object containing the current production Worker vars, including sandbox configuration and preview hostname. These override development defaults; the workflow sets `SHUTTLE_WEB_URL` from the variable above. |
+| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | R2 S3 credentials with object read/write access to `shuttle-releases`. Uploads use the account's S3 endpoint and multipart uploads for large bundles.                                                              |
+| `MAC_CSC_NAME`                              | Developer ID Application identity name, consistently used across releases.                                                                                                                                         |
+| `MAC_CSC_LINK`                              | Base64-encoded exported Developer ID Application `.p12` certificate, including its private key.                                                                                                                    |
+| `MAC_CSC_KEY_PASSWORD`                      | Password protecting that certificate.                                                                                                                                                                              |
+| `APPLE_ID`                                  | Apple account used for notarization.                                                                                                                                                                               |
+| `APPLE_APP_SPECIFIC_PASSWORD`               | App-specific notarization password for that account.                                                                                                                                                               |
+| `APPLE_TEAM_ID`                             | Apple Developer team ID matching the signing certificate.                                                                                                                                                          |
 
 Cloudflare deployment fails clearly if its configuration is missing. When signing is explicitly
 enabled, missing Apple credentials fail the desktop job rather than silently falling back. The hosted app may already have
