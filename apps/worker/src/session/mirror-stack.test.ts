@@ -56,7 +56,12 @@ function fakeGitHub(baseSha: string, baseTree: Tree) {
 
   const github: MirrorGitHub = {
     commitChangeset: async (input: CommitChangesetInput) => {
-      calls.push(`commit ${input.branch}`)
+      calls.push(
+        input.authorUserId === undefined || input.authorUserId === null
+          ? `commit ${input.branch}`
+          : `commit ${input.branch} as ${input.authorUserId}`,
+      )
+
       const parent = commits.get(input.baseSha)
 
       if (!parent) {
@@ -264,6 +269,17 @@ describe('mirrorRepoStack', () => {
 
     expect(again.layers.map((layer) => layer.outcome)).toEqual(['unchanged'])
     expect(calls).toEqual([])
+  })
+
+  test('commits are credited to the person who approved the publish', async () => {
+    const { write, publish, calls } = setup()
+
+    write('a.txt', 'a\n')
+    await publish({ authorUserId: 'user_1' })
+
+    expect(calls.filter((call) => call.startsWith('commit '))).toEqual([
+      'commit shuttle/session_1/glue as user_1',
+    ])
   })
 
   test('publishing a stack that does not exist fails clearly', async () => {

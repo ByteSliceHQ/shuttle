@@ -46,6 +46,8 @@ export interface PendingPrPublish {
   readonly parentPull: { readonly fullName: string; readonly number: number } | null
   readonly restacks: readonly number[]
   readonly status: 'awaiting_approval' | 'publishing'
+  /** Shuttle user who approved the publish; their GitHub account authors the commits. */
+  readonly approvedBy?: string | null
 }
 
 export interface StackSessionSlice {

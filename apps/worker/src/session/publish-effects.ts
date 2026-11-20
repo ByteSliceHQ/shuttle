@@ -17,6 +17,22 @@ export interface ApprovalDecision {
   readonly payload?: JsonValue | undefined
 }
 
+/** Who sent an event: the signed-in person, for one that came from a browser. */
+export interface EventOriginLike {
+  readonly origin?: { readonly type: string; readonly actorId?: string | undefined } | undefined
+}
+
+/** The Shuttle user an event was sent by, or null when it did not come from a person. */
+export function actorOfEvent(event: EventOriginLike): string | null {
+  const origin = event.origin
+
+  if (origin?.type !== 'external' || origin.actorId === undefined || origin.actorId === '') {
+    return null
+  }
+
+  return origin.actorId
+}
+
 export interface PublishSessionSlice {
   readonly pendingPrPublish: PendingPrPublish | null
   readonly discardedPrApprovalId: string | null
@@ -27,6 +43,7 @@ export interface PublishSessionSlice {
 export function withPrApprovalDecision<S extends PublishSessionSlice>(
   state: S,
   payload: ApprovalDecision,
+  approvedBy: string | null = null,
 ): S | null {
   const approvalId = payload.approvalId
   const pending = state.pendingPrPublish
@@ -71,6 +88,7 @@ export function withPrApprovalDecision<S extends PublishSessionSlice>(
       parentPull: pending.parentPull,
       restacks: pending.restacks,
       status: 'publishing',
+      approvedBy,
     },
   }
 }
@@ -93,6 +111,7 @@ export function appendPrPublishEffects(state: PublishSessionSlice, effects: Runt
           stackId: pending.stackId,
           layer: pending.layer,
           stacks: stacksAsJson(state.stacks),
+          approvedBy: pending.approvedBy ?? null,
         },
         `publish_pr_${pending.approvalId}`,
       ),
