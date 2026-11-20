@@ -189,6 +189,11 @@ try {
     '@types/react-dom@^19',
     // Named by a dependency's own types, which are checked here along with ours.
     '@opentelemetry/api',
+    // Looms takes any `effect` from the one we pin upwards. A host installs ours, as it has to
+    // for the two to share one copy.
+    ...(published.dependencies?.effect === undefined
+      ? []
+      : [`effect@${published.dependencies.effect}`]),
   ]
 
   if (npm) {
