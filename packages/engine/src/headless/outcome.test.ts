@@ -32,14 +32,53 @@ describe('pullRequestsOf', () => {
 })
 
 describe('questionOf', () => {
-  test('is the approval the session is waiting on', () => {
+  test('is the question an agent asked', () => {
     expect(
-      questionOf({ openApprovals: { ask_1: { title: 'Which database?', description: null } } }),
-    ).toEqual({ approvalId: 'ask_1', title: 'Which database?', description: null })
+      questionOf({
+        state: {},
+        asked: [{ approvalId: 'ask_1', title: 'Which database?', description: null }],
+      }),
+    ).toEqual({
+      approvalId: 'ask_1',
+      title: 'Which database?',
+      description: null,
+      kind: 'question',
+      expiresAt: null,
+    })
+  })
+
+  test('a pull request proposal says so, and when it stops taking a decision', () => {
+    expect(
+      questionOf({
+        state: {
+          pendingPrPublish: {
+            approvalId: 'pr_publish_1',
+            title: 'Fix the test',
+            status: 'awaiting_approval',
+            expiresAt: 5_000,
+          },
+        },
+        asked: [{ approvalId: 'ask_1', title: 'Which database?', description: null }],
+      }),
+    ).toEqual({
+      approvalId: 'pr_publish_1',
+      title: 'Publish this pull request?',
+      description: 'Fix the test',
+      kind: 'publish-pull-request',
+      expiresAt: 5_000,
+    })
+  })
+
+  test('a proposal that is already publishing is no longer a question', () => {
+    expect(
+      questionOf({
+        state: { pendingPrPublish: { approvalId: 'pr_publish_1', status: 'publishing' } },
+      }),
+    ).toBeNull()
   })
 
   test('is null when nothing is open', () => {
-    expect(questionOf({ openApprovals: {} })).toBeNull()
+    expect(questionOf({ state: {} })).toBeNull()
   })
 })
 
@@ -58,14 +97,30 @@ describe('outcomeOf', () => {
   test('a session waiting on a person is blocked on the question', () => {
     const outcome = outcomeOf({
       activity: 'needs_input',
-      state: { openApprovals: { ask_1: { title: 'Which database?', description: 'Two fit.' } } },
+      state: {},
+      asked: [{ approvalId: 'ask_1', title: 'Which database?', description: null }],
     })
 
     expect(outcome).toEqual({
       state: 'blocked',
-      question: { approvalId: 'ask_1', title: 'Which database?', description: 'Two fit.' },
+      question: {
+        approvalId: 'ask_1',
+        title: 'Which database?',
+        description: null,
+        kind: 'question',
+        expiresAt: null,
+      },
       pullRequests: [],
     })
+  })
+
+  test('an open proposal blocks a session that is otherwise at rest or still in a tool call', () => {
+    const state = {
+      pendingPrPublish: { approvalId: 'pr_publish_1', title: 'Fix', status: 'awaiting_approval' },
+    }
+
+    expect(outcomeOf({ activity: 'idle', state }).state).toBe('blocked')
+    expect(outcomeOf({ activity: 'working', state }).state).toBe('blocked')
   })
 
   test('a session that stopped on an error has failed', () => {

@@ -4,6 +4,7 @@ import type { EventInput } from '@swirls/looms/core'
 
 import type { EngineEnv } from '../env'
 import type { ActingFor } from '../ports/identity'
+import type { SessionStartRequest } from '../ports/session-start'
 import type { SessionAccess } from '../tenancy/access'
 import { fakeEnv } from '../testing/fake-env'
 import { NO_FOLDER } from '../workspace/scope'
@@ -146,6 +147,36 @@ describe('startHeadlessSession', () => {
 
     expect(error).toMatchObject({ reason: 'plan limit' })
     expect(runs.size).toBe(0)
+  })
+
+  test('the host is asked first, with the metadata it gave', async () => {
+    const { namespace } = recordingNamespace()
+    const asked: SessionStartRequest[] = []
+
+    await startHeadlessSession(
+      {
+        env: fakeEnv({ LOOMS_RUN: namespace }),
+        ports: {
+          sessionStart: {
+            admit: async (start) => {
+              asked.push(start)
+              return { allowed: true }
+            },
+          },
+        },
+      },
+      request({ metadata: { threadId: 't1' } }),
+    )
+
+    expect(asked).toEqual([
+      {
+        kind: 'host',
+        orgId: 'org1',
+        acting: organization,
+        repos: ['ByteSliceHQ/glue'],
+        metadata: { threadId: 't1' },
+      },
+    ])
   })
 
   test('rejects a request that cannot be a session', async () => {

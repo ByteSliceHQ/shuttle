@@ -2,6 +2,7 @@ import { Predicate } from 'effect'
 
 import { isJsonObject, type JsonObject, type JsonValue, type RunState } from '@swirls/looms/core'
 
+import type { ApprovalKind } from '../ports/approvals'
 import { deriveActivityFromRunState } from '../workspace/activity-state'
 import type { SessionActivity } from '../workspace/module'
 
@@ -19,6 +20,13 @@ export interface SessionQuestion {
   readonly approvalId: string
   readonly title: string
   readonly description: string | null
+  /**
+   * What is being asked. A `question` is answered in words, or left to the agent's judgment. A
+   * `publish-pull-request` is a proposal, approved or rejected.
+   */
+  readonly kind: 'question' | ApprovalKind
+  /** When a decision stops being accepted, as epoch milliseconds. Null: it waits for as long as it takes. */
+  readonly expiresAt: number | null
 }
 
 /**
@@ -48,11 +56,21 @@ export type SessionOutcome =
       readonly pullRequests: readonly SessionPullRequest[]
     }
 
-/** What the outcome is read from, apart from the run itself. */
+/** A question an agent asked with `ask_user`, as the run holds it: a wait on its answer. */
+export interface AskedQuestion {
+  readonly approvalId: string
+  /** The question as the agent put it, when the run still shows the call that asked. */
+  readonly title: string | null
+  readonly description: string | null
+}
+
+/** What the outcome is read from. */
 export interface OutcomeSource {
   readonly activity: SessionActivity
-  /** The session thread's own state: what the session knows about its pull requests and questions. */
+  /** The session thread's own state: what the session knows about its pull requests. */
   readonly state: JsonObject
+  /** What the session's agents are waiting on a person for. */
+  readonly asked?: readonly AskedQuestion[]
 }
 
 /** The repository a stack key names: `owner/name`, or `owner/name#2` for a session's second stack. */
@@ -93,44 +111,125 @@ export function pullRequestsOf(state: JsonObject): SessionPullRequest[] {
   })
 }
 
-export function questionOf(state: JsonObject): SessionQuestion | null {
-  const [first] = Object.entries(asObject(state.openApprovals))
+/**
+ * What the session is waiting on a person for. A pull request proposal comes first: it is the
+ * session's own, and nothing else moves until it is decided.
+ */
+export function questionOf(source: Omit<OutcomeSource, 'activity'>): SessionQuestion | null {
+  const proposal = asObject(source.state.pendingPrPublish)
 
-  if (first === undefined) {
+  if (proposal.status === 'awaiting_approval' && Predicate.isString(proposal.approvalId)) {
+    return {
+      approvalId: proposal.approvalId,
+      title: 'Publish this pull request?',
+      description: Predicate.isString(proposal.title) ? proposal.title : null,
+      kind: 'publish-pull-request',
+      expiresAt: Predicate.isNumber(proposal.expiresAt) ? proposal.expiresAt : null,
+    }
+  }
+
+  const [asked] = source.asked ?? []
+
+  if (asked === undefined) {
     return null
   }
 
-  const [approvalId, open] = first
-  const { title, description } = asObject(open)
-
   return {
-    approvalId,
-    title: Predicate.isString(title) ? title : 'Needs your decision',
-    description: Predicate.isString(description) ? description : null,
+    approvalId: asked.approvalId,
+    title: asked.title ?? 'Needs your decision',
+    description: asked.description,
+    kind: 'question',
+    expiresAt: null,
   }
 }
 
-/** The outcome for a session whose activity and state are known. */
+/** The approval requests an agent thread has made from its tool calls, by approval id. */
+function requestsOf(threadState: JsonValue | undefined): Map<string, JsonObject> {
+  const pending = asObject(threadState).pendingEffects
+
+  const requests = (Array.isArray(pending) ? pending : [])
+    .flatMap((entry) => {
+      const effects = asObject(entry).effects
+
+      return Array.isArray(effects) ? effects.map(asObject) : []
+    })
+    .filter((effect) => effect.type === 'approval.request')
+    .map((effect) => asObject(effect.input))
+
+  return new Map(
+    requests.flatMap((request) =>
+      Predicate.isString(request.approvalId) ? [[request.approvalId, request] as const] : [],
+    ),
+  )
+}
+
+/** The questions the run's agents have asked and are still waiting on. */
+export function askedOf(run: RunState): AskedQuestion[] {
+  return Object.values(run.waits).flatMap((wait) => {
+    const owner = run.threads[wait.threadId]
+
+    if (
+      !('type' in wait.on) ||
+      wait.on.type !== 'approval.decided' ||
+      owner === undefined ||
+      owner.status === 'completed' ||
+      owner.status === 'failed' ||
+      owner.status === 'cancelled'
+    ) {
+      return []
+    }
+
+    const approvalId = asObject(wait.on.match).approvalId
+
+    if (!Predicate.isString(approvalId)) {
+      return []
+    }
+
+    const { title, description } = requestsOf(owner.state).get(approvalId) ?? {}
+
+    return [
+      {
+        approvalId,
+        title: Predicate.isString(title) ? title : null,
+        description: Predicate.isString(description) ? description : null,
+      },
+    ]
+  })
+}
+
+/**
+ * The outcome for a session whose activity and state are known. An approval the session has open
+ * is what it is blocked on, whatever else is going on: the agent that proposed a pull request is
+ * still inside its tool call, and a proposal made from the session itself leaves nothing running.
+ */
 export function outcomeOf(source: OutcomeSource): SessionOutcome {
   const pullRequests = pullRequestsOf(source.state)
+
+  if (source.activity === 'error') {
+    const error = asObject(source.state.error).message
+
+    return { state: 'failed', error: Predicate.isString(error) ? error : null, pullRequests }
+  }
+
+  const question = questionOf(source)
+
+  if (question !== null) {
+    return { state: 'blocked', question, pullRequests }
+  }
 
   switch (source.activity) {
     case 'working':
       return { state: 'working' }
 
-    case 'error': {
-      const error = asObject(source.state.error).message
-
-      return { state: 'failed', error: Predicate.isString(error) ? error : null, pullRequests }
-    }
-
     case 'needs_input':
       return {
         state: 'blocked',
-        question: questionOf(source.state) ?? {
+        question: {
           approvalId: '',
           title: 'Needs your decision',
           description: null,
+          kind: 'question',
+          expiresAt: null,
         },
         pullRequests,
       }
@@ -154,5 +253,14 @@ export function sessionOutcome(run: RunState): SessionOutcome {
     return { state: 'working' }
   }
 
-  return outcomeOf({ activity: deriveActivityFromRunState(run), state: asObject(root.state) })
+  const outcome = outcomeOf({
+    activity: deriveActivityFromRunState(run),
+    state: asObject(root.state),
+    asked: askedOf(run),
+  })
+
+  // A session that failed outright, not in its conductor, says why on its thread.
+  return outcome.state === 'failed' && outcome.error === null
+    ? { ...outcome, error: root.error ?? null }
+    : outcome
 }

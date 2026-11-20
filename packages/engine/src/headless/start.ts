@@ -139,6 +139,7 @@ export async function startHeadlessSession(
     orgId,
     acting: request.acting,
     repos: repos.map((repo) => repo.fullName),
+    metadata: request.metadata,
   })
 
   const owner = ownerOfActing(request.acting)
@@ -198,7 +199,7 @@ export async function answerHeadlessQuestion(
 
   const actor = actorOfActing(acting)
 
-  const decided: JsonObjectBuilder = { approvalId, decidedBy: actor.userId }
+  const decided: JsonObjectBuilder = { approvalId }
 
   if (answer === null) {
     decided.actionId = 'defer'
@@ -212,5 +213,12 @@ export async function answerHeadlessQuestion(
     decided.outcome = answer.decision
   }
 
-  await loomsStub(env.LOOMS_RUN, runId).signal([{ type: 'approval.decided', payload: decided }])
+  // Recorded as decided by whoever the host acts for, as a decision made in the app is.
+  await loomsStub(env.LOOMS_RUN, runId).signal([
+    {
+      type: 'approval.decided',
+      payload: decided,
+      origin: { type: 'external', actorId: actor.userId },
+    },
+  ])
 }
