@@ -35,6 +35,27 @@ export const AttachmentRefSchema = Schema.Struct({
 
 export type AttachmentRef = Schema.Schema.Type<typeof AttachmentRefSchema>
 
+/**
+ * Something a message points the agents at, picked after `@` in the message box. A file is named
+ * by its path in the session's worktree (`<repository>/<path>`); agents open it themselves. A
+ * session carries what the Worker read of it when the message was sent, since agents cannot open
+ * another session.
+ */
+export const MessageReferenceSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('file'), path: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal('session'),
+    sessionId: Schema.String,
+    title: Schema.String,
+    /** The text the message writes it as after `@`, when that is not its title. */
+    label: Schema.optional(Schema.String),
+    /** What the session is about and where it got to. Absent until the Worker has read it. */
+    digest: Schema.optional(Schema.String),
+  }),
+])
+
+export type MessageReference = Schema.Schema.Type<typeof MessageReferenceSchema>
+
 export const shuttleCatalog = defineEventCatalog('shuttle', {
   'user.said': Schema.Struct({
     messageId: Schema.String,
@@ -45,6 +66,8 @@ export const shuttleCatalog = defineEventCatalog('shuttle', {
     author: Schema.optional(MessageAuthorSchema),
     /** Files sent with the message. The Worker has checked that each is stored for this session. */
     attachments: Schema.optional(Schema.Array(AttachmentRefSchema)),
+    /** Files and sessions picked after `@`. The Worker has checked each session may be opened. */
+    references: Schema.optional(Schema.Array(MessageReferenceSchema)),
   }),
   'intake.started': Schema.Struct({
     messageId: Schema.String,

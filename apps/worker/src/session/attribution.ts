@@ -1,10 +1,12 @@
 import { withAttachmentManifest } from '../assets/sandbox'
-import type { AttachmentRef, MessageAuthor } from './scope'
+import { referenceManifest } from './references'
+import type { AttachmentRef, MessageAuthor, MessageReference } from './scope'
 
 interface SpokenMessage {
   readonly text: string
   readonly author?: MessageAuthor
   readonly attachments?: readonly AttachmentRef[]
+  readonly references?: readonly MessageReference[]
 }
 
 /**
@@ -18,13 +20,17 @@ export function attributed(message: SpokenMessage, speakerIds: readonly string[]
 }
 
 /**
- * `attributed`, followed by where the message's attached files are saved in the sandbox. Every
- * agent can open a file by path, including those that are never sent the file itself.
+ * `attributed`, followed by where the message's attached files are saved in the sandbox and what
+ * it points at with `@`. Every agent can open a file by path, including those that are never sent
+ * the file itself.
  */
 export function attributedWithFiles(
   message: SpokenMessage,
   speakerIds: readonly string[],
   runId: string,
 ): string {
-  return withAttachmentManifest(attributed(message, speakerIds), runId, message.attachments)
+  const text = withAttachmentManifest(attributed(message, speakerIds), runId, message.attachments)
+  const references = referenceManifest(runId, message.references)
+
+  return references === '' ? text : `${text}\n\n${references}`
 }

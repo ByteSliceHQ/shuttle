@@ -55,6 +55,7 @@ import {
   type SandboxBinding,
   type SandboxPlacement,
 } from './session/bind-sandbox'
+import { readDigestSource, type DigestSource } from './session/digest-source'
 import {
   LAST_MOVE_KEY,
   PENDING_PLACEMENT_KEY,
@@ -211,6 +212,18 @@ export class LoomsRun extends LoomsDurableObject<ShuttleEnv> {
       pending: (await this.ctx.storage.get<PendingPlacement>(PENDING_PLACEMENT_KEY)) ?? null,
       last: (await this.ctx.storage.get<SessionMove>(LAST_MOVE_KEY)) ?? null,
     }
+  }
+
+  /**
+   * What another session's message quotes when it points at this one: the brief and the latest
+   * agent messages, cut down here so the whole transcript never leaves this object.
+   */
+  async getDigestSource(): Promise<DigestSource> {
+    const runId = this.ctx.id.name ?? ''
+
+    return readDigestSource((name) =>
+      this.fetch(new Request(`https://shuttle.internal/runs/${runId}/projections/${name}`)),
+    )
   }
 
   /** The repositories this session works in. Empty before it binds a sandbox, or with none linked. */

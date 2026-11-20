@@ -5,6 +5,7 @@ import type { ShuttleEnv } from './env'
 import type { HarnessId, VendorHarnessId } from './harness'
 import type { LinkedSandboxRepo } from './sandbox/workspace'
 import type { SandboxPlacement } from './session/bind-sandbox'
+import type { DigestSource } from './session/digest-source'
 import type { PendingPlacement, SessionMove } from './session/handoff'
 import type { SessionStacks } from './session/stack-state'
 import type { Team, TeamInput } from './team'
@@ -74,6 +75,7 @@ export interface LoomsRunStub {
   placeSandboxLater(placement: SandboxPlacement | null): Promise<{ ok: true }>
   getSandboxMoves(): Promise<{ pending: PendingPlacement | null; last: SessionMove | null }>
   getSessionRepos(): Promise<readonly LinkedSandboxRepo[]>
+  getDigestSource(): Promise<DigestSource>
   getSessionStacks(): Promise<SessionStacks>
   getSessionActivitySnapshot(): Promise<{ activity: SessionActivity; tail: number } | null>
 }

@@ -12,6 +12,7 @@ import { jsonFields, jsonNumber, jsonText } from '../../lib/json'
 import { hasText } from '../../lib/text'
 import type { SessionEvent } from '../events/event-catalog'
 import { mediaAssetsOf, sharedAssetOf, type MediaAsset, type SessionMedia } from './media'
+import { mentionReferencesOf, type MentionReference } from './mentions/tokens'
 
 /** The fields of an event's payload, or no fields when the payload is not a JSON object. */
 export function eventFields(event: SessionEvent): JsonObject {
@@ -83,6 +84,8 @@ export type FeedItem =
       readonly author?: MessageAuthor
       /** Files sent with the message. */
       readonly attachments?: readonly MediaAsset[]
+      /** Files and sessions the message points at with `@`. */
+      readonly references?: readonly MentionReference[]
     }
   | {
       /** Files an agent shared for the people in the session to see. */
@@ -653,6 +656,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
       const messageId = jsonText(payload.messageId)
       const text = jsonText(payload.text) ?? ''
       const attachments = mediaAssetsOf(payload.attachments)
+      const references = mentionReferencesOf(payload.references)
 
       // A message may be files alone.
       if (!hasText(messageId) || (!hasText(text) && attachments.length === 0)) {
@@ -674,6 +678,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
           forced: isInterjectionKind(forced) ? forced : undefined,
           author,
           attachments: attachments.length > 0 ? attachments : undefined,
+          references: references.length > 0 ? references : undefined,
         }),
         messageText: { ...feed.messageText, [messageId]: text },
         media: [

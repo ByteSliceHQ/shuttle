@@ -38,6 +38,8 @@ import { ContextUsage } from './context-usage-meter'
 import { HarnessSwitcher } from './harness-switcher'
 import { routeStyles } from './interjection-routes'
 import { readStoredLlmModel, writeStoredLlmModel, type OpenRouterModelId } from './llm-models'
+import { MESSAGE_TEXT_METRICS } from './mentions/highlights'
+import { useComposerMentions } from './mentions/use-composer-mentions'
 import { ModelSwitcher } from './model-switcher'
 import { interjectionKinds, isInterjectionKind, type InterjectionKind } from './session-feed'
 import {
@@ -199,6 +201,21 @@ export function Composer({
     target === AUTO ? undefined : targets.find((identity) => identity.threadId === target)
 
   const effectiveTarget = selectedTarget?.threadId ?? AUTO
+
+  const mentionMenu = useComposerMentions({
+    runId,
+    text,
+    setText,
+    inputRef,
+    active: inputFocused && !disabled,
+    editable: !disabled,
+    agents: (hybrid ? mentions : []).map((member) => ({
+      id: member,
+      label: MENTION_LABELS[member],
+    })),
+    onPickAgent: (id) => setMention(mentions.find((member) => member === id) ?? null),
+  })
+
   const revealExamples = showExamples && inputFocused && text.length === 0 && !disabled
 
   // Agents never block the composer: a message can always be written and sent, even while the
@@ -225,6 +242,7 @@ export function Composer({
     }
 
     const sending = files.take()
+    const sendingReferences = mentionMenu.take(typed)
     const message = activeMention !== null && typed !== '' ? `@${activeMention} ${typed}` : typed
     // A message addressed to an agent is work for it, so it must not be answered as a question.
     const addressed = activeMention !== null || (hybrid && ADDRESSED.test(typed))
@@ -258,6 +276,10 @@ export function Composer({
                 author: { id: me.id, name: me.name === '' ? me.email : me.name },
                 attachments:
                   uploaded.length > 0 ? uploaded.map((asset) => ({ ...asset })) : undefined,
+                references:
+                  sendingReferences.length > 0
+                    ? sendingReferences.map((reference) => ({ ...reference.shown }))
+                    : undefined,
               }),
             },
             {
@@ -273,6 +295,7 @@ export function Composer({
                     forceKind,
                     targetThreadId: targetThread,
                     attachments: uploaded.map((asset) => asset.id),
+                    references: sendingReferences.map((reference) => reference.input),
                   })
                   .then(
                     () => {},
@@ -293,12 +316,17 @@ export function Composer({
       .catch((cause: unknown) => {
         // Hand the message back unless something new has been written since.
         setText((current) => (current.trim() === '' ? typed : current))
+        mentionMenu.restore(sendingReferences)
         files.restore(sending)
         setError(errorMessage(cause))
       })
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (mentionMenu.onKeyDown(event)) {
+      return
+    }
+
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
       submit()
@@ -308,11 +336,15 @@ export function Composer({
   function onPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
     const pasted = [...event.clipboardData.files]
 
-    // A screenshot or copied file is attached. Pasted text is left to the textarea.
+    // A screenshot or copied file is attached.
     if (pasted.length > 0) {
       event.preventDefault()
       files.add(pasted)
+      return
     }
+
+    // Text copied from a message, or from this box, brings its mentions with it as picks.
+    mentionMenu.onPaste(event)
   }
 
   function onDragEnter(event: DragEvent) {
@@ -444,21 +476,32 @@ export function Composer({
               }}
             />
           ) : null}
+          {mentionMenu.menu}
           <AttachmentTray attachments={files.attachments} onRemove={files.remove} />
-          <textarea
-            ref={inputRef}
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            onKeyDown={onKeyDown}
-            onPaste={onPaste}
-            onFocus={() => setInputFocused(true)}
-            onBlur={() => setInputFocused(false)}
-            rows={1}
-            disabled={disabled}
-            placeholder="Ask anything. Questions don't interrupt the agents."
-            aria-label="Message the session"
-            className="placeholder:text-muted-foreground/70 block field-sizing-content max-h-48 min-h-11 w-full resize-none bg-transparent px-3.5 pt-2.5 pb-1.5 text-[13.5px] leading-relaxed outline-none disabled:opacity-50"
-          />
+          <div className="relative">
+            {mentionMenu.highlights}
+            <textarea
+              ref={inputRef}
+              value={text}
+              {...mentionMenu.inputProps}
+              onChange={(event) => {
+                setText(event.target.value)
+                mentionMenu.onTextChange(event.target.value, event.target.selectionStart)
+              }}
+              onKeyDown={onKeyDown}
+              onPaste={onPaste}
+              onFocus={() => setInputFocused(true)}
+              onBlur={() => setInputFocused(false)}
+              rows={1}
+              disabled={disabled}
+              placeholder="Ask anything, or type @ to add files and sessions. Questions don't interrupt the agents."
+              aria-label="Message the session"
+              className={cn(
+                MESSAGE_TEXT_METRICS,
+                'placeholder:text-muted-foreground/70 relative block field-sizing-content max-h-48 min-h-11 w-full resize-none bg-transparent outline-none disabled:opacity-50',
+              )}
+            />
+          </div>
           <div className="flex items-center justify-between gap-1.5 px-2 pb-2">
             <div className="flex min-w-0 items-center gap-1">
               <Tooltip>
