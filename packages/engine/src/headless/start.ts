@@ -180,6 +180,15 @@ export async function headlessOutcome(host: ShuttleHost, runId: string): Promise
 }
 
 /**
+ * An answer to a blocked session's question: words for a `question`, a decision for a
+ * `publish-pull-request`, or null to leave it to the agent's judgment.
+ */
+export type HeadlessAnswer =
+  | { readonly text: string }
+  | { readonly decision: 'approve' | 'reject' }
+  | null
+
+/**
  * Answers the question a blocked session is waiting on. `null` has the agent use its own
  * judgment, as a person choosing "use your judgment" does. A question that is a pull request
  * proposal is decided with `approve` or `reject`.
@@ -188,7 +197,7 @@ export async function answerHeadlessQuestion(
   host: ShuttleHost,
   runId: string,
   approvalId: string,
-  answer: { readonly text: string } | { readonly decision: 'approve' | 'reject' } | null,
+  answer: HeadlessAnswer,
   acting: ActingFor,
 ): Promise<void> {
   const { env } = resolveHost(host)
@@ -221,4 +230,25 @@ export async function answerHeadlessQuestion(
       origin: { type: 'external', actorId: actor.userId },
     },
   ])
+}
+
+/** The headless API of one host, for whatever launches its sessions. */
+export interface HeadlessSessions {
+  start(request: HeadlessSessionRequest): Promise<HeadlessSession>
+  outcome(runId: string): Promise<SessionOutcome>
+  answer(
+    runId: string,
+    approvalId: string,
+    answer: HeadlessAnswer,
+    acting: ActingFor,
+  ): Promise<void>
+}
+
+export function headlessSessions(host: ShuttleHost): HeadlessSessions {
+  return {
+    start: (request) => startHeadlessSession(host, request),
+    outcome: (runId) => headlessOutcome(host, runId),
+    answer: (runId, approvalId, answer, acting) =>
+      answerHeadlessQuestion(host, runId, approvalId, answer, acting),
+  }
 }

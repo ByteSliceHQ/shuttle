@@ -32,8 +32,11 @@ const encoder = new TextEncoder()
 
 function bytes(text: string): ArrayBuffer {
   const encoded = encoder.encode(text)
+  const copy = new ArrayBuffer(encoded.byteLength)
 
-  return encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength)
+  new Uint8Array(copy).set(encoded)
+
+  return copy
 }
 
 async function readAll(stream: ReadableStream): Promise<Uint8Array> {
@@ -128,7 +131,7 @@ export function daytonaHost(sandbox: DaytonaSandboxLike): SandboxHost {
 
     async readFile(path) {
       try {
-        return new TextDecoder('utf-8', { ignoreBOM: true }).decode(
+        return new TextDecoder('utf-8', { ignoreBOM: true, fatal: false }).decode(
           await sandbox.fs.downloadFile(path),
         )
       } catch (cause) {

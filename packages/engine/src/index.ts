@@ -1,12 +1,17 @@
 /**
  * What a host imports to run Shuttle inside its own Worker.
  *
- * A host's Durable Object class extends `LoomsDurableObject` and returns
- * `shuttleModules({ env, ports }, runId, { storage })` from `configure`. Everything it does not
- * pass in `ports` is what a standalone Shuttle does. See `docs/hosting.md`.
+ * A host's Durable Object class extends `ShuttleRun` (from `@shuttle/engine/worker`) and says who
+ * the host is: `{ env, ports }`. Everything it does not pass in `ports` is what a standalone
+ * Shuttle does. Nothing here needs a Worker to load, so a host's own code and tests can import it
+ * anywhere. See `docs/hosting.md`.
  */
 export { shuttleModules, type ShuttleModulesOptions } from './modules'
 export type { EngineEnv } from './env'
+export type { LoomsRunStub } from './looms-stub'
+export type { Actor, SessionAccess } from './tenancy/access'
+
+export { fixedGitAccess, type GitAccess } from '@shuttle/git/access'
 
 export { resolveHost, type HostPorts, type ResolvedHost, type ShuttleHost } from './ports/host'
 
@@ -55,10 +60,13 @@ export {
   answerHeadlessQuestion,
   headlessOutcome,
   HeadlessRequestError,
+  headlessSessions,
   startHeadlessSession,
+  type HeadlessAnswer,
   type HeadlessRepository,
   type HeadlessSession,
   type HeadlessSessionRequest,
+  type HeadlessSessions,
 } from './headless/start'
 
 export {

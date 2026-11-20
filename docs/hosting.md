@@ -20,41 +20,70 @@ declares the bindings it provides and passes them as `env`.
 ## Composition root
 
 ```ts
-import { shuttleModules, type ShuttleHost } from '@shuttle/engine'
+import type { ShuttleHost } from '@shuttle/engine'
+import { EventFirehose, SessionSandbox, ShuttleRun } from '@shuttle/engine/worker'
 
-export class LoomsRun extends LoomsDurableObject<HostEnv> {
-  override configure(env: HostEnv): LoomsDurableObjectConfig {
-    const host: ShuttleHost = { env, ports: {/* what this host replaces */} }
+export { EventFirehose, SessionSandbox }
 
-    return {
-      modules: shuttleModules(host, this.ctx.id.name, { storage: this.ctx.storage }),
-      // launcher, attributes, projectors, authorize as `apps/worker/src/index.ts` does
-    }
+export class LoomsRun extends ShuttleRun<HostEnv> {
+  protected override host(env: HostEnv): ShuttleHost {
+    return { env, ports: {/* what this host replaces */} }
   }
 }
 ```
 
-The host also exports the `SessionSandbox` and `EventFirehose` Durable Object classes and binds
-`LOOMS_RUN`, `SANDBOX` and `EVENT_FIREHOSE`, as `apps/worker/wrangler.jsonc` does.
+`ShuttleRun` is the Durable Object every Shuttle run lives in. It registers `shuttleModules(host, …)`
+with Looms and answers the calls the engine makes from one run to another (`LoomsRunStub`: who may
+open a session, where its sandbox is, its agents and models). A host overrides `configure` only to
+add to what it returns, as `apps/worker/src/index.ts` adds its timing observer.
+
+The host binds `LOOMS_RUN` to its subclass, `SANDBOX` to `SessionSandbox` and `EVENT_FIREHOSE` to
+`EventFirehose`, as `apps/worker/wrangler.jsonc` does. Those three classes load only in a Worker,
+which is why they have an entry point of their own. `@shuttle/engine` itself loads anywhere, so a
+host's other code and its tests can import the ports and the headless API under Bun or Node.
+
+## From another workspace
+
+The packages are TypeScript source with `workspace:*` dependencies on each other, so a host outside
+this repository adds them to its own Bun workspace: check this repository out inside the host's
+(a git submodule, say `vendor/shuttle`) and list `vendor/shuttle/packages/{api,core,git,sandbox,engine}`
+in the host's `workspaces`. The host then depends on `"@shuttle/engine": "workspace:*"`. Its
+`@swirls/looms` and `effect` versions have to be the ones in `packages/engine/package.json`, so the
+workspace installs one copy of each.
+
+The sources compile under a host's own `tsconfig` with `strict`, `noUncheckedIndexedAccess`,
+`verbatimModuleSyntax`, `noImplicitReturns`, `noImplicitOverride` and `noFallthroughCasesInSwitch`,
+`lib` `ES2023`, and `@cloudflare/workers-types` in `types`.
 
 ## Host ports
 
 A port is a small interface. Leave it out and Shuttle does what it does standalone.
 
-| Port           | Decides                                                                              | Standalone                                                         |
-| -------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
-| `identity`     | Who a request acts for: a named person, or an organization acting through a service. | The signed-in person.                                              |
-| `sessionStart` | Whether a session may start, for a person's start, an automatic review, or a host's. | Every start is allowed.                                            |
-| `credentials`  | Whose credential a vendor agent turn runs on, and where it is stored.                | The person it works for, kept in the organization's workspace run. |
-| `approvals`    | How long an approval waits before a decision is refused.                             | Forever.                                                           |
-| `git`          | Installation tokens and the user token for GitHub.                                   | Shuttle's own GitHub App, from `env`.                              |
+| Port           | Decides                                                                              | Standalone                                     |
+| -------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| `identity`     | Who a request acts for: a named person, or an organization acting through a service. | The signed-in person.                          |
+| `sessionStart` | Whether a session may start, for a person's start, an automatic review, or a host's. | Every start is allowed.                        |
+| `credentials`  | Whose credential a vendor agent turn runs on, and the API keys the host holds.       | The person it works for, on their own sign-in. |
+| `approvals`    | How long an approval waits before a decision is refused.                             | Forever.                                       |
+| `git`          | Installation tokens and the user token for GitHub.                                   | Shuttle's own GitHub App, from `env`.          |
 
 `serviceIdentity({ token, service })` is a ready identity for a host calling over HTTP: it presents
 a shared secret and names who it acts for in `x-shuttle-org` (and `x-shuttle-user` for a person).
 
+`sessionStart` is asked before every session: one a person starts in the app (`person`), a review
+Shuttle opens by itself (`auto-review`), and a host's own (`host`, with the metadata it gave).
+
+A turn runs on the credential of the person it is working for, and never on another person's. The
+`credentials` port says whose that is (that person, an organization, or nobody) and may supply API
+keys for them as environment variables (`apiKeys`). A person's sign-in with a vendor stays in
+Shuttle's own encrypted store, in the organization's workspace run, and is only ever placed in that
+person's turns: a port cannot read it, hold it, or supply one. An organization has API keys or
+nothing.
+
 Approval expiry covers the pull request publish gate. A decision after the expiry is refused and the
 agent is told the proposal expired. Nothing wakes the session when the time passes; the gate is
-settled by the late decision, or by the session moving on.
+settled by the late decision, or by the session moving on. A host that wants a decision made by a
+rule reads the question from `headlessOutcome` and answers it with `answerHeadlessQuestion`.
 
 ## Headless sessions
 
@@ -72,7 +101,7 @@ const { runId } = await startHeadlessSession(host, {
 const outcome = await headlessOutcome(host, runId)
 // { state: 'working' }
 // { state: 'completed', pullRequests: [{ repo, number, url, draft }] }
-// { state: 'blocked', question: { approvalId, title, description }, pullRequests }
+// { state: 'blocked', question: { approvalId, title, description, kind, expiresAt }, pullRequests }
 // { state: 'failed', error, pullRequests }
 
 await answerHeadlessQuestion(
@@ -87,3 +116,16 @@ await answerHeadlessQuestion(
 A headless session has no folder (`NO_FOLDER`) and a sandbox of its own, `session:<runId>`. A
 person's session is private to them; an organization's is open to the organization. `metadata` is a
 string map Shuttle carries on the session (`hostMetadata` in the session input) and never reads.
+
+A session is `blocked` while it has a question open, whatever else is running. `question.kind` says
+how to answer: a `question` (an agent's `ask_user`) takes `{ text }`, or `null` for the agent's own
+judgment; a `publish-pull-request` proposal takes `{ decision: 'approve' | 'reject' }`, and
+`expiresAt` is when the host's approval policy stops accepting one. The decision is recorded as made
+by whoever `acting` is.
+
+`headlessSessions(host)` gives the same three calls bound to a host (`start`, `outcome`, `answer`),
+for whatever launches its sessions.
+
+The headless API calls `env.LOOMS_RUN`, so it runs in the host's Worker or anywhere that holds that
+binding. `serviceIdentity` is there for a host that puts these calls behind HTTP for a caller
+elsewhere; Shuttle's own Worker serves no such route.

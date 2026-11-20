@@ -45,6 +45,17 @@ import type { SandboxMachine, SandboxMachineInfo, SandboxProvider } from './type
  */
 
 /** Marks an error as "the machine is not connected", so a caller can fall back to saved work. */
+/** `Promise.withResolvers`, which is newer than the `lib` a host may compile with. */
+function deferred<Value>() {
+  const resolvers: ((value: Value) => void)[] = []
+
+  const promise = new Promise<Value>((resolve) => {
+    resolvers.push(resolve)
+  })
+
+  return { promise, resolve: (value: Value) => resolvers[0]?.(value) }
+}
+
 export const SANDBOX_OFFLINE = 'sandbox-offline'
 
 export function isSandboxOffline(cause: unknown): boolean {
@@ -190,7 +201,7 @@ class LocalMachine implements SandboxMachine {
             ? undefined
             : base64(await new Response(options.stdin).arrayBuffer())
 
-        const { promise: started, resolve: announce } = Promise.withResolvers<number | undefined>()
+        const { promise: started, resolve: announce } = deferred<number | undefined>()
 
         const output: Promise<HostOutput> = this.call(
           {

@@ -20,7 +20,7 @@ Use one of these types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`,
 
 Shuttle is a Looms application, not a Looms package.
 
-- `packages/engine` (`@shuttle/engine`) owns the custom Looms modules (`session`, `pulls`, `reflect`, `workspace`) and `shuttleModules(host, …)`; `packages/sandbox` and `packages/git` sit under it. `apps/worker` is a host of them: Cloudflare hosting, auth and the HTTP API. See `docs/hosting.md`.
+- `packages/engine` (`@shuttle/engine`) owns the custom Looms modules (`session`, `pulls`, `reflect`, `workspace`) and `shuttleModules(host, …)`; `packages/sandbox` and `packages/git` sit under it. `apps/worker` is a host of them: Cloudflare hosting, auth and the HTTP API. The run's Durable Object is the engine's `ShuttleRun` (`@shuttle/engine/worker`), which a host subclasses. See `docs/hosting.md`.
 - `apps/web` is the session UI, assembled from `packages/react`.
 - `packages/react` is the UI as parts (`@shuttle/react`), for this app and for other hosts.
 - `packages/core` (`@shuttle/core`) holds what the runs say: the workspace and pulls runs'
