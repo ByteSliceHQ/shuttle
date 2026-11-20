@@ -54,6 +54,7 @@ import type { ShuttleEnv } from '../env'
 import { GITHUB_NOT_CONNECTED, githubTokenOf } from '../github/user-token'
 import { installationConnected } from '../tenancy/installations'
 import { api, badRequest, notFound } from './base'
+import { admitPersonStart } from './session-start'
 
 const workspace = api.workspace
 
@@ -421,6 +422,8 @@ export const workspaceRouter = {
       readWorkspaceFolders(env, orgId),
     ])
 
+    await admitPersonStart(env, actor, tree.folders[folderId]?.repos ?? [])
+
     const runId = scopedRunId(orgId, `session_${crypto.randomUUID()}`)
     const stub = loomsStub(env.LOOMS_RUN, personalRunId)
 
@@ -650,6 +653,8 @@ export const workspaceRouter = {
         ensureNamedWorkspace(env, personalRunId),
         readWorkspaceFolders(env, orgId),
       ])
+
+      await admitPersonStart(env, actor, tree.folders[folderId]?.repos ?? [])
 
       const runId = scopedRunId(orgId, crypto.randomUUID())
       const stub = loomsStub(env.LOOMS_RUN, personalRunId)

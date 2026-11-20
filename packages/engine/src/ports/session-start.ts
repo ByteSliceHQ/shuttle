@@ -23,6 +23,8 @@ export interface SessionStartRequest {
   readonly acting: ActingFor | null
   /** Full names of the repositories the session will work in. */
   readonly repos: readonly string[]
+  /** What a host attached to its own start, as it gave it. Absent for every other kind. */
+  readonly metadata?: Readonly<Record<string, string>>
 }
 
 export type SessionStartVerdict =
