@@ -113,7 +113,10 @@ await answerHeadlessQuestion(
 )
 ```
 
-A headless session has no folder (`NO_FOLDER`) and a sandbox of its own, `session:<runId>`. A
+A headless session has no folder (`NO_FOLDER`) and a sandbox of its own, `session:<runId>`.
+`harness` picks the agent that works it (`claude-code`, `codex`, …); left out, it runs on the
+deployment's default. A vendor harness runs on the credential the `credentials` port names, so a
+host paying with an organization's own API key picks the vendor that key is for. A
 person's session is private to them; an organization's is open to the organization. `metadata` is a
 string map Shuttle carries on the session (`hostMetadata` in the session input) and never reads.
 

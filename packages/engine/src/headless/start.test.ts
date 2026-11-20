@@ -29,6 +29,7 @@ interface Recorded {
   readonly run: string
   readonly signals: EventInput[]
   access: SessionAccess | null
+  harness: string | null
 }
 
 /** A Looms namespace that remembers what each run was told. */
@@ -36,7 +37,7 @@ function recordingNamespace() {
   const runs = new Map<string, Recorded>()
 
   const record = (name: string): Recorded => {
-    const found = runs.get(name) ?? { run: name, signals: [], access: null }
+    const found = runs.get(name) ?? { run: name, signals: [], access: null, harness: null }
 
     runs.set(name, found)
 
@@ -52,6 +53,10 @@ function recordingNamespace() {
       setAccess: async (access: SessionAccess) => {
         recorded.access = access
         return access
+      },
+      setHarness: async (harness: string) => {
+        recorded.harness = harness
+        return { harness }
       },
       signal: async (events: readonly EventInput[]) => {
         recorded.signals.push(...events)
@@ -179,6 +184,29 @@ describe('startHeadlessSession', () => {
     ])
   })
 
+  test('the session runs on the harness the host chose, set before it is requested', async () => {
+    const { namespace, runs } = recordingNamespace()
+
+    const { runId } = await startHeadlessSession(
+      { env: fakeEnv({ LOOMS_RUN: namespace }) },
+      request({ harness: 'claude-code' }),
+    )
+
+    expect(runs.get(runId)?.harness).toBe('claude-code')
+    expect(runs.get(runId)?.signals).toEqual([])
+  })
+
+  test('without a harness the session keeps the default', async () => {
+    const { namespace, runs } = recordingNamespace()
+
+    const { runId } = await startHeadlessSession(
+      { env: fakeEnv({ LOOMS_RUN: namespace }) },
+      request(),
+    )
+
+    expect(runs.get(runId)?.harness).toBeNull()
+  })
+
   test('rejects a request that cannot be a session', async () => {
     const { namespace } = recordingNamespace()
     const host = { env: fakeEnv({ LOOMS_RUN: namespace }) }
@@ -189,6 +217,8 @@ describe('startHeadlessSession', () => {
       request({ repositories: [{ ...repo, fullName: 'no-slash' }] }),
       request({ idempotencyKey: 'has space' }),
       request({ metadata: { key: 'x'.repeat(3000) } }),
+      // SAFETY: deliberately not a harness, to see it refused.
+      request({ harness: 'not-a-harness' as 'claude-code' }),
     ]) {
       expect(await rejection(startHeadlessSession(host, bad))).toBeInstanceOf(HeadlessRequestError)
     }

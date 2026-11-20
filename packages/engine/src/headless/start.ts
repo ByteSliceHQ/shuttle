@@ -1,5 +1,6 @@
 import { ensureNamedWorkspace, ensureWorkspaceQuietly } from '../bootstrap'
 import { personalWorkspaceRunId, workspaceRunId } from '../config'
+import { parseHarness, type HarnessId } from '../harness'
 import { loomsStub } from '../looms-stub'
 import { resolveHost, type ShuttleHost } from '../ports/host'
 import { actorOfActing, orgOfActing, ownerOfActing, type ActingFor } from '../ports/identity'
@@ -34,6 +35,12 @@ export interface HeadlessSessionRequest {
   readonly metadata?: Readonly<Record<string, string>>
   /** Names the session, so asking again with the same key finds it instead of starting another. */
   readonly idempotencyKey?: string
+  /**
+   * Which agent works the session. A vendor harness runs on the credential the host's
+   * `credentials` port names, so a host that supplies an organization's own API keys picks the
+   * vendor they are for. Left out, the session runs on the deployment's default harness.
+   */
+  readonly harness?: HarnessId
 }
 
 export interface HeadlessSession {
@@ -131,6 +138,10 @@ export async function startHeadlessSession(
     checkMetadata(request.metadata)
   }
 
+  if (request.harness !== undefined && parseHarness(request.harness) === null) {
+    throw new HeadlessRequestError(`"${request.harness}" is not a harness Shuttle can run`)
+  }
+
   const repos = linkedRepos(request.repositories)
   const orgId = orgOfActing(request.acting)
 
@@ -152,8 +163,15 @@ export async function startHeadlessSession(
 
   const runId = scopedRunId(orgId, `session_${request.idempotencyKey ?? crypto.randomUUID()}`)
 
-  // Recorded before the session exists, so there is no moment when it is open to everyone.
-  await loomsStub(env.LOOMS_RUN, runId).setAccess(accessFor(request.acting))
+  const session = loomsStub(env.LOOMS_RUN, runId)
+
+  // Recorded before the session exists, so there is no moment when it is open to everyone, and
+  // its first turn already runs on the harness the host chose.
+  await session.setAccess(accessFor(request.acting))
+
+  if (request.harness !== undefined) {
+    await session.setHarness(request.harness)
+  }
 
   await loomsStub(env.LOOMS_RUN, listedIn).signal([
     requestSession({
