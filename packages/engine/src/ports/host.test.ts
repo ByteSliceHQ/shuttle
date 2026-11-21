@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 
 import { fixedGitAccess } from '@shuttle/git/access'
+import type { Projector } from '@swirls/looms/projectors'
 
 import { fakeEnv } from '../testing/fake-env'
 import { neverExpire } from './approvals'
 import { sponsorCredentials } from './credentials'
-import { resolveHost } from './host'
+import { projectorsFor, resolveHost } from './host'
 import { noIdentity } from './identity'
 import { noPeople } from './people'
 import { openSessionStart } from './session-start'
@@ -68,5 +69,40 @@ describe('a host that replaces a port', () => {
 
     expect(ports.git).toBe(git)
     expect(env.GIT_ACCESS).toBe(git)
+  })
+})
+
+/** A projector that does nothing, known by its name. */
+const projector = (name: string): Projector => ({
+  name,
+  version: '1',
+  project: () => Promise.resolve(),
+})
+
+describe('a host that copies runs’ events somewhere of its own', () => {
+  test('has its projectors after Shuttle’s own, for the run it was asked about', () => {
+    const asked: string[] = []
+    const own = [projector('firehose'), projector('activity')]
+
+    const projectors = projectorsFor(
+      {
+        env: fakeEnv(),
+        projectors: ({ runId }) => {
+          asked.push(runId)
+          return [projector('stream'), projector('index')]
+        },
+      },
+      'o-org1-session_1',
+      own,
+    )
+
+    expect(projectors.map((each) => each.name)).toEqual(['firehose', 'activity', 'stream', 'index'])
+    expect(asked).toEqual(['o-org1-session_1'])
+  })
+
+  test('a host that supplies none has Shuttle’s own and nothing more', () => {
+    const own = [projector('firehose')]
+
+    expect(projectorsFor({ env: fakeEnv() }, 'o-org1-session_1', own)).toEqual(own)
   })
 })

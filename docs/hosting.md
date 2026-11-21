@@ -53,6 +53,27 @@ The host binds `LOOMS_RUN` to its subclass, `SANDBOX` to `SessionSandbox` or its
 which is why they have an entry point of their own. `@shuttle/engine` itself loads anywhere, so a
 host's other code and its tests can import the ports and the headless API under Bun or Node.
 
+### Copying a run's events somewhere else
+
+Shuttle projects each run's events to what it needs itself. A host that also wants them somewhere
+of its own, such as an event log or a stream, returns projectors from `host`:
+
+```ts
+protected override host(env: HostEnv): ShuttleHost {
+  return {
+    env,
+    ports: {},
+    projectors: ({ runId }) => [eventLog(env, runId)],
+  }
+}
+```
+
+It is asked once for each run, when the run's object is configured, and its projectors run after
+Shuttle's own. A projector is Looms's: `@swirls/looms/projectors` has the interface and the ones
+Looms ships. A run's attributes are Shuttle's (`sessionId`, `folderId`, `repo`, `kind`), so a
+projector that files events by organization reads it from the run's id (`orgOfRun` in
+`@swirls/shuttle/api`).
+
 ## From npm
 
 A host outside this repository installs `@swirls/shuttle`, which carries the same packages built to
