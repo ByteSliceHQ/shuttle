@@ -1,5 +1,16 @@
 # @swirls/shuttle
 
+## 0.6.0
+
+### Minor Changes
+
+- 41c7bc9: `serveShuttle` takes `basePath`, such as `'/shuttle'`, for a host whose own routes sit beside Shuttle's: it answers only paths under it, takes it off before a module sees the path (`/capabilities` and read grants included), and answers a path under it that no module claims with a 404 a listed origin can read. `sessionTenant({ user, orgId, role?, runNames? })` in `@swirls/shuttle/api` builds the `Tenant` for `<Shuttle.Provider>` with `pulls: null`, for a host that serves sessions without `GET /me`. How run ids are made and read (`scopedRunId`, `personalRunId`, `parseRunId` and the rest) moves from `@swirls/shuttle/engine/tenancy/run-id` to `@swirls/shuttle/api`, beside `tenantRunIds` and `DEFAULT_RUN_NAMES`; the engine's `runNames(env)` is in `@swirls/shuttle/engine/tenancy/run-names`.
+
+### Patch Changes
+
+- f04cdde: Depends on `@swirls/looms` 0.23.0, whose NATS projector can reach a stream through a transport the host supplies and can put a run's attributes in its subjects. Nothing in Shuttle's own behaviour changes. A host has to be on the same Looms version as Shuttle, so move both together.
+- 8b82997: Back off the wait page for a preview port and stop its poll while the tab is hidden, so a preview whose port never comes up no longer spends the Worker's request budget or its error signal.
+
 ## 0.5.1
 
 ### Patch Changes
