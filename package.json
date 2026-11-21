@@ -22,7 +22,7 @@
     "desktop": "bun run --cwd apps/desktop start",
     "changeset": "changeset",
     "check:changeset": "bun run scripts/check-changeset.ts",
-    "version-packages": "changeset version && oxfmt packages/shuttle/CHANGELOG.md",
+    "version-packages": "changeset version && oxfmt packages/shuttle/CHANGELOG.md packages/shuttle-engine/CHANGELOG.md",
     "check:package": "bun run scripts/check-package.ts",
     "release": "bun run scripts/publish.ts"
   },

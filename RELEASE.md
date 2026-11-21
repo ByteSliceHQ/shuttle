@@ -1,9 +1,17 @@
 # Releasing Shuttle
 
-`@swirls/shuttle` is the repository's only public npm package. `@shuttle/api`, `@shuttle/core` and
-`@shuttle/react` remain private build units, used as source by the apps here; `packages/shuttle`
-assembles their compiled output into one package with module subpaths (`@swirls/shuttle/react`,
-`@swirls/shuttle/api`, `@swirls/shuttle/core/workspace`, `@swirls/shuttle/core/pulls`).
+The repository publishes two npm packages, versioned together:
+
+- `@swirls/shuttle`: the React parts, the API contract and the run events. `packages/shuttle`
+  assembles it from `@shuttle/react`, `@shuttle/api` and `@shuttle/core`, with module subpaths
+  (`@swirls/shuttle/react`, `@swirls/shuttle/api`, `@swirls/shuttle/core/workspace`,
+  `@swirls/shuttle/core/pulls`).
+- `@swirls/shuttle-engine`: what a host runs sessions on. `packages/shuttle-engine` assembles it
+  from `@shuttle/engine`, `@shuttle/sandbox`, `@shuttle/git` and `@shuttle/runner-protocol`. It
+  depends on the exact `@swirls/shuttle` it was built with.
+
+The `@shuttle/*` packages remain private build units, used as source by the apps here. A changeset
+for either published package releases both at the same version.
 
 ## Version policy
 
@@ -47,10 +55,12 @@ commit the version pull request produced:
 ```sh
 bun run check:package
 cd packages/shuttle && npm publish --access public
+cd ../shuttle-engine && npm publish --access public
 ```
 
-Then, on npmjs.com, add this repository's `release.yml` workflow and its `npm` environment as the
-package's trusted publisher. Every release after that goes through the workflow.
+Then, on npmjs.com, add this repository's `release.yml` workflow and its `npm` environment as
+each package's trusted publisher. This holds for each package by itself: `@swirls/shuttle-engine`
+needs its own first publish by hand, after `@swirls/shuttle` of the same version is on npm. Every release after that goes through the workflow.
 
 Publishing uses npm trusted publishing from `.github/workflows/release.yml` in the protected
 `npm` GitHub environment. The workflow authenticates through GitHub OIDC and records npm

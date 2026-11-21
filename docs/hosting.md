@@ -55,18 +55,18 @@ host's other code and its tests can import the ports and the headless API under 
 
 ## From npm
 
-A host outside this repository installs `@swirls/shuttle`, which carries the same packages built to
+A host outside this repository installs `@swirls/shuttle-engine`, which carries the same packages built to
 JavaScript with their types:
 
-| In this repository          | From npm                           |
-| --------------------------- | ---------------------------------- |
-| `@shuttle/engine`           | `@swirls/shuttle/engine`           |
-| `@shuttle/engine/worker`    | `@swirls/shuttle/engine/worker`    |
-| `@shuttle/engine/<module>`  | `@swirls/shuttle/engine/<module>`  |
-| `@shuttle/git/<module>`     | `@swirls/shuttle/git/<module>`     |
-| `@shuttle/sandbox/<module>` | `@swirls/shuttle/sandbox/<module>` |
+| In this repository          | From npm                                  |
+| --------------------------- | ----------------------------------------- |
+| `@shuttle/engine`           | `@swirls/shuttle-engine`                  |
+| `@shuttle/engine/worker`    | `@swirls/shuttle-engine/worker`           |
+| `@shuttle/engine/<module>`  | `@swirls/shuttle-engine/<module>`         |
+| `@shuttle/git/<module>`     | `@swirls/shuttle-engine/git/<module>`     |
+| `@shuttle/sandbox/<module>` | `@swirls/shuttle-engine/sandbox/<module>` |
 
-The host's `@swirls/looms` and `effect` versions have to be the ones `@swirls/shuttle` depends on,
+The host's `@swirls/looms` and `effect` versions have to be the ones `@swirls/shuttle-engine` depends on,
 so it installs one copy of each. Its `tsconfig` has `@cloudflare/workers-types` in `types`, for the
 bindings the engine's types name, and `skipLibCheck` on.
 
@@ -80,8 +80,8 @@ A page that shows a session (the parts in `@swirls/shuttle/react`) talks to Shut
 engine serves it in modules, and a host mounts the ones it wants:
 
 ```ts
-import { serveShuttle } from '@swirls/shuttle/engine'
-import { shuttleApiModules } from '@swirls/shuttle/engine/worker'
+import { serveShuttle } from '@swirls/shuttle-engine'
+import { shuttleApiModules } from '@swirls/shuttle-engine/worker'
 
 export default {
   async fetch(request: Request, env: HostEnv, ctx: ExecutionContext) {
@@ -105,7 +105,7 @@ export default {
 | `firehoseApi` | The organization's stream of what its public sessions do. `/firehose`       |                     |
 
 `shuttleApiModules` is all of them. `runsApi` forwards to Durable Objects, so it is exported from
-`@swirls/shuttle/engine/worker`; the others, in `portableApiModules`, load anywhere. Every module
+`@swirls/shuttle-engine/worker`; the others, in `portableApiModules`, load anywhere. Every module
 shows what `runsApi` streams, so a host that mounts any of them mounts it. A module is an object
 (`ApiModule`: a name, the paths it claims, a handler), so a host adds its own beside these, as
 Shuttle's app does for its workspace routes.
