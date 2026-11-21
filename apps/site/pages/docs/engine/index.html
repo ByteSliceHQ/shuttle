@@ -1,0 +1,671 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Host the engine · Shuttle</title>
+    <meta
+      name="description"
+      content="Run Shuttle's coding agent sessions in your own Cloudflare Worker: your sign-in, your billing, your GitHub access, and the API Shuttle's React parts talk to."
+    />
+    <meta property="og:title" content="Host Shuttle's engine in your product" />
+    <meta
+      property="og:description"
+      content="Shuttle's sessions in your own Worker, behind your own sign-in, with the API its React parts talk to."
+    />
+    <meta property="og:image" content="https://shuttle.codes/shuttle-mac.png" />
+    <meta name="theme-color" content="#f2efe9" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/site.css" />
+  </head>
+  <body>
+    <header class="top">
+      <a class="mark" href="/" aria-label="Shuttle">
+        <svg viewBox="0 0 48 48" aria-hidden="true">
+          <rect class="tile" width="48" height="48" rx="11" />
+          <g transform="translate(6 6) scale(0.75)">
+            <g class="warp">
+              <rect x="11.5" y="5" width="9" height="20.5" rx="2.25" />
+              <rect x="11.5" y="38.5" width="9" height="4.5" rx="2.25" />
+              <rect x="27.5" y="5" width="9" height="4.5" rx="2.25" />
+              <rect x="27.5" y="22.5" width="9" height="20.5" rx="2.25" />
+            </g>
+            <g class="weft">
+              <rect x="5" y="11.5" width="4.5" height="9" rx="2.25" />
+              <rect x="22.5" y="11.5" width="20.5" height="9" rx="2.25" />
+              <rect x="5" y="27.5" width="20.5" height="9" rx="2.25" />
+              <rect x="38.5" y="27.5" width="4.5" height="9" rx="2.25" />
+            </g>
+          </g>
+        </svg>
+        Shuttle
+      </a>
+      <nav>
+        <a href="/docs/" aria-current="page">Docs</a>
+        <a href="https://github.com/ByteSliceHQ/shuttle">GitHub</a>
+        <a class="wide" href="https://app.shuttle.codes">Sign in</a>
+        <a href="/download/mac">Download</a>
+      </nav>
+    </header>
+
+    <main class="docs">
+      <aside class="toc" aria-label="Docs">
+        <p class="toc-title">Docs</p>
+        <ol class="doc-nav">
+          <li><a href="/docs/">Embed Shuttle</a></li>
+          <li><a href="/docs/parts/">Build your own ADE</a></li>
+          <li><a href="/docs/engine/" aria-current="page">Host the engine</a></li>
+        </ol>
+        <p class="toc-title">On this page</p>
+        <ol>
+          <li><a href="#install">Install</a></li>
+          <li><a href="#worker">Your Worker</a></li>
+          <li><a href="#ports">Ports</a></li>
+          <li><a href="#identity">Who is asking</a></li>
+          <li><a href="#serve">Serving the API</a></li>
+          <li><a href="#origins">Pages on another origin</a></li>
+          <li><a href="#headless">Headless sessions</a></li>
+          <li><a href="#end-to-end">End to end</a></li>
+          <li><a href="#settings">Settings</a></li>
+          <li><a href="#links">Reference</a></li>
+        </ol>
+      </aside>
+
+      <article class="prose">
+        <p class="kicker">@swirls/shuttle/engine</p>
+        <h1>Host the engine</h1>
+        <p class="pitch">
+          The engine is what runs Shuttle's sessions: the agents, their sandboxes, pull requests and
+          review. It is a library your Cloudflare Worker hosts. You say who is asking, who pays and
+          how to reach GitHub; it does the rest, and serves the API the
+          <a href="/docs/parts/">parts</a> talk to.
+        </p>
+
+        <h2 id="install">Install</h2>
+        <pre><code class="language-bash">bun add @swirls/shuttle ai @cloudflare/sandbox @daytona/sdk
+bun add -d @cloudflare/workers-types</code></pre>
+        <ul>
+          <li>
+            Install <code>@swirls/looms</code> and <code>effect</code> only at the versions
+            <code>@swirls/shuttle</code> depends on, if at all, so there is one copy of each.
+          </li>
+          <li>
+            Put <code>@cloudflare/workers-types</code> in your <code>tsconfig</code>'s
+            <code>types</code>, for the bindings the engine's types name, and turn
+            <code>skipLibCheck</code> on.
+          </li>
+          <li>
+            <code>@swirls/shuttle/engine</code> loads under Bun and Node as well, so your other code
+            and your tests can import the ports and the headless API.
+            <code>@swirls/shuttle/engine/worker</code> holds what only loads in a Worker.
+          </li>
+        </ul>
+
+        <h2 id="worker">Your Worker</h2>
+        <p>
+          Every session, pull request inbox and workspace is a Looms run, and every run lives in a
+          Durable Object. The engine supplies the class; you subclass it to say who the host is.
+        </p>
+        <pre><code class="language-tsx">import type { ShuttleHost } from '@swirls/shuttle/engine'
+import { EventFirehose, SessionSandbox, ShuttleRun } from '@swirls/shuttle/engine/worker'
+
+export function host(env: Env): ShuttleHost {
+  return { env, ports: { /* what your product decides; see Ports */ } }
+}
+
+export class LoomsRun extends ShuttleRun&lt;Env&gt; {
+  protected override host(env: Env) {
+    return host(env)
+  }
+}
+
+export { EventFirehose }
+
+// The sandbox is a Durable Object of its own and does not see the run's ports. Give it the
+// same GitHub access as your `git` port, or export SessionSandbox as it is.
+export class Sandbox extends SessionSandbox&lt;Env&gt; {
+  protected override environment(env: Env) {
+    return { ...env, GIT_ACCESS: myGitAccess(env) }
+  }
+}</code></pre>
+        <p>Then bind the three classes under the names the engine looks for:</p>
+        <pre><code class="language-jsonc">{
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      { "name": "LOOMS_RUN", "class_name": "LoomsRun" },
+      { "name": "SANDBOX", "class_name": "Sandbox" },
+      { "name": "EVENT_FIREHOSE", "class_name": "EventFirehose" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LoomsRun", "Sandbox", "EventFirehose"] }],
+  // Attachments and the media agents make. Optional.
+  "r2_buckets": [{ "binding": "ASSETS", "bucket_name": "my-shuttle-assets" }]
+}</code></pre>
+        <p>
+          Sandboxes run in memory until you choose otherwise (see <a href="#settings">Settings</a>).
+          For containers or Daytona, build the sandbox image from
+          <a href="https://github.com/ByteSliceHQ/shuttle/blob/main/packages/sandbox/Dockerfile"
+            ><code>packages/sandbox/Dockerfile</code></a
+          >; it is not in the npm package.
+        </p>
+
+        <h2 id="ports">Ports</h2>
+        <p>
+          A port is a small interface where your product makes a decision Shuttle would otherwise
+          make itself. Every one is optional: leave it out and Shuttle does what it does standalone.
+        </p>
+        <div class="table">
+          <table>
+            <thead>
+              <tr>
+                <th>Port</th>
+                <th>Decides</th>
+                <th>Left out</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>identity</code></td>
+                <td>Who a request acts for: a person, or an organization through a service.</td>
+                <td>Nobody, so every API request is refused.</td>
+              </tr>
+              <tr>
+                <td><code>sessionStart</code></td>
+                <td>Whether a session may start: a person's, an automatic review, or yours.</td>
+                <td>Every start is allowed.</td>
+              </tr>
+              <tr>
+                <td><code>credentials</code></td>
+                <td>
+                  Whose credential an agent turn runs on, the API keys you hold for them, and the
+                  model key for Shuttle's own agent loop.
+                </td>
+                <td>The person it works for, on their own vendor sign-in.</td>
+              </tr>
+              <tr>
+                <td><code>approvals</code></td>
+                <td>How long a pull request proposal waits before a decision is refused.</td>
+                <td>Forever.</td>
+              </tr>
+              <tr>
+                <td><code>git</code></td>
+                <td>GitHub installation tokens, and a person's own token.</td>
+                <td>Shuttle's own GitHub App, from <code>env</code>.</td>
+              </tr>
+              <tr>
+                <td><code>people</code></td>
+                <td>Who is in an organization, which sharing a session is checked against.</td>
+                <td>Nobody, so sessions are shared with no one.</td>
+              </tr>
+              <tr>
+                <td><code>previews</code></td>
+                <td>Where preview hostname keys are kept.</td>
+                <td>Sessions have no previews.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <pre><code class="language-tsx">export function host(env: Env): ShuttleHost {
+  return {
+    env,
+    ports: {
+      identity: ticketIdentity(env.TICKET_SECRET),
+      sessionStart: {
+        admit: async ({ orgId }) =&gt;
+          (await sessionsLeft(env, orgId)) &gt; 0
+            ? { allowed: true }
+            : { allowed: false, reason: 'Your plan has no sessions left this month.' },
+      },
+      credentials: {
+        // Every turn runs on the organization's own keys, and its model calls are billed to it.
+        ownerOf: ({ orgId }) =&gt; (orgId === null ? null : { kind: 'organization', orgId }),
+        apiKeys: async ({ orgId }) =&gt; orgApiKeys(env, orgId),
+        modelKey: async ({ orgId }) =&gt; orgOpenRouterKey(env, orgId),
+      },
+      approvals: { expiresAfterMs: () =&gt; 7 * 24 * 60 * 60_000 },
+      git: myGitAccess(env),
+      people: { members: async (orgId) =&gt; memberIds(env, orgId) },
+    },
+  }
+}</code></pre>
+        <ul>
+          <li>
+            A turn never runs on another person's credential. A person's vendor sign-in stays in
+            Shuttle's own encrypted store and only goes into that person's turns; no port can read
+            it or supply one. What a port adds is API keys.
+          </li>
+          <li>
+            <code>sessionStart</code> is asked once per session. A start you repeat with the same
+            idempotency key is the same session and is not asked again, so a port that counts starts
+            counts each session once.
+          </li>
+          <li>
+            A decision made after <code>approvals</code> says a proposal expired is refused, and the
+            agent is told so. Nothing wakes the session when the time passes.
+          </li>
+        </ul>
+
+        <h2 id="identity">Who is asking</h2>
+        <p>
+          The <code>identity</code> port looks at a request and says who it acts for, or
+          <code>null</code>. Everything after that (who owns a session, which runs a request may
+          open) is worked out from its answer. There are three ready ways to answer:
+        </p>
+        <div class="table">
+          <table>
+            <thead>
+              <tr>
+                <th>Port</th>
+                <th>For</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>personIdentity(resolve)</code></td>
+                <td>
+                  Your own sign-in. <code>resolve</code> turns a request into a person (user id, org
+                  id, role, name, email) or <code>null</code>.
+                </td>
+              </tr>
+              <tr>
+                <td><code>serviceIdentity({ token, service })</code></td>
+                <td>
+                  Your backend calling over HTTP: a shared secret as a bearer token, and who it acts
+                  for in <code>x-shuttle-org</code> and, for a person, <code>x-shuttle-user</code>.
+                </td>
+              </tr>
+              <tr>
+                <td><code>firstIdentity(...ports)</code></td>
+                <td>The first of several ports that knows the request.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          A port of your own is one function. This one takes a short-lived ticket your app signs for
+          the person looking at a session, which is how a page on another origin is usually signed
+          in:
+        </p>
+        <pre><code class="language-tsx">import { firstIdentity, serviceIdentity, type IdentityPort } from '@swirls/shuttle/engine'
+
+const ticketIdentity = (secret: string): IdentityPort =&gt; ({
+  async resolve(request) {
+    const ticket = await verifyTicket(request.headers.get('authorization'), secret)
+
+    return ticket === null
+      ? null
+      : {
+          kind: 'person',
+          actor: { userId: ticket.userId, orgId: ticket.orgId, role: 'member', name: ticket.name, email: '' },
+        }
+  },
+})
+
+const identity = firstIdentity(
+  ticketIdentity(env.TICKET_SECRET),
+  serviceIdentity({ token: env.SERVICE_TOKEN, service: 'acme-app' }),
+)</code></pre>
+        <p>
+          An organization acting through a service owns nothing it starts: its sessions are open to
+          the whole organization. A person's sessions are private to them until they share them.
+        </p>
+
+        <h2 id="serve">Serving the API</h2>
+        <p>
+          <code>serveShuttle</code> answers the routes of the modules you mount, behind your
+          identity port and the check of who may open which run. For any other path it answers
+          <code>null</code>, so it sits in front of your own routes.
+        </p>
+        <pre><code class="language-tsx">import { serveShuttle } from '@swirls/shuttle/engine'
+import { shuttleApiModules } from '@swirls/shuttle/engine/worker'
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    const shuttle = serveShuttle(host(env), { modules: shuttleApiModules })
+
+    return (await shuttle(request, ctx)) ?? myOwnRoutes(request, env)
+  },
+}</code></pre>
+        <div class="table">
+          <table>
+            <thead>
+              <tr>
+                <th>Module</th>
+                <th>Serves</th>
+                <th>Needs</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>runsApi</code></td>
+                <td>
+                  A run's log, live, and the signals a browser may send it.
+                  <code>/runs/:id/…</code>
+                </td>
+                <td>A Worker</td>
+              </tr>
+              <tr>
+                <td><code>sessionApi</code></td>
+                <td>
+                  A session, its playbook and its sandbox's files. <code>/sessions/…</code>,
+                  <code>/playbook</code>
+                </td>
+                <td></td>
+              </tr>
+              <tr>
+                <td><code>assetsApi</code></td>
+                <td>Attachments and the media agents make. <code>/sessions/:id/assets</code></td>
+                <td>The <code>ASSETS</code> bucket</td>
+              </tr>
+              <tr>
+                <td><code>terminalApi</code></td>
+                <td>A session's terminal. <code>/sessions/:id/sandbox/terminal</code></td>
+                <td>A container sandbox</td>
+              </tr>
+              <tr>
+                <td><code>firehoseApi</code></td>
+                <td>
+                  The organization's stream of what its public sessions do. <code>/firehose</code>
+                </td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <ul>
+          <li>
+            <code>shuttleApiModules</code> is all of them. <code>portableApiModules</code>, from
+            <code>@swirls/shuttle/engine</code>, is all but <code>runsApi</code>, for code that
+            loads outside a Worker. Every page that shows a session reads its run's log, so mount
+            <code>runsApi</code> with whatever else you mount.
+          </li>
+          <li>
+            A request with nobody behind it is refused with 401, and one for a run its person may
+            not open with 404, before any module sees it.
+          </li>
+          <li>
+            <code>GET /capabilities</code> says which modules are mounted, and the parts leave out
+            what is not: mount <code>sessionApi</code> and <code>runsApi</code> alone and a page
+            shows the conversation and the workspace, with no terminal and no media.
+          </li>
+        </ul>
+
+        <h3>Under a path of your own</h3>
+        <p>
+          If your Worker has a <code>/runs</code> or <code>/sessions</code> of its own, mount
+          Shuttle under a path with <code>basePath</code>, and give the parts the same path in
+          <code>baseUrl</code>.
+        </p>
+        <pre><code class="language-tsx">const shuttle = serveShuttle(host(env), { modules: shuttleApiModules, basePath: '/shuttle' })
+
+// On the page:
+const host = createShuttleHost({ baseUrl: 'https://engine.example.com/shuttle' })</code></pre>
+        <p>
+          It then answers every path under <code>/shuttle</code> and <code>null</code> for the rest,
+          and takes <code>/shuttle</code> off before a module sees the path, so
+          <code>/shuttle/capabilities</code> and <code>/shuttle/runs/:id/grant</code> work too. A
+          path under it that no module claims gets a 404 that a page on a listed origin can read.
+        </p>
+
+        <h3>A module of your own</h3>
+        <p>
+          A module is a plain object: a name for <code>/capabilities</code>, the paths it claims,
+          and a handler that gets the request with the person already known. A tab kind of yours
+          that says <code>needs: ['designs']</code> appears once this module is mounted.
+        </p>
+        <pre><code class="language-tsx">import type { ApiModule } from '@swirls/shuttle/engine'
+
+const designsApi: ApiModule = {
+  name: 'designs',
+  claims: (pathname) =&gt; pathname.startsWith('/designs/'),
+  handle: async ({ request, actor, env }) =&gt; Response.json(await designsFor(env, actor.orgId, request)),
+}
+
+serveShuttle(host(env), { modules: [...shuttleApiModules, designsApi] })</code></pre>
+
+        <h2 id="origins">Pages on another origin</h2>
+        <p>
+          A page on the Worker's own origin needs nothing more. When the page is somewhere else
+          (your app on <code>app.example.com</code>, the engine on <code>engine.example.com</code>),
+          give <code>serveShuttle</code> two more options:
+        </p>
+        <pre><code class="language-tsx">serveShuttle(host(env), {
+  modules: shuttleApiModules,
+  origins: ['https://app.example.com'],
+  grantSecret: env.SHUTTLE_GRANT_SECRET, // at least 32 random characters
+})</code></pre>
+        <ul>
+          <li>
+            <code>origins</code> lists the pages that embed Shuttle. Answers to them carry the
+            headers a browser needs to read them, preflights included.
+          </li>
+          <li>
+            <code>grantSecret</code> lets a page read a run's live log over a WebSocket, which
+            cannot carry a sign-in. Someone who may open the run asks
+            <code>POST /runs/:id/grant</code> for a short-lived read grant, and the log accepts it
+            in place of a sign-in. The parts do this by themselves when the backend is on another
+            origin. <code>grantTtlMs</code> sets how long a grant lasts (five minutes by default).
+          </li>
+        </ul>
+
+        <h2 id="headless">Headless sessions</h2>
+        <p>
+          Your backend can start a session with no interface at all: a brief, some repositories, and
+          who it is for. It reports where the session stands, and takes answers to the questions its
+          agents ask.
+        </p>
+        <pre><code class="language-tsx">import { answerHeadlessQuestion, headlessOutcome, startHeadlessSession } from '@swirls/shuttle/engine'
+
+const acting = { kind: 'organization', orgId, service: 'acme-app' } as const
+
+const { runId } = await startHeadlessSession(host(env), {
+  acting,
+  brief: 'Fix the flaky checkout test',
+  repositories: [{ installationId, fullName: 'acme/shop', defaultBranch: 'main', private: true }],
+  metadata: { ticket: 'SHOP-142' },
+  idempotencyKey: 'shop-142',
+})
+
+const outcome = await headlessOutcome(host(env), runId)
+// { state: 'working' }
+// { state: 'completed', pullRequests: [{ repo, number, url, draft }] }
+// { state: 'blocked', question: { approvalId, title, description, kind, expiresAt }, pullRequests }
+// { state: 'failed', error, pullRequests }
+
+if (outcome.state === 'blocked' &amp;&amp; outcome.question.approvalId !== null) {
+  await answerHeadlessQuestion(host(env), runId, outcome.question.approvalId, { text: 'Use Postgres' }, acting)
+}</code></pre>
+        <ul>
+          <li>
+            <code>harness</code> picks the agent that works the session (<code>claude-code</code>,
+            <code>codex</code>, …), so an organization paying with its own API key gets the vendor
+            that key is for. Left out, it is the deployment's default.
+          </li>
+          <li>
+            The same <code>idempotencyKey</code> returns the same session and changes nothing on it.
+            A key that names someone else's session is refused.
+          </li>
+          <li>
+            <code>question.kind</code> says how to answer: an agent's question takes
+            <code>{ text }</code> (or <code>null</code> for the agent's own judgment); a pull
+            request proposal or a drafted review (<code>publish-pull-request</code>,
+            <code>submit-review</code>) takes <code>{ decision: 'approve' | 'reject' }</code>. An
+            answer of the wrong shape, or for a question that is not open, is refused with
+            <code>HeadlessRequestError</code> and decides nothing.
+          </li>
+          <li>
+            <code>headlessOutcome</code> answers for any run id, so check that the session is the
+            caller's before you pass its answer on. <code>headlessSessions(host)</code> gives the
+            three calls bound to one host.
+          </li>
+          <li>
+            These calls reach runs through <code>env.LOOMS_RUN</code>, so they run in your Worker or
+            anywhere else that holds the binding.
+          </li>
+        </ul>
+
+        <h2 id="end-to-end">End to end</h2>
+        <p>
+          The usual arrangement for a product that puts sessions in its own pages: the engine runs
+          in a Worker beside your app, your backend starts sessions, and your page shows them with
+          the parts, signed in with a ticket your app signs.
+        </p>
+        <h3>1. The Worker: sessions, and the API under /shuttle</h3>
+        <pre><code class="language-tsx">import { firstIdentity, serveShuttle, sessionApi, serviceIdentity, type ShuttleHost } from '@swirls/shuttle/engine'
+import { runsApi } from '@swirls/shuttle/engine/worker'
+
+const host = (env: Env): ShuttleHost =&gt; ({
+  env,
+  ports: {
+    identity: firstIdentity(
+      ticketIdentity(env.TICKET_SECRET), // pages
+      serviceIdentity({ token: env.SERVICE_TOKEN, service: 'acme-app' }), // your backend
+    ),
+    credentials: orgCredentials(env),
+    git: myGitAccess(env),
+  },
+})
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    const shuttle = serveShuttle(host(env), {
+      modules: [sessionApi, runsApi],
+      basePath: '/shuttle',
+      origins: [env.APP_ORIGIN],
+      grantSecret: env.SHUTTLE_GRANT_SECRET,
+    })
+
+    return (await shuttle(request, ctx)) ?? myOwnRoutes(request, env)
+  },
+}</code></pre>
+        <h3>2. Your backend: start a session, sign a ticket</h3>
+        <pre><code class="language-tsx">// A route of your own in the same Worker, or headlessSessions(host) behind serviceIdentity.
+const { runId } = await startHeadlessSession(host(env), {
+  acting: { kind: 'person', actor: { userId, orgId, role: 'member', name, email } },
+  brief,
+  repositories,
+  idempotencyKey: workItemId,
+})
+
+return Response.json({ runId, ticket: await signTicket({ userId, orgId, name }, env.TICKET_SECRET) })</code></pre>
+        <h3>3. Your page: show it</h3>
+        <pre><code class="language-tsx">const host = createShuttleHost({
+  baseUrl: 'https://engine.example.com/shuttle',
+  headers: () =&gt; ({ authorization: `Bearer ${latestTicket()}` }),
+})
+
+const identity = { tenant: sessionTenant({ user: me, orgId }), listPeople: async () =&gt; [] }
+
+&lt;Shuttle.Provider host={host} router={router} identity={identity}&gt;
+  &lt;Suspense&gt;
+    &lt;Shuttle.Session id={runId} readOnly={!mayDrive}&gt;
+      &lt;Shuttle.SessionHeader /&gt;
+      &lt;Shuttle.Conversation /&gt;
+      &lt;Shuttle.Composer /&gt;
+      &lt;Shuttle.Artifacts /&gt;
+    &lt;/Shuttle.Session&gt;
+  &lt;/Suspense&gt;
+&lt;/Shuttle.Provider&gt;</code></pre>
+        <p>
+          Renew the ticket before it runs out and have <code>headers</code> read the newest one; the
+          session stays connected across renewals. <code>sessionTenant</code> comes from
+          <code>@swirls/shuttle/api</code>; see <a href="/docs/parts/#host">Who is signed in</a>.
+        </p>
+
+        <h2 id="settings">Settings</h2>
+        <p>The engine reads these from <code>env</code>. All are optional.</p>
+        <div class="table">
+          <table>
+            <thead>
+              <tr>
+                <th>Setting</th>
+                <th>What it does</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>SHUTTLE_WORKSPACE_MODE</code></td>
+                <td>
+                  Where sandboxes run: <code>memory</code> (the default),
+                  <code>container</code> (Cloudflare) or <code>daytona</code>, with
+                  <code>DAYTONA_API_KEY</code> and <code>DAYTONA_SNAPSHOT</code>.
+                </td>
+              </tr>
+              <tr>
+                <td><code>OPENROUTER_API_KEY</code></td>
+                <td>
+                  The model key for Shuttle's own agent loop, when
+                  <code>credentials.modelKey</code> gives none. <code>LOOMS_MODEL</code> picks the
+                  model.
+                </td>
+              </tr>
+              <tr>
+                <td><code>SHUTTLE_CREDENTIALS_KEY</code></td>
+                <td>Encrypts the vendor sign-ins people store with Shuttle.</td>
+              </tr>
+              <tr>
+                <td><code>GITHUB_APP_ID</code>, <code>GITHUB_APP_PRIVATE_KEY</code></td>
+                <td>Shuttle's own GitHub App, when there is no <code>git</code> port.</td>
+              </tr>
+              <tr>
+                <td><code>ASSETS</code></td>
+                <td>The R2 bucket for attachments and media. Needed by <code>assetsApi</code>.</td>
+              </tr>
+              <tr>
+                <td><code>SHUTTLE_PREVIEW_HOST</code></td>
+                <td>
+                  The hostname sandbox previews are served under, with the
+                  <code>previews</code> port.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 id="links">Reference</h2>
+        <ul class="link-list">
+          <li>
+            <a href="https://github.com/ByteSliceHQ/shuttle/blob/main/docs/hosting.md"
+              >docs/hosting.md</a
+            >
+            <span>The engine's reference, kept beside its source</span>
+          </li>
+          <li>
+            <a href="https://github.com/ByteSliceHQ/shuttle/blob/main/docs/sandboxes.md"
+              >docs/sandboxes.md</a
+            >
+            <span>Sandbox providers, and moving work between them</span>
+          </li>
+          <li>
+            <a href="https://github.com/ByteSliceHQ/shuttle/tree/main/apps/worker">apps/worker</a>
+            <span>Shuttle's own Worker, a host of the engine like yours</span>
+          </li>
+          <li>
+            <a href="https://github.com/ByteSliceHQ/shuttle/tree/main/packages/engine"
+              >packages/engine</a
+            >
+            <span>The engine's source</span>
+          </li>
+        </ul>
+        <p class="next">
+          Next: <a href="/docs/parts/">Build your own ADE</a>, to show the sessions your Worker
+          runs.
+        </p>
+      </article>
+    </main>
+
+    <footer class="foot">
+      <span>Shuttle is made by ByteSlice.</span>
+      <a href="https://github.com/ByteSliceHQ/shuttle">Source on GitHub</a>
+    </footer>
+  </body>
+</html>

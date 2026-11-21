@@ -15,7 +15,7 @@ const root = join(import.meta.dir, '..')
 const pagesDir = join(root, 'pages')
 const publicDir = join(root, 'public')
 
-const langs = ['tsx', 'bash', 'css'] as const
+const langs = ['tsx', 'bash', 'css', 'jsonc'] as const
 const theme = 'github-dark-default'
 
 const highlighter = await createHighlighter({ themes: [theme], langs: [...langs] })

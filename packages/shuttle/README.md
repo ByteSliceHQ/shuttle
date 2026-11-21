@@ -38,13 +38,14 @@ export function MyCustomADE() {
 | `@swirls/shuttle/engine/worker`   | The Durable Objects a host's Worker binds                |
 
 The parts need a Shuttle backend to talk to, React 19, TanStack Query 5 and Tailwind CSS 4. They
-are built for a bundler such as Vite. See the
-[repository](https://github.com/ByteSliceHQ/shuttle#readme) for the backend and a complete
-example in `examples/custom-ade`.
+are built for a bundler such as Vite. [Build your own ADE](https://shuttle.codes/docs/parts/)
+walks through them, and `examples/custom-ade` in the
+[repository](https://github.com/ByteSliceHQ/shuttle#readme) is a complete one.
 
 The engine runs Shuttle's sessions inside another product's Cloudflare Worker and serves the
 backend these parts talk to. A host that runs it also installs `ai`, `@cloudflare/sandbox` and
 `@daytona/sdk`, which the React parts do not need. See
-[Hosting Shuttle](https://github.com/ByteSliceHQ/shuttle/blob/main/docs/hosting.md).
+[Host the engine](https://shuttle.codes/docs/engine/), and
+[docs/hosting.md](https://github.com/ByteSliceHQ/shuttle/blob/main/docs/hosting.md) for the reference.
 
 Release notes are in [`CHANGELOG.md`](./CHANGELOG.md).
