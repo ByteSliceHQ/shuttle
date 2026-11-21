@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 
+import { worktreeRoot } from '../../lib/worktree'
 import type { AgentIdentity } from '../sessions/agents'
 import type { SessionMedia } from '../sessions/media'
 import type { ArtifactTab, ArtifactTabKind } from '../workspace/workspace'
@@ -71,7 +72,7 @@ export interface ArtifactType {
 
 /** A file tab's target as a path under the session's worktree, which is how the workspace names files. */
 function worktreePath(runId: string, target: string): string {
-  const root = `/workspace/.wt/${runId}/`
+  const root = `${worktreeRoot(runId)}/`
 
   return target.startsWith(root) ? target.slice(root.length) : target
 }

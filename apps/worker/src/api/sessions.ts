@@ -27,6 +27,7 @@ import { ACTOR_HEADER } from '@swirls/looms/runtime'
 
 import { getAuth } from '../auth/auth'
 import type { ShuttleEnv } from '../env'
+import { resolveReferences } from '../session/resolve-references'
 import { moveListings, signalListings } from '../workspace/listings'
 import { api, badRequest, forbidden, notFound } from './base'
 
@@ -137,7 +138,11 @@ export const sessionsRouter = {
 
   say: sessions.say.handler(async ({ input, context: { env, actor } }) => {
     // A message may be files alone.
-    if (input.text.trim() === '' && input.attachments.length === 0) {
+    if (
+      input.text.trim() === '' &&
+      input.attachments.length === 0 &&
+      input.references.length === 0
+    ) {
       throw badRequest('messageId and text are required')
     }
 
@@ -155,6 +160,9 @@ export const sessionsRouter = {
       attachments.push(asset)
     }
 
+    // Each session the message points at is checked and read now, as it stands when it is sent.
+    const references = await resolveReferences(env, actor, input.id, input.text, input.references)
+
     const message = say({
       messageId: input.messageId,
       text: input.text,
@@ -162,6 +170,7 @@ export const sessionsRouter = {
       targetThreadId: input.targetThreadId === '' ? undefined : input.targetThreadId,
       author: { id: actor.userId, name: actor.name === '' ? actor.email : actor.name },
       attachments: attachments.length > 0 ? attachments : undefined,
+      references: references.length > 0 ? references : undefined,
     })
 
     // Answered once the message is on the log. The browser shows it from the event stream, and

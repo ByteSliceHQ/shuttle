@@ -23,4 +23,9 @@ export interface GitEnv {
    * GitHub App settings above are not used for them. See `access.ts`.
    */
   readonly GIT_ACCESS?: GitAccess
+  /**
+   * Shuttle's sign-in database, where a person's linked GitHub account is found so the commits
+   * they approve are credited to them. Without it commits are credited to the GitHub App.
+   */
+  readonly AUTH_DB?: D1Database
 }

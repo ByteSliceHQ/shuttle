@@ -40,6 +40,7 @@ const PublishPullSchema = Schema.Struct({
   repo: Schema.optional(Schema.NullOr(Schema.String)),
   stackId: Schema.optional(Schema.NullOr(Schema.Finite)),
   layer: Schema.optional(Schema.NullOr(Schema.Finite)),
+  approvedBy: Schema.optional(Schema.NullOr(Schema.String)),
   stacks: Schema.optional(
     Schema.Record(
       Schema.String,
@@ -113,6 +114,7 @@ export function createPublishPullRequestEffect(env: EngineEnv, storage?: Durable
               draft: input.draft,
               stackId: stamped ? (input.stackId ?? null) : null,
               layer: stamped ? (input.layer ?? null) : null,
+              authorUserId: input.approvedBy ?? null,
             },
             priorStacks,
           )

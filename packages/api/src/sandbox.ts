@@ -24,6 +24,24 @@ export const SandboxFiles = SandboxSource.extend({
 })
 export type SandboxFiles = z.infer<typeof SandboxFiles>
 
+/** One repository's paths, relative to it. */
+export const SandboxPathsRepo = z.object({
+  name: z.string(),
+  files: z.array(z.string()).readonly(),
+  /** Whether the repository has more paths than were listed. */
+  truncated: z.boolean(),
+})
+export type SandboxPathsRepo = z.infer<typeof SandboxPathsRepo>
+
+export const SandboxPaths = SandboxSource.extend({
+  repos: z.array(SandboxPathsRepo).readonly(),
+  /** Names this listing. Sent back as `etag`, an unchanged listing is not sent again. */
+  etag: z.string(),
+  /** True when the listing is the one `etag` named; `repos` is then empty. */
+  unchanged: z.boolean().optional(),
+})
+export type SandboxPaths = z.infer<typeof SandboxPaths>
+
 /**
  * One file in the session's worktree. Asked for as it was when the session started
  * (`version: 'base'`), `content` is null when it did not exist then, and nothing says whether it
@@ -302,6 +320,15 @@ export const sandboxContract = {
     .route({ method: 'GET', path: '/sessions/{id}/sandbox/files' })
     .input(SessionParams)
     .output(SandboxFiles),
+
+  /**
+   * Every path in the session's repositories, for picking one after `@`: what git tracks or
+   * would track, without the measuring `workspace` does. Read once and searched in the browser.
+   */
+  paths: oc
+    .route({ method: 'GET', path: '/sessions/{id}/sandbox/paths' })
+    .input(SessionParams.extend({ etag: z.string().max(200).optional() }))
+    .output(SandboxPaths),
 
   /**
    * One file, as it is now or, with `version: 'base'`, as it was where its changes are measured

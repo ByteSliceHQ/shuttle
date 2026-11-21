@@ -18,6 +18,22 @@ export interface ApprovalDecision {
   readonly payload?: JsonValue | undefined
 }
 
+/** Who sent an event: the signed-in person, for one that came from a browser. */
+export interface EventOriginLike {
+  readonly origin?: { readonly type: string; readonly actorId?: string | undefined } | undefined
+}
+
+/** The Shuttle user an event was sent by, or null when it did not come from a person. */
+export function actorOfEvent(event: EventOriginLike): string | null {
+  const origin = event.origin
+
+  if (origin?.type !== 'external' || origin.actorId === undefined || origin.actorId === '') {
+    return null
+  }
+
+  return origin.actorId
+}
+
 export interface PublishSessionSlice {
   readonly pendingPrPublish: PendingPrPublish | null
   readonly discardedPrApprovalId: string | null
@@ -26,12 +42,21 @@ export interface PublishSessionSlice {
   readonly stacks: Parameters<typeof stacksAsJson>[0]
 }
 
+/** What `withPrApprovalDecision` is told about a decision besides its payload. */
+export interface ApprovalContext {
+  readonly at?: number
+  readonly approvedBy?: string | null
+}
+
 /** Apply an approval decision to a pending PR publish, or return null if unrelated. */
 export function withPrApprovalDecision<S extends PublishSessionSlice>(
   state: S,
   payload: ApprovalDecision,
-  /** When the decision was recorded, to hold it against the approval's expiry. */
-  at: number = Date.now(),
+  /**
+   * When the decision was recorded, to hold it against the approval's expiry, and the Shuttle user
+   * who made it, whose GitHub account then authors the commits.
+   */
+  { at = Date.now(), approvedBy = null }: ApprovalContext = {},
 ): S | null {
   const approvalId = payload.approvalId
   const pending = state.pendingPrPublish
@@ -90,6 +115,7 @@ export function withPrApprovalDecision<S extends PublishSessionSlice>(
       parentPull: pending.parentPull,
       restacks: pending.restacks,
       status: 'publishing',
+      approvedBy,
     },
   }
 }
@@ -112,6 +138,7 @@ export function appendPrPublishEffects(state: PublishSessionSlice, effects: Runt
           stackId: pending.stackId,
           layer: pending.layer,
           stacks: stacksAsJson(state.stacks),
+          approvedBy: pending.approvedBy ?? null,
         },
         `publish_pr_${pending.approvalId}`,
       ),

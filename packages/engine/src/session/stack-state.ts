@@ -48,6 +48,8 @@ export interface PendingPrPublish {
   readonly status: 'awaiting_approval' | 'publishing'
   /** When a decision stops being accepted. Absent or null: never. */
   readonly expiresAt?: number | null
+  /** Shuttle user who approved the publish; their GitHub account authors the commits. */
+  readonly approvedBy?: string | null
 }
 
 export interface StackSessionSlice {

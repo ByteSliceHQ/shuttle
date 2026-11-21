@@ -20,6 +20,7 @@ import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 import { stageBridge } from '../../runner/src/provision'
+import { packagerEnvironment } from './packager-env'
 
 const root = resolve(import.meta.dir, '..')
 const runnerRoot = resolve(root, '../runner')
@@ -34,13 +35,18 @@ if (!url?.startsWith('https://')) {
   process.exit(1)
 }
 
-async function run(command: readonly string[], cwd: string, env?: Record<string, string>) {
+async function run(
+  command: readonly string[],
+  cwd: string,
+  env?: Record<string, string | undefined>,
+) {
   console.log(`$ ${command.join(' ')}`)
 
   const child = Bun.spawn([...command], {
     cwd,
     stdio: ['ignore', 'inherit', 'inherit'],
-    env: { ...process.env, ...env },
+    // A provided env replaces the process env. Merging would put a blank CSC_LINK back.
+    env: env ?? process.env,
   })
 
   if ((await child.exited) !== 0) {
@@ -84,5 +90,5 @@ await run(
     'never',
   ],
   root,
-  hasIdentity ? {} : { CSC_IDENTITY_AUTO_DISCOVERY: 'false' },
+  packagerEnvironment(process.env, hasIdentity),
 )

@@ -42,6 +42,40 @@ export const MAX_ATTACHMENTS = 10
 
 export const AssetId = z.string().regex(/^ast_[0-9a-f]{32}$/)
 
+/** Most things one message may point at with `@`. */
+export const MAX_REFERENCES = 20
+
+/**
+ * A path in the session's worktree, `<repository>/<path>`: relative, with no `.` or `..` parts,
+ * so it cannot name anything outside the worktree.
+ */
+export const WorktreePath = z
+  .string()
+  .min(1)
+  .max(1024)
+  .refine(
+    (path) =>
+      !path.startsWith('/') &&
+      !path.includes('\0') &&
+      path.split('/').every((part) => part !== '' && part !== '.' && part !== '..'),
+    { message: 'must be a path inside the session worktree' },
+  )
+
+/** Something picked after `@` in the message box, as the browser names it. */
+export const MessageReferenceInput = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('file'), path: WorktreePath }),
+  z.object({
+    kind: z.literal('session'),
+    sessionId: z.string().min(1).max(256),
+    /**
+     * The text the session is written as after `@`, when it is not just its title: two sessions
+     * with the same title are told apart by a number.
+     */
+    label: z.string().min(1).max(300).optional(),
+  }),
+])
+export type MessageReferenceInput = z.infer<typeof MessageReferenceInput>
+
 export const LlmModel = z.object({ model: z.string() })
 export type LlmModel = z.infer<typeof LlmModel>
 
@@ -105,6 +139,8 @@ export const sessionsContract = {
         targetThreadId: z.string().optional(),
         /** Ids of files already uploaded to this session. */
         attachments: z.array(AssetId).max(MAX_ATTACHMENTS).default([]),
+        /** Files and sessions picked after `@`. */
+        references: z.array(MessageReferenceInput).max(MAX_REFERENCES).default([]),
       }),
     )
     .output(z.object({ messageId: z.string() })),
