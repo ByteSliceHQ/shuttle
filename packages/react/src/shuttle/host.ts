@@ -2,6 +2,7 @@ import { createORPCClient, ORPCError } from '@orpc/client'
 import type { ContractRouterClient } from '@orpc/contract'
 import { OpenAPILink } from '@orpc/openapi-client/fetch'
 import { createTanstackQueryUtils } from '@orpc/tanstack-query'
+import { z } from 'zod'
 
 import { clientContract } from '@shuttle/api'
 import type { JsonObject } from '@swirls/looms/core'
@@ -50,6 +51,13 @@ export interface ShuttleHostOptions {
   readonly baseUrl?: string
   /** Makes every HTTP request, so a host can add its own credentials. Defaults to `fetch`. */
   readonly fetch?: ShuttleFetch
+  /**
+   * What the backend authenticates a request by, when that is not a cookie: asked before every
+   * request that can carry a header (the API, signals, an upload) and added to it.
+   * An image, a download and a terminal are addresses the browser opens by itself and cannot
+   * carry one; they need the backend's cookie.
+   */
+  readonly headers?: () => Readonly<Record<string, string>>
   /** The machine this is running on, when it has one. */
   readonly device?: ShuttleDevice | null
   /**
@@ -65,6 +73,22 @@ export interface ShuttleHostOptions {
   /** Added to how a run's event store is opened: an observer, a different cache. */
   readonly runStore?: (userId: string) => Partial<RunStoreOptions>
 }
+
+/** What the backend serves, as `GET /capabilities` says it. */
+export interface ShuttleCapabilities {
+  /** The API modules the backend mounted, by name: `session`, `assets`, `terminal`, … */
+  readonly modules: readonly string[]
+  /** Whether sessions have previews. */
+  readonly previews: boolean
+  /** Whether the backend gives read grants for a run's log. */
+  readonly grants: boolean
+}
+
+const CapabilitiesSchema = z.object({
+  modules: z.array(z.string()),
+  previews: z.boolean().optional(),
+  grants: z.boolean().optional(),
+})
 
 /**
  * Everything Shuttle's components need from where they are running that is not React: how to
@@ -87,6 +111,15 @@ export interface ShuttleHost {
   url(path: string): string
   /** The same, for a WebSocket. */
   socketUrl(path: string): string
+  /** What a request that cannot go through `fetch`, such as an upload, carries: see `headers`. */
+  headers(): Readonly<Record<string, string>>
+  /** Whether the backend is on another origin than the page, so its cookie has to be asked for. */
+  crossOrigin(): boolean
+  /**
+   * What the backend serves. Null when it does not say (an older backend), which the parts take
+   * to mean everything. Asked once.
+   */
+  capabilities(): Promise<ShuttleCapabilities | null>
   /**
    * What a call sends so the backend answers for this machine's sandbox as well as the cloud.
    * With no device, the call is about the cloud alone.
@@ -107,6 +140,15 @@ export interface ShuttleHost {
    * from it arrives whole. After a few seconds it goes ahead regardless. Never rejects.
    */
   whenRunSynced(runId: string, userId: string): Promise<void>
+}
+
+/** What the backend serves, as a query: asked once and kept for as long as the page is open. */
+export function capabilitiesQuery(host: ShuttleHost) {
+  return {
+    queryKey: ['shuttle', 'capabilities', host.origin()] as const,
+    queryFn: () => host.capabilities(),
+    staleTime: Infinity,
+  }
 }
 
 /** A run refused a signal. `status` is the HTTP status it answered with. */
@@ -140,10 +182,34 @@ const WAIT_MS = 4000
 export function createShuttleHost(options: ShuttleHostOptions = {}): ShuttleHost {
   const baseUrl = (options.baseUrl ?? '').replace(/\/+$/, '')
   const device = options.device ?? null
-  const request: ShuttleFetch = options.fetch ?? ((input, init) => fetch(input, init))
+  const send: ShuttleFetch = options.fetch ?? ((input, init) => fetch(input, init))
+  const extraHeaders = () => options.headers?.() ?? {}
 
   /** The backend's origin: the one it was given, or the page's own. */
   const origin = () => (baseUrl !== '' ? baseUrl : window.location.origin)
+
+  const crossOrigin = () =>
+    baseUrl !== '' &&
+    typeof window !== 'undefined' &&
+    new URL(baseUrl, window.location.href).origin !== window.location.origin
+
+  /** Every request the parts send through `fetch`: with the host's headers, and its cookie. */
+  const request: ShuttleFetch = (input, init) => {
+    const headers = new Headers(init?.headers)
+
+    for (const [name, value] of Object.entries(extraHeaders())) {
+      headers.set(name, value)
+    }
+
+    // A browser leaves the cookie off a request to another origin unless it is asked for.
+    return send(input, {
+      ...init,
+      headers,
+      credentials: init?.credentials ?? (crossOrigin() ? 'include' : undefined),
+    })
+  }
+
+  let capabilities: Promise<ShuttleCapabilities | null> | undefined
 
   const client: ShuttleClient = createORPCClient(
     new OpenAPILink<CallContext>(clientContract, {
@@ -188,6 +254,26 @@ export function createShuttleHost(options: ShuttleHostOptions = {}): ShuttleHost
     origin,
     url: (path) => `${baseUrl}${path}`,
     socketUrl: (path) => `${origin().replace(/^http/, 'ws')}${path}`,
+    headers: extraHeaders,
+    crossOrigin,
+
+    capabilities() {
+      capabilities ??= request(`${baseUrl}/capabilities`)
+        .then(async (response) => {
+          const said = response.ok ? CapabilitiesSchema.safeParse(await response.json()) : null
+
+          return said?.success === true
+            ? {
+                modules: said.data.modules,
+                previews: said.data.previews ?? true,
+                grants: said.data.grants ?? false,
+              }
+            : null
+        })
+        .catch(() => null)
+
+      return capabilities
+    },
     deviceContext: () => ({ deviceId: device?.deviceId ?? null }),
     runStoreOptions,
 

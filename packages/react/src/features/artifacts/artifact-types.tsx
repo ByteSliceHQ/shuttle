@@ -10,6 +10,7 @@ import {
 import type { ReactNode } from 'react'
 
 import { worktreeRoot } from '../../lib/worktree'
+import type { ShuttleCapabilities } from '../../shuttle'
 import type { AgentIdentity } from '../sessions/agents'
 import type { SessionMedia } from '../sessions/media'
 import type { ArtifactTab, ArtifactTabKind } from '../workspace/workspace'
@@ -47,6 +48,13 @@ export interface ArtifactType {
   readonly kind: ArtifactTabKind
   readonly label: string
   readonly icon: ReactNode
+  /**
+   * What the backend has to serve for the type to work: the names of API modules it mounted
+   * (`terminal`, `assets`, or a module of the host's own), or `previews`. A type whose needs the
+   * backend does not meet is left out of the session, tabs and menu alike. Left out, it needs
+   * nothing beyond the session itself.
+   */
+  readonly needs?: readonly string[]
   /**
    * There is one tab of this kind at most: opening it again brings the one that is open
    * forward. Left out, each opening is a new tab. Shuttle's own kinds decide this themselves.
@@ -106,6 +114,7 @@ export const defaultArtifactTypes: readonly ArtifactType[] = [
     kind: 'terminal',
     label: 'Terminal',
     icon: <SquareTerminal />,
+    needs: ['terminal'],
     launcher: { keywords: 'shell console', starter: true },
     render: ({ tab, runId, folderId }) => (
       <TerminalViewer runId={runId} folderId={folderId} cwd={tab.target} />
@@ -115,6 +124,7 @@ export const defaultArtifactTypes: readonly ArtifactType[] = [
     kind: 'browser',
     label: 'Browser',
     icon: <Globe />,
+    needs: ['previews'],
     launcher: { keywords: 'preview web page', starter: true },
     render: ({ tab, runId, retarget }) => (
       <BrowserViewer runId={runId} target={tab.target} onRetarget={retarget} />
@@ -131,6 +141,7 @@ export const defaultArtifactTypes: readonly ArtifactType[] = [
     kind: 'media',
     label: 'Media',
     icon: <Images />,
+    needs: ['assets'],
     launcher: { keywords: 'images video audio files attachments assets generated' },
     render: ({ runId, media, identities }) => (
       <MediaViewer runId={runId} media={media} identities={identities} />
@@ -141,6 +152,24 @@ export const defaultArtifactTypes: readonly ArtifactType[] = [
   // Event history opens as a drawer under the session; it is never shown as a tab.
   { kind: 'events', label: 'Events', icon: <ListTree />, render: () => null },
 ]
+
+/** Whether the backend serves `need`: a module it mounted, or previews. */
+export function serves(capabilities: ShuttleCapabilities, need: string): boolean {
+  return need === 'previews' ? capabilities.previews : capabilities.modules.includes(need)
+}
+
+/**
+ * The types the backend can serve. Null is a backend that does not say what it serves, which
+ * is taken to serve everything.
+ */
+export function servedArtifactTypes(
+  types: readonly ArtifactType[],
+  capabilities: ShuttleCapabilities | null,
+): readonly ArtifactType[] {
+  return capabilities === null
+    ? types
+    : types.filter((type) => (type.needs ?? []).every((need) => serves(capabilities, need)))
+}
 
 /** The type that draws tabs of `kind`. The last one registered for a kind wins. */
 export function artifactTypeFor(

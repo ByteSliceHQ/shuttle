@@ -653,7 +653,11 @@ export function attentionPullCount(pulls: readonly PullInboxSummary[]): number {
   }).length
 }
 
-/** The pulls run of the organization the browser is signed in to. */
+/**
+ * The pulls run of the organization the browser is signed in to. A host that keeps no pull
+ * request inbox has none; then this is the empty id, whose store holds nothing and connects
+ * to nothing.
+ */
 export function usePullsRunId(): string {
-  return useTenant().runs.pulls
+  return useTenant().runs.pulls ?? ''
 }

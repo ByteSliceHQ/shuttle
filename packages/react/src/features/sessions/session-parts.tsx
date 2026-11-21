@@ -80,6 +80,7 @@ export function SessionConversation() {
       root={session.root}
       openThreadId={session.openThreadId}
       onOpenThread={session.openThread}
+      readOnly={session.readOnly}
     />
   )
 }
@@ -96,6 +97,12 @@ export function SessionComposer({
 }) {
   const session = useSession()
   const { folder } = session
+
+  // A session that is only watched has nothing to say to it. The box also tells the session
+  // which model this browser prefers when it shows, which a watcher must not.
+  if (session.readOnly) {
+    return null
+  }
 
   return (
     <Composer

@@ -1,4 +1,4 @@
-import { useSuspenseQuery } from '@tanstack/react-query'
+import { useQuery, useSuspenseQuery } from '@tanstack/react-query'
 import {
   createContext,
   useCallback,
@@ -22,8 +22,18 @@ import {
   type RunSummary,
 } from '@swirls/looms/react'
 
-import { possessive, useOrgPeople, useShuttleHost, useTenant } from '../../shuttle'
-import { defaultArtifactTypes, type ArtifactType } from '../artifacts/artifact-types'
+import {
+  capabilitiesQuery,
+  possessive,
+  useOrgPeople,
+  useShuttleHost,
+  useTenant,
+} from '../../shuttle'
+import {
+  defaultArtifactTypes,
+  servedArtifactTypes,
+  type ArtifactType,
+} from '../artifacts/artifact-types'
 import type { SessionEvent } from '../events/event-catalog'
 import { pullInbox, reviewedPullForSession, usePullsRunId } from '../pulls/pulls'
 import type { ArtifactTabKind, WorkspaceFolder } from '../workspace/workspace'
@@ -89,8 +99,10 @@ export interface SessionValue {
   /** Opens event history on an agent, or on one of its steps. */
   readonly inspect: (threadId: string, seq?: number) => void
 
-  /** The kinds of tab the artifacts pane can show. */
+  /** The kinds of tab the artifacts pane can show: the ones given, less what the backend cannot serve. */
   readonly artifactTypes: readonly ArtifactType[]
+  /** Whether the session is only being watched: nothing in it sends, decides or answers. */
+  readonly readOnly: boolean
   readonly tabs: SessionTabsController
   /** Shows something in the artifacts pane, bringing the pane out if it is away. */
   readonly openArtifact: (kind: ArtifactTabKind, target?: string) => void
@@ -144,6 +156,12 @@ export interface SessionProps {
   readonly focusThread?: string | undefined
   /** The kinds of tab the artifacts pane can show. Shuttle's own, unless given others. */
   readonly artifactTypes?: readonly ArtifactType[]
+  /**
+   * Shows the session without the means to change it: no message box, and its questions and
+   * proposals cannot be answered here. For a page that watches a session someone else, or
+   * something else, is driving.
+   */
+  readonly readOnly?: boolean
   readonly children: ReactNode
 }
 
@@ -161,10 +179,20 @@ function SessionRoot({
   thread,
   onThreadChange,
   focusThread,
-  artifactTypes = defaultArtifactTypes,
+  artifactTypes: givenArtifactTypes = defaultArtifactTypes,
+  readOnly = false,
   children,
 }: SessionProps) {
   const host = useShuttleHost()
+
+  // What the backend serves is asked once. Until it answers, nothing is left out.
+  const { data: capabilities = null } = useQuery(capabilitiesQuery(host))
+
+  const artifactTypes = useMemo(
+    () => servedArtifactTypes(givenArtifactTypes, capabilities),
+    [givenArtifactTypes, capabilities],
+  )
+
   const store = useRunStore(runId)
   const summary = useRunSummary(store)
   const tree = useThreadTree(store)
@@ -398,6 +426,7 @@ function SessionRoot({
     selectEvent: setSelectedSeq,
     inspect,
     artifactTypes,
+    readOnly,
     tabs,
     openArtifact,
     panes: {
