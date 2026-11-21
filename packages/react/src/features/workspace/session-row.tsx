@@ -3,7 +3,6 @@ import { GitPullRequest, MoreHorizontal } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu'
 import { cn } from '../../lib/cn'
@@ -11,21 +10,22 @@ import { compactRelativeTime, fullDateTime } from '../../lib/time'
 import { Link } from '../../shuttle'
 import { resolveSessionIndicator } from '../sessions/session-activity'
 import { ActivityDot } from './activity-dot'
+import { RowContextMenu, RowDropdownMenuItems, sessionMenuEntries } from './row-menu'
 
 /** Hidden until the row is hovered or focused; always shown on touch, where hover never fires. */
 export const revealOnRowHover =
-  'opacity-0 transition-opacity duration-100 group-hover/row:opacity-100 group-has-[:focus-visible]/row:opacity-100 data-[state=open]:opacity-100 has-data-[state=open]:opacity-100 pointer-coarse:opacity-100'
+  'opacity-0 transition-opacity duration-100 group-hover/row:opacity-100 group-has-[:focus-visible]/row:opacity-100 data-[state=open]:opacity-100 has-data-[state=open]:opacity-100 group-data-[state=open]/row:opacity-100 pointer-coarse:opacity-100'
 
 /** Trailing metadata yields its slot to the row's actions. */
 export const yieldOnRowHover =
-  'transition-opacity duration-100 group-hover/row:opacity-0 group-has-[:focus-visible]/row:opacity-0 group-has-data-[state=open]/row:opacity-0 pointer-coarse:hidden'
+  'transition-opacity duration-100 group-hover/row:opacity-0 group-has-[:focus-visible]/row:opacity-0 group-has-data-[state=open]/row:opacity-0 group-data-[state=open]/row:opacity-0 pointer-coarse:hidden'
 
 export function sidebarRowClass(active: boolean) {
   return cn(
     'group/row relative flex h-8 items-center rounded-md text-[12.5px] transition-colors duration-100',
     active
       ? 'bg-accent text-foreground'
-      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground data-[state=open]:bg-accent/50 data-[state=open]:text-foreground',
   )
 }
 
@@ -57,11 +57,12 @@ export function SessionRow({
   onRename?: () => void
   onArchive?: () => void
 }) {
-  const hasMenu = onRename !== undefined || onArchive !== undefined
+  const entries = sessionMenuEntries(onRename, onArchive)
+  const hasMenu = entries.length > 0
   const tone = resolveSessionIndicator({ activity, status, unread })
   const needsAttention = !active && (tone === 'needs_input' || tone === 'ready')
 
-  return (
+  const row = (
     <div className={cn(sidebarRowClass(active), 'float-in', dimmed === true && 'opacity-60')}>
       <Link
         to={{ page: 'session', sessionId: runId }}
@@ -112,12 +113,21 @@ export function SessionRow({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="min-w-36">
-              {onRename ? <DropdownMenuItem onSelect={onRename}>Rename</DropdownMenuItem> : null}
-              {onArchive ? <DropdownMenuItem onSelect={onArchive}>Archive</DropdownMenuItem> : null}
+              <RowDropdownMenuItems entries={entries} />
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
       </div>
     </div>
+  )
+
+  if (!hasMenu) {
+    return row
+  }
+
+  return (
+    <RowContextMenu entries={entries} className="min-w-36">
+      {row}
+    </RowContextMenu>
   )
 }
