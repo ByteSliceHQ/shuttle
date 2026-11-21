@@ -9,6 +9,7 @@
 const API_PREFIXES = [
   '/definitions',
   '/health',
+  '/capabilities',
   '/operations',
   '/runs',
   '/sessions',
