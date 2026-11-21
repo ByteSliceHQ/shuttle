@@ -152,9 +152,14 @@ const host = createShuttleHost({
 ```
 
 - **Credentials.** `headers` is asked before every request that can carry one (the API, signals,
-  an upload) and added to it. When the backend is on another origin the parts also ask the browser
+  a run's log, an upload) and added to it. When the backend is on another origin the parts also ask the browser
   to send its cookie. An image, a download and a terminal are addresses the browser opens by
   itself: they carry no header, so they need the cookie.
+- **A live log across origins.** A run's live log is a WebSocket, which carries no header. When
+  the backend is on another origin the parts ask it for a read grant for each run
+  (`POST /runs/:id/grant`), open the log with it, and renew it before it runs out. The backend
+  gives grants when it is served with a `grantSecret`. `grants` on `createShuttleHost` turns
+  this on or off by hand.
 - **What is mounted.** The parts read `GET /capabilities` once and leave out what the backend does
   not serve: no Terminal tab without `terminalApi`, no Media tab without `assetsApi`, no Browser
   tab without the `previews` port. An artifact type of the host's own says what it needs with

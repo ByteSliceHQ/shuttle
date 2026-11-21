@@ -53,11 +53,18 @@ export interface ShuttleHostOptions {
   readonly fetch?: ShuttleFetch
   /**
    * What the backend authenticates a request by, when that is not a cookie: asked before every
-   * request that can carry a header (the API, signals, an upload) and added to it.
+   * request that can carry a header (the API, signals, a run's log, an upload) and added to it.
    * An image, a download and a terminal are addresses the browser opens by itself and cannot
    * carry one; they need the backend's cookie.
    */
   readonly headers?: () => Readonly<Record<string, string>>
+  /**
+   * Whether to ask the backend for read grants, which a run's live log is opened with when the
+   * page cannot put a credential on its WebSocket. Left out, it is on exactly when the backend
+   * is on another origin than the page. The backend gives them when it is served with a
+   * `grantSecret`.
+   */
+  readonly grants?: boolean
   /** The machine this is running on, when it has one. */
   readonly device?: ShuttleDevice | null
   /**
@@ -89,6 +96,11 @@ const CapabilitiesSchema = z.object({
   previews: z.boolean().optional(),
   grants: z.boolean().optional(),
 })
+
+const GrantSchema = z.object({ grant: z.string().min(1), expiresAt: z.number() })
+
+/** A grant is renewed this long before it runs out, so a reconnect never offers a dead one. */
+const GRANT_RENEW_MS = 60_000
 
 /**
  * Everything Shuttle's components need from where they are running that is not React: how to
@@ -209,6 +221,60 @@ export function createShuttleHost(options: ShuttleHostOptions = {}): ShuttleHost
     })
   }
 
+  const grantsWanted = () => options.grants ?? crossOrigin()
+  const grants = new Map<string, z.infer<typeof GrantSchema>>()
+  const asking = new Map<string, Promise<void>>()
+
+  /** Asks the backend for a run's read grant, once at a time. A refusal leaves the run without. */
+  const renewGrant = (runId: string): Promise<void> => {
+    const pending = asking.get(runId)
+
+    if (pending) {
+      return pending
+    }
+
+    const asked = request(`${baseUrl}/runs/${encodeURIComponent(runId)}/grant`, { method: 'POST' })
+      .then(async (response) => {
+        const given = response.ok ? GrantSchema.safeParse(await response.json()) : null
+
+        if (given?.success === true) {
+          grants.set(runId, given.data)
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        asking.delete(runId)
+      })
+
+    asking.set(runId, asked)
+
+    return asked
+  }
+
+  /**
+   * The run's read grant, for its store's next connection. One that is missing or about to run
+   * out is asked for now, and is there by the time the store connects again.
+   */
+  const grantFor = (runId: string): string | undefined => {
+    if (runId === '' || !grantsWanted()) {
+      return undefined
+    }
+
+    const held = grants.get(runId)
+
+    if (held === undefined || held.expiresAt - Date.now() < GRANT_RENEW_MS) {
+      void renewGrant(runId)
+    }
+
+    return held !== undefined && held.expiresAt > Date.now() ? held.grant : undefined
+  }
+
+  // Where the types are Bun's, `fetch` also has a `preconnect`, which a run store never calls.
+  const storeFetch: typeof fetch = Object.assign(
+    (input: RequestInfo | URL, init?: RequestInit) => request(input, init),
+    { preconnect: () => {} },
+  )
+
   let capabilities: Promise<ShuttleCapabilities | null> | undefined
 
   const client: ShuttleClient = createORPCClient(
@@ -236,6 +302,10 @@ export function createShuttleHost(options: ShuttleHostOptions = {}): ShuttleHost
       transport: 'websocket',
       retainMs: SESSION_RETAIN_MS,
       cache: eventCacheFor(userId),
+      // The run's log is read with the same credentials as every other call, and its live
+      // socket, which can carry none, with a grant.
+      fetch: storeFetch,
+      grant: grantFor,
       ...options.runStore?.(userId),
     }
 
@@ -300,6 +370,11 @@ export function createShuttleHost(options: ShuttleHostOptions = {}): ShuttleHost
     },
 
     async whenRunSynced(runId, userId) {
+      // With a grant in hand the store's first connection is live, with no refusal to recover from.
+      if (grantsWanted()) {
+        await renewGrant(runId)
+      }
+
       await preloadRunStore(runId, {
         ...runStoreOptions(userId),
         signal: AbortSignal.timeout(WAIT_MS),

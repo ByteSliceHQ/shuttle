@@ -61,7 +61,7 @@
     "@orpc/openapi": "1.16.2",
     "@orpc/server": "1.16.2",
     "@pierre/sdk": "^0.1.2",
-    "@swirls/looms": "0.20.0",
+    "@swirls/looms": "0.22.0",
     "@swirls/shuttle": "0.4.0",
     "ai": "^7.0.0",
     "effect": "4.1.4",
