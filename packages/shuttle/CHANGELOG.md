@@ -1,5 +1,13 @@
 # @swirls/shuttle
 
+## 0.5.0
+
+### Minor Changes
+
+- b73e904: What only the engine needs is no longer installed with the package: `ai`, `@cloudflare/sandbox` and `@daytona/sdk` are optional peer dependencies, which a host that runs `@swirls/shuttle/engine` installs beside it. A page that uses the React parts does not carry them.
+- b73e904: The engine serves Shuttle's HTTP API in modules a host mounts: `serveShuttle(host, { modules })` from `@swirls/shuttle/engine`, with `sessionApi`, `assetsApi`, `terminalApi` and `firehoseApi` there and `runsApi` and `shuttleApiModules` in `@swirls/shuttle/engine/worker`. It asks the host's identity port who a request acts for, checks who may open the run a path names, answers pages on other origins (`origins`), and gives read grants for a run's log (`grantSecret`). Two new ports, `people` and `previews`, replace what those routes read from Shuttle's own database. See `docs/hosting.md`.
+- b73e904: The React parts work against a host that mounts only some of the backend. `createShuttleHost` takes `headers`, added to every request that can carry one, and asks for the backend's cookie when it is on another origin. The parts read `GET /capabilities` and leave out artifact types whose `needs` the backend does not serve. `<Shuttle.Session readOnly>` shows a session without the means to change it. `Tenant.runs.pulls` may be `null` for a host with no pull request inbox. The parts read a run's log with the same credentials, and across origins open its live socket with a read grant they ask the backend for. `@swirls/looms` moves to 0.22.0; a host installs the same version.
+
 ## 0.4.0
 
 ### Minor Changes
