@@ -1,12 +1,13 @@
 /**
  * Puts `@swirls/shuttle` together: the one package this repository publishes.
  *
- * `@shuttle/api`, `@shuttle/core` and `@shuttle/react` stay private and are what the apps here
- * use, as TypeScript source. Each is compiled by `tsc`; this copies their output into `dist`
- * under its own name, so `@shuttle/react` becomes `@swirls/shuttle/react`, and rewrites what
- * they say about each other to match.
+ * The parts (`@shuttle/api`, `@shuttle/core`, `@shuttle/react`, and the engine a host runs:
+ * `@shuttle/engine`, `@shuttle/sandbox`, `@shuttle/git`, `@shuttle/runner-protocol`) stay private
+ * and are what the apps here use, as TypeScript source. Each is compiled by `tsc`; this copies
+ * their output into `dist` under its own name, so `@shuttle/react` becomes
+ * `@swirls/shuttle/react`, and rewrites what they say about each other to match.
  */
-import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -14,7 +15,22 @@ const packageRoot = fileURLToPath(new URL('..', import.meta.url))
 const packagesRoot = fileURLToPath(new URL('../..', import.meta.url))
 const outputRoot = join(packageRoot, 'dist')
 
-const modules = ['api', 'core', 'react'] as const
+/** Each part, and a file its build always has, to tell a part that was never built. */
+const modules = {
+  api: 'index.js',
+  core: 'workspace.js',
+  react: 'index.js',
+  'runner-protocol': 'index.js',
+  git: 'access.js',
+  sandbox: 'src/workspace.js',
+  engine: 'index.js',
+} as const
+
+const names = Object.keys(modules).join('|')
+
+/** One of the parts, by the name the sources here import it under. */
+const privateSpecifier = new RegExp(`^@shuttle/(${names})(/|$)`)
+const privateName = new RegExp(`@shuttle/(${names})\\b`, 'g')
 
 const moduleSpecifier = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(['"])([^'"]+)\2/g
 
@@ -26,10 +42,10 @@ async function isFile(path: string): Promise<boolean> {
   }
 }
 
-async function copyBuild(name: (typeof modules)[number]): Promise<void> {
+async function copyBuild(name: string, marker: string): Promise<void> {
   const source = join(packagesRoot, name, 'dist')
 
-  if (!(await isFile(join(source, name === 'core' ? 'workspace.js' : 'index.js')))) {
+  if (!(await isFile(join(source, marker)))) {
     throw new Error(`Missing ${source}; build @shuttle/${name} before assembling @swirls/shuttle`)
   }
 
@@ -38,6 +54,19 @@ async function copyBuild(name: (typeof modules)[number]): Promise<void> {
     // What `bun run pack` used to leave in a package's `dist`, and source maps.
     filter: (path) => !path.endsWith('.map') && !/\/(package\.json|LICENSE|NOTICE)$/.test(path),
   })
+}
+
+/**
+ * The sandbox is built from two folders, `src` and `bridge`. Nothing published is called `src`,
+ * so its `src` goes out as `lib`: the two stay side by side, as they import each other.
+ */
+async function renameSandboxSource(): Promise<void> {
+  await rename(join(outputRoot, 'sandbox', 'src'), join(outputRoot, 'sandbox', 'lib'))
+}
+
+/** A part's module as the published package exports it. */
+function published(specifier: string): string {
+  return specifier.replace('@shuttle/', '@swirls/shuttle/')
 }
 
 /**
@@ -73,8 +102,8 @@ async function rewrite(file: string): Promise<void> {
 
     if (specifier.startsWith('.')) {
       renamed.set(specifier, await withExtension(file, specifier))
-    } else if (/^@shuttle\/(api|core|react)(\/|$)/.test(specifier)) {
-      renamed.set(specifier, specifier.replace('@shuttle/', '@swirls/shuttle/'))
+    } else if (privateSpecifier.test(specifier)) {
+      renamed.set(specifier, published(specifier))
     } else if (specifier.startsWith('@shuttle/')) {
       throw new Error(`${file} imports ${specifier}, which is not published`)
     }
@@ -89,7 +118,7 @@ async function rewrite(file: string): Promise<void> {
           `${prefix}${quote}${renamed.get(specifier) ?? specifier}${quote}`,
       )
       // And where a comment names one of them, since comments are what an editor shows.
-      .replaceAll(/@shuttle\/(api|core|react)\b/g, '@swirls/shuttle/$1'),
+      .replaceAll(privateName, '@swirls/shuttle/$1'),
   )
 }
 
@@ -107,7 +136,8 @@ async function rewriteAll(directory: string): Promise<void> {
 
 await rm(outputRoot, { recursive: true, force: true })
 await mkdir(outputRoot, { recursive: true })
-await Promise.all(modules.map(copyBuild))
+await Promise.all(Object.entries(modules).map(([name, marker]) => copyBuild(name, marker)))
+await renameSandboxSource()
 await rewriteAll(outputRoot)
 
 // The theme tells Tailwind to read the files beside it. In the source those are the parts'

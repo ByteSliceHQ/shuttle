@@ -53,18 +53,26 @@ The host binds `LOOMS_RUN` to its subclass, `SANDBOX` to `SessionSandbox` or its
 which is why they have an entry point of their own. `@shuttle/engine` itself loads anywhere, so a
 host's other code and its tests can import the ports and the headless API under Bun or Node.
 
-## From another workspace
+## From npm
 
-The packages are TypeScript source with `workspace:*` dependencies on each other, so a host outside
-this repository adds them to its own Bun workspace: check this repository out inside the host's
-(a git submodule, say `vendor/shuttle`) and list `vendor/shuttle/packages/{api,core,git,runner-protocol,sandbox,engine}`
-in the host's `workspaces`. The host then depends on `"@shuttle/engine": "workspace:*"`. Its
-`@swirls/looms` and `effect` versions have to be the ones in `packages/engine/package.json`, so the
-workspace installs one copy of each.
+A host outside this repository installs `@swirls/shuttle`, which carries the same packages built to
+JavaScript with their types:
 
-The sources compile under a host's own `tsconfig` with `strict`, `noUncheckedIndexedAccess`,
-`verbatimModuleSyntax`, `noImplicitReturns`, `noImplicitOverride` and `noFallthroughCasesInSwitch`,
-`lib` `ES2023`, and `@cloudflare/workers-types` in `types`.
+| In this repository          | From npm                           |
+| --------------------------- | ---------------------------------- |
+| `@shuttle/engine`           | `@swirls/shuttle/engine`           |
+| `@shuttle/engine/worker`    | `@swirls/shuttle/engine/worker`    |
+| `@shuttle/engine/<module>`  | `@swirls/shuttle/engine/<module>`  |
+| `@shuttle/git/<module>`     | `@swirls/shuttle/git/<module>`     |
+| `@shuttle/sandbox/<module>` | `@swirls/shuttle/sandbox/<module>` |
+
+The host's `@swirls/looms` and `effect` versions have to be the ones `@swirls/shuttle` depends on,
+so it installs one copy of each. Its `tsconfig` has `@cloudflare/workers-types` in `types`, for the
+bindings the engine's types name, and `skipLibCheck` on.
+
+The sandbox's container image is not in the npm package. A host that runs sandboxes in containers
+or on Daytona builds it from `packages/sandbox/Dockerfile` in this repository; one that runs them
+in memory or on people's own machines needs no image.
 
 ## Host ports
 

@@ -11,6 +11,7 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
+    "build": "bun x tsc -p tsconfig.build.json",
     "check-types": "bun x tsc -p tsconfig.json --noEmit",
     "test": "bun test src"
   },
@@ -24,7 +25,7 @@
     "@swirls/looms": "0.20.0",
     "ai": "^7.0.0",
     "effect": "4.1.4",
-    "zod": "^4.5.4"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260914.1",

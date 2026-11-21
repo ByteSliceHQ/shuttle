@@ -87,7 +87,7 @@ try {
   const published = await manifestOf(packageRoot)
   const drift: string[] = []
 
-  for (const name of ['api', 'core', 'react']) {
+  for (const name of ['api', 'core', 'react', 'runner-protocol', 'git', 'sandbox', 'engine']) {
     const part = await manifestOf(join(root, 'packages', name))
 
     for (const [dependency, range] of Object.entries(part.dependencies ?? {})) {
@@ -151,6 +151,13 @@ try {
     'dist/react/index.d.ts',
     'dist/react/ui.js',
     'dist/react/theme.css',
+    'dist/engine/index.js',
+    'dist/engine/index.d.ts',
+    'dist/engine/worker.js',
+    'dist/git/access.d.ts',
+    'dist/sandbox/lib/session-sandbox.js',
+    'dist/sandbox/bridge/protocol.d.ts',
+    'dist/runner-protocol/index.js',
     'package.json',
     'README.md',
     'CHANGELOG.md',
@@ -189,6 +196,8 @@ try {
     '@types/react-dom@^19',
     // Named by a dependency's own types, which are checked here along with ours.
     '@opentelemetry/api',
+    // The engine's types name a Worker's bindings, which a host's own tsconfig supplies.
+    '@cloudflare/workers-types',
     // Looms takes any `effect` from the one we pin upwards. A host installs ours, as it has to
     // for the two to share one copy.
     ...(published.dependencies?.effect === undefined
@@ -202,12 +211,32 @@ try {
     await run(['bun', 'add', '--ignore-scripts', ...installed], fixture)
   }
 
-  const entries = Object.keys(published.exports ?? {})
-    .filter((entry) => !entry.endsWith('.css'))
+  // The engine's modules are exported by pattern. These stand for it: ones a host imports by
+  // name, one from each part behind a pattern, none of which needs a Worker to load.
+  const byPattern = [
+    '@swirls/shuttle/engine/agents/intake',
+    '@swirls/shuttle/engine/harness',
+    '@swirls/shuttle/engine/session/module',
+    '@swirls/shuttle/engine/tenancy/access',
+    '@swirls/shuttle/engine/tenancy/run-id',
+    '@swirls/shuttle/engine/testing/fake-env',
+    '@swirls/shuttle/engine/workspace/module',
+    '@swirls/shuttle/git/access',
+    '@swirls/shuttle/sandbox/names',
+    '@swirls/shuttle/sandbox/bridge/protocol',
+  ]
+
+  const named = Object.keys(published.exports ?? {})
+    .filter((entry) => !entry.endsWith('.css') && !entry.includes('*'))
     .map((entry) => `@swirls/shuttle${entry.slice(1)}`)
 
+  // The engine's types name a Worker's bindings, so it is checked as a host's Worker would
+  // compile it, further down, and not with the parts a page uses.
+  const hosted = [...named.filter((entry) => entry.includes('/engine')), ...byPattern]
+  const entries = named.filter((entry) => !entry.includes('/engine'))
+
   // What has no need of a browser loads in Node as it is, with every import naming its file.
-  const headless = entries.filter((entry) => !entry.includes('/react'))
+  const headless = [...entries.filter((entry) => !entry.includes('/react')), ...hosted]
 
   await writeFile(join(fixture, 'smoke.mjs'), `${imports(headless)}\nconsole.log('imports ok')\n`)
 
@@ -272,6 +301,84 @@ void [host, ${entries.map((_, index) => `module${index}`).join(', ')}]
   }
 
   await run([join(root, 'node_modules', '.bin', 'tsc'), '--noEmit', '-p', 'tsconfig.json'], fixture)
+
+  // The engine as a host's Worker uses it: its own run and sandbox classes, a port replaced, and
+  // a headless session. The Durable Object classes load only in a Worker, so this one is checked
+  // and not run.
+  await writeFile(
+    join(fixture, 'host.ts'),
+    `${imports(hosted)}
+import {
+  fixedGitAccess,
+  headlessSessions,
+  type EngineEnv,
+  type SessionOutcome,
+  type ShuttleHost,
+} from '@swirls/shuttle/engine'
+import { EventFirehose, SessionSandbox, ShuttleRun } from '@swirls/shuttle/engine/worker'
+
+export { EventFirehose }
+
+const git = fixedGitAccess('token')
+
+export class Run extends ShuttleRun<EngineEnv> {
+  protected override host(env: EngineEnv): ShuttleHost {
+    return { env, ports: { git } }
+  }
+}
+
+export class Sandbox extends SessionSandbox<EngineEnv> {
+  protected override environment(env: EngineEnv) {
+    return { ...env, GIT_ACCESS: git }
+  }
+}
+
+export async function start(env: EngineEnv): Promise<SessionOutcome> {
+  const sessions = headlessSessions({ env, ports: { git } })
+
+  const { runId } = await sessions.start({
+    acting: { kind: 'organization', orgId: 'org1', service: 'build-host' },
+    brief: 'Fix the flaky checkout test',
+    repositories: [{ installationId: 1, fullName: 'acme/shop', defaultBranch: 'main', private: true }],
+  })
+
+  return sessions.outcome(runId)
+}
+
+void [${hosted.map((_, index) => `module${index}`).join(', ')}]
+`,
+  )
+
+  await writeFile(
+    join(fixture, 'tsconfig.host.json'),
+    JSON.stringify(
+      {
+        compilerOptions: {
+          // What docs/hosting.md says a host's tsconfig has.
+          lib: ['ES2023'],
+          module: 'ESNext',
+          moduleResolution: 'Bundler',
+          noImplicitOverride: true,
+          noUncheckedIndexedAccess: true,
+          // On, unlike the page's check above: the engine's declarations repeat Looms' module
+          // types and effect's, which do not check by themselves without the DOM's types.
+          skipLibCheck: true,
+          strict: true,
+          target: 'ESNext',
+          types: ['@cloudflare/workers-types'],
+          verbatimModuleSyntax: true,
+        },
+        include: ['host.ts'],
+      },
+      undefined,
+      2,
+    ),
+  )
+
+  await run(
+    [join(root, 'node_modules', '.bin', 'tsc'), '--noEmit', '-p', 'tsconfig.host.json'],
+    fixture,
+  )
 
   // Bundled with the theme, as a host's page would be. Tailwind itself is the host's to run.
   await writeFile(

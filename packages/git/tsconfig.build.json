@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "types": ["@cloudflare/workers-types"],
+    "paths": {
+      "@shuttle/core/*": ["../core/dist/*.d.ts"]
+    }
+  },
+  "exclude": ["src/**/*.test.ts", "dist"]
+}

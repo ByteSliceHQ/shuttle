@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "types": ["@cloudflare/workers-types", "node"],
+    "paths": {
+      "@shuttle/api": ["../api/dist/index.d.ts"],
+      "@shuttle/git/*": ["../git/dist/*.d.ts"],
+      "@shuttle/runner-protocol": ["../runner-protocol/dist/index.d.ts"]
+    }
+  },
+  "exclude": [
+    "src/**/*.test.ts",
+    "bridge/**/*.test.ts",
+    "bridge/testing",
+    "src/stack-git-fixture.ts",
+    "dist"
+  ]
+}
