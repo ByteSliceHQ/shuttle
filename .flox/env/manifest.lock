@@ -24,9 +24,6 @@
     "hook": {
       "on-activate": "  echo \"Shuttle\"\n  echo \"  bun install\"\n  echo \"  cp apps/worker/.dev.vars.example apps/worker/.dev.vars\"\n  echo \"  bun run dev   # worker :$SHUTTLE_WORKER_PORT + web :$SHUTTLE_WEB_PORT (+ webhook tunnel when GitHub App is set)\"\n"
     },
-    "profile": {
-      "common": "  :\n"
-    },
     "options": {
       "systems": [
         "aarch64-darwin",

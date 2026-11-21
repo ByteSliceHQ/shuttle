@@ -23,10 +23,5 @@ on-activate = '''
   echo "  bun run dev   # worker :$SHUTTLE_WORKER_PORT + web :$SHUTTLE_WEB_PORT (+ webhook tunnel when GitHub App is set)"
 '''
 
-[profile]
-common = '''
-  :
-'''
-
 [options]
 systems = ["aarch64-darwin", "aarch64-linux", "x86_64-linux"]
