@@ -1,7 +1,7 @@
 {
   "name": "@swirls/shuttle",
   "version": "0.4.0",
-  "description": "Shuttle as parts: React components for a development environment built around coding agents, with the API contract and run events they speak",
+  "description": "Shuttle as parts: React components for a development environment built around coding agents, the API contract and run events they speak, and the engine a host runs their sessions on",
   "homepage": "https://github.com/ByteSliceHQ/shuttle#readme",
   "bugs": {
     "url": "https://github.com/ByteSliceHQ/shuttle/issues"
@@ -44,7 +44,31 @@
       "types": "./dist/react/ui.d.ts",
       "import": "./dist/react/ui.js"
     },
-    "./react/theme.css": "./dist/react/theme.css"
+    "./react/theme.css": "./dist/react/theme.css",
+    "./engine": {
+      "types": "./dist/engine/index.d.ts",
+      "import": "./dist/engine/index.js"
+    },
+    "./engine/*": {
+      "types": "./dist/engine/*.d.ts",
+      "import": "./dist/engine/*.js"
+    },
+    "./git/*": {
+      "types": "./dist/git/*.d.ts",
+      "import": "./dist/git/*.js"
+    },
+    "./runner-protocol": {
+      "types": "./dist/runner-protocol/index.d.ts",
+      "import": "./dist/runner-protocol/index.js"
+    },
+    "./sandbox/bridge/*": {
+      "types": "./dist/sandbox/bridge/*.d.ts",
+      "import": "./dist/sandbox/bridge/*.js"
+    },
+    "./sandbox/*": {
+      "types": "./dist/sandbox/lib/*.d.ts",
+      "import": "./dist/sandbox/lib/*.js"
+    }
   },
   "publishConfig": {
     "access": "public"
@@ -53,12 +77,17 @@
     "build": "bun run scripts/assemble.ts"
   },
   "dependencies": {
+    "@ai-sdk/typesafe-ai": "^3.0.35",
+    "@openrouter/ai-sdk-provider": "^3.0.0",
     "@orpc/client": "1.16.2",
     "@orpc/contract": "1.16.2",
+    "@orpc/openapi": "1.16.2",
     "@orpc/openapi-client": "1.16.2",
+    "@orpc/server": "1.16.2",
     "@orpc/tanstack-query": "1.16.2",
     "@pierre/diffs": "1.7.0-beta.4",
     "@pierre/highlights": "0.5.1",
+    "@pierre/sdk": "^0.1.2",
     "@pierre/words": "0.2.2",
     "@swirls/looms": "0.20.0",
     "@tanstack/react-virtual": "^3.14.26",
@@ -77,16 +106,36 @@
   "devDependencies": {
     "@shuttle/api": "workspace:*",
     "@shuttle/core": "workspace:*",
-    "@shuttle/react": "workspace:*"
+    "@shuttle/engine": "workspace:*",
+    "@shuttle/git": "workspace:*",
+    "@shuttle/react": "workspace:*",
+    "@shuttle/runner-protocol": "workspace:*",
+    "@shuttle/sandbox": "workspace:*"
   },
   "peerDependencies": {
+    "@cloudflare/sandbox": "^1.0.3",
+    "@cloudflare/workers-types": "^5.20260914.1",
+    "@daytona/sdk": "^0.231.1",
     "@tanstack/react-query": "^5.107.1",
+    "ai": "^7.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwindcss": "^4.3.3"
   },
   "peerDependenciesMeta": {
+    "@cloudflare/sandbox": {
+      "optional": true
+    },
+    "@cloudflare/workers-types": {
+      "optional": true
+    },
+    "@daytona/sdk": {
+      "optional": true
+    },
     "@tanstack/react-query": {
+      "optional": true
+    },
+    "ai": {
       "optional": true
     },
     "react": {

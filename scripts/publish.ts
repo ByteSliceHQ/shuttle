@@ -1,7 +1,7 @@
 /**
  * What the Release workflow runs once the version pull request is merged: publishes
- * `@swirls/shuttle` and `@swirls/shuttle-engine` if this version of either is not on npm yet,
- * after checking the packages as they will be installed. It is not for running from a developer's checkout.
+ * `@swirls/shuttle` if this version is not on npm yet, after checking the package as it will
+ * be installed. It is not for running from a developer's checkout.
  */
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -92,54 +92,27 @@ async function createMissingTags(): Promise<void> {
   await runOrThrow(['bun', 'x', 'changeset', 'tag'], root)
 }
 
-/** The two packages published from here. They are versioned together (`.changeset/config.json`). */
-const PUBLISHED = ['shuttle', 'shuttle-engine']
+const manifest: unknown = JSON.parse(
+  await readFile(join(root, 'packages', 'shuttle', 'package.json'), 'utf8'),
+)
 
-async function identityOf(folder: string): Promise<PackageIdentity> {
-  const manifest: unknown = JSON.parse(
-    await readFile(join(root, 'packages', folder, 'package.json'), 'utf8'),
-  )
-
-  if (!isPackageIdentity(manifest)) {
-    throw new Error(`packages/${folder}/package.json has no name or version`)
-  }
-
-  return manifest
+if (!isPackageIdentity(manifest)) {
+  throw new Error('packages/shuttle/package.json has no name or version')
 }
 
-async function isOnNpm({ name, version }: PackageIdentity): Promise<boolean> {
-  const published = await fetch(
-    `https://registry.npmjs.org/${encodeURIComponent(name)}/${version}`,
-    { method: 'HEAD' },
-  )
+const { name, version } = manifest
 
-  return published.ok
-}
+const published = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name)}/${version}`, {
+  method: 'HEAD',
+})
 
-const packages = await Promise.all(PUBLISHED.map(identityOf))
-const missing: PackageIdentity[] = []
-
-for (const identity of packages) {
-  if (!(await isOnNpm(identity))) {
-    missing.push(identity)
-  }
-}
-
-const label = packages.map(({ name, version }) => `${name}@${version}`).join(' and ')
-
-if (missing.length === 0) {
-  console.log(`${label} are already on npm; creating any tags the release still lacks.`)
+if (published.ok) {
+  console.log(`${name}@${version} is already on npm; creating any tags the release still lacks.`)
   await createMissingTags()
   process.exit(0)
 }
 
-// The two share a version, so a refusal that names it is about whichever is still missing.
-const [{ name, version } = { name: '', version: '' }] = missing
-
-console.log(
-  `${missing.map((identity) => `${identity.name}@${identity.version}`).join(' and ')} not on npm yet; checking the packages and publishing.`,
-)
-
+console.log(`${name}@${version} is not on npm yet; checking the package and publishing.`)
 await runOrThrow(['bun', 'run', 'check:package'], root)
 
 const publish = await run(['bun', 'x', 'changeset', 'publish'], root)

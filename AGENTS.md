@@ -106,18 +106,20 @@ repository's web and desktop apps, and other products. It has three entry points
   session part draws. The package reads no `import.meta.env`; what differs by environment is
   an option of `createShuttleHost`. `examples/custom-ade` is a host with no workspace, and is
   the place to try a part on its own.
-- **Outside this repository** the parts are `@swirls/shuttle`, one of the two packages published
-  from here. `@shuttle/api`, `@shuttle/core` and `@shuttle/react` stay private and are what the
-  apps use; `packages/shuttle` puts their compiled output together under `@swirls/shuttle/api`,
-  `/core/…` and `/react`. The other is `@swirls/shuttle-engine`, which `packages/shuttle-engine`
-  puts together from `@shuttle/engine`, `@shuttle/sandbox`, `@shuttle/git` and
-  `@shuttle/runner-protocol`. A dependency added to one of the private packages is added to the
-  published package it goes into too, and `bun run check:package` fails until it is. A type
+- **Outside this repository** the parts are `@swirls/shuttle`, the only package published from
+  here. `@shuttle/api`, `@shuttle/core` and `@shuttle/react` stay private and are what the apps
+  use; `packages/shuttle` puts their compiled output together under `@swirls/shuttle/api`,
+  `/core/…` and `/react`. The engine goes out the same way, from `@shuttle/engine`,
+  `@shuttle/sandbox`, `@shuttle/git` and `@shuttle/runner-protocol`, under
+  `@swirls/shuttle/engine`, `/sandbox/…` and `/git/…`. A dependency added to any of them is
+  added to `packages/shuttle/package.json` too, as a dependency, or as an optional peer when
+  only a host that runs the engine needs it (as `ai` is); `bun run check:package` fails until
+  it is. A type
   that is exported has to be nameable in a declaration file, so give a query's options an
   explicit type where the inferred one carries the query library's tags.
-- **Changesets:** a pull request that changes one of those packages in a way someone installing
-  `@swirls/shuttle` or `@swirls/shuttle-engine` would see adds one with `bun run changeset`. The
-  two are versioned together. See `RELEASE.md`.
+- **Changesets:** a pull request that changes `packages/api`, `core`, `react` or `shuttle` in a
+  way someone installing `@swirls/shuttle` would see adds one with `bun run changeset`. See
+  `RELEASE.md`.
 - **Exports:** `src/index.ts` and `src/ui.ts` list what hosts may use. Add to them when a host
   needs something; a host never reaches into `src`.
 - **Styles:** `src/theme.css` holds the tokens and the classes the parts use. It tells Tailwind
