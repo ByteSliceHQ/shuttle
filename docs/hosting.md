@@ -23,11 +23,18 @@ declares the bindings it provides and passes them as `env`.
 import type { ShuttleHost } from '@shuttle/engine'
 import { EventFirehose, SessionSandbox, ShuttleRun } from '@shuttle/engine/worker'
 
-export { EventFirehose, SessionSandbox }
+export { EventFirehose }
 
 export class LoomsRun extends ShuttleRun<HostEnv> {
   protected override host(env: HostEnv): ShuttleHost {
     return { env, ports: {/* what this host replaces */} }
+  }
+}
+
+// A host that replaces nothing the sandbox uses exports `SessionSandbox` as it is.
+export class Sandbox extends SessionSandbox<HostEnv> {
+  protected override environment(env: HostEnv) {
+    return { ...env, GIT_ACCESS: hostGit(env) }
   }
 }
 ```
@@ -37,8 +44,12 @@ with Looms and answers the calls the engine makes from one run to another (`Loom
 open a session, where its sandbox is, its agents and models). A host overrides `configure` only to
 add to what it returns, as `apps/worker/src/index.ts` adds its timing observer.
 
-The host binds `LOOMS_RUN` to its subclass, `SANDBOX` to `SessionSandbox` and `EVENT_FIREHOSE` to
-`EventFirehose`, as `apps/worker/wrangler.jsonc` does. Those three classes load only in a Worker,
+The sandbox is a Durable Object of its own, so it does not see the run's ports. It clones and
+pushes with what `environment` returns: a host that supplies the `git` port gives the same
+`GitAccess` there as `GIT_ACCESS`, or the sandbox asks for Shuttle's own GitHub App key.
+
+The host binds `LOOMS_RUN` to its subclass, `SANDBOX` to `SessionSandbox` or its subclass of it, and
+`EVENT_FIREHOSE` to `EventFirehose`, as `apps/worker/wrangler.jsonc` does. Those three classes load only in a Worker,
 which is why they have an entry point of their own. `@shuttle/engine` itself loads anywhere, so a
 host's other code and its tests can import the ports and the headless API under Bun or Node.
 
@@ -46,7 +57,7 @@ host's other code and its tests can import the ports and the headless API under 
 
 The packages are TypeScript source with `workspace:*` dependencies on each other, so a host outside
 this repository adds them to its own Bun workspace: check this repository out inside the host's
-(a git submodule, say `vendor/shuttle`) and list `vendor/shuttle/packages/{api,core,git,sandbox,engine}`
+(a git submodule, say `vendor/shuttle`) and list `vendor/shuttle/packages/{api,core,git,runner-protocol,sandbox,engine}`
 in the host's `workspaces`. The host then depends on `"@shuttle/engine": "workspace:*"`. Its
 `@swirls/looms` and `effect` versions have to be the ones in `packages/engine/package.json`, so the
 workspace installs one copy of each.
@@ -71,7 +82,9 @@ A port is a small interface. Leave it out and Shuttle does what it does standalo
 a shared secret and names who it acts for in `x-shuttle-org` (and `x-shuttle-user` for a person).
 
 `sessionStart` is asked before every session: one a person starts in the app (`person`), a review
-Shuttle opens by itself (`auto-review`), and a host's own (`host`, with the metadata it gave).
+Shuttle opens by itself (`auto-review`), and a host's own (`host`, with the metadata it gave). A
+host's start repeated with the same `idempotencyKey` is the same session and is not asked again, so
+a port that counts starts counts each session once.
 
 A turn runs on the credential of the person it is working for, and never on another person's. The
 `credentials` port says whose that is (that person, an organization, or nobody) and may supply API
@@ -124,9 +137,17 @@ string map Shuttle carries on the session (`hostMetadata` in the session input) 
 
 A session is `blocked` while it has a question open, whatever else is running. `question.kind` says
 how to answer: a `question` (an agent's `ask_user`) takes `{ text }`, or `null` for the agent's own
-judgment; a `publish-pull-request` proposal takes `{ decision: 'approve' | 'reject' }`, and
-`expiresAt` is when the host's approval policy stops accepting one. The decision is recorded as made
-by whoever `acting` is.
+judgment; a `publish-pull-request` proposal, or a `submit-review` (a pull request review an agent
+has drafted), takes `{ decision: 'approve' | 'reject' }`. `expiresAt` is when the host's approval
+policy stops accepting a decision on a proposal. An answer of the wrong shape for the question, or
+for one the session does not have open, is refused with `HeadlessRequestError` and decides nothing.
+The decision is recorded as made by whoever `acting` is. `question.approvalId` is null in the rare
+case that the run is waiting on a person and does not say for which approval.
+
+`answerHeadlessQuestion` refuses an `acting` that could not open the session: another
+organization, or anyone but the owner and the people it is shared with for a person's private
+session. `headlessOutcome` takes no `acting` and answers for any run id, so a host that serves it
+to callers checks first that the session is the caller's to read.
 
 `headlessSessions(host)` gives the same three calls bound to a host (`start`, `outcome`, `answer`),
 for whatever launches its sessions.
