@@ -110,6 +110,7 @@ function memoryHost({ approvals, conductor = stubAgent('conductor') }: MemoryHos
     launch: async (args: { kind: string; definitionName: string; input?: JsonValue }) => {
       await looms().launchRun({ ...args, runId: name })
     },
+    getAccess: async () => access.get(name) ?? null,
     setAccess: async (given: SessionAccess) => {
       access.set(name, given)
       return given

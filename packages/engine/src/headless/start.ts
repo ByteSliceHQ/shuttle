@@ -106,6 +106,11 @@ function accessFor(acting: ActingFor): SessionAccess {
     : { ownerId: owner, memberIds: [], visibility: 'private' }
 }
 
+/** Whether a session already recorded as `recorded` is the one `access` would start. */
+function sameAccess(recorded: SessionAccess, access: SessionAccess): boolean {
+  return recorded.ownerId === access.ownerId && recorded.visibility === access.visibility
+}
+
 /**
  * Starts a session from a repository and a brief, with no folder. The session works the way one a
  * person starts does: the same agents, in a sandbox of its own, publishing through the same
@@ -113,7 +118,9 @@ function accessFor(acting: ActingFor): SessionAccess {
  * stands with {@link headlessOutcome}.
  *
  * The host's `sessionStart` port decides first, and a refusal is thrown as
- * `SessionStartRefusedError` before anything is created.
+ * `SessionStartRefusedError` before anything is created. Asking again with the same idempotency
+ * key returns the session already started and changes nothing on it; a key that names a session
+ * someone else started is refused.
  */
 export async function startHeadlessSession(
   host: ShuttleHost,
@@ -164,14 +171,25 @@ export async function startHeadlessSession(
   const runId = scopedRunId(orgId, `session_${request.idempotencyKey ?? crypto.randomUUID()}`)
 
   const session = loomsStub(env.LOOMS_RUN, runId)
+  const access = accessFor(request.acting)
+  const recorded = await session.getAccess()
 
-  // Recorded before the session exists, so there is no moment when it is open to everyone, and
-  // its first turn already runs on the harness the host chose.
-  await session.setAccess(accessFor(request.acting))
+  if (recorded === null) {
+    // Recorded before the session exists, so there is no moment when it is open to everyone, and
+    // its first turn already runs on the harness the host chose.
+    await session.setAccess(access)
 
-  if (request.harness !== undefined) {
-    await session.setHarness(request.harness)
+    if (request.harness !== undefined) {
+      await session.setHarness(request.harness)
+    }
+  } else if (!sameAccess(recorded, access)) {
+    // A key names one session in the organization. Someone else's is not theirs to take over.
+    throw new HeadlessRequestError('that idempotency key names a session someone else started')
   }
+
+  // Asking again leaves the session's access and harness as they are. The request is sent again,
+  // which the workspace ignores for a session it already has, so a start that stopped before it
+  // got this far is finished.
 
   await loomsStub(env.LOOMS_RUN, listedIn).signal([
     requestSession({

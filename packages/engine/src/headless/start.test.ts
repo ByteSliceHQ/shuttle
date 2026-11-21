@@ -50,6 +50,7 @@ function recordingNamespace() {
     return {
       getRun: async () => ({ startIdentity: { kind: 'x' } }),
       launch: async () => {},
+      getAccess: async () => recorded.access,
       setAccess: async (access: SessionAccess) => {
         recorded.access = access
         return access
@@ -88,6 +89,66 @@ const organization: ActingFor = { kind: 'organization', orgId: 'org1', service: 
 function request(overrides: Partial<HeadlessSessionRequest> = {}): HeadlessSessionRequest {
   return { acting: organization, brief: 'Fix the flaky test', repositories: [repo], ...overrides }
 }
+
+describe('starting again with the same idempotency key', () => {
+  const other: ActingFor = {
+    kind: 'person',
+    actor: { userId: 'u2', orgId: 'org1', role: 'member', name: 'Grace', email: '' },
+  }
+
+  test('returns the same session and leaves its harness as it was', async () => {
+    const { namespace, runs } = recordingNamespace()
+    const env = fakeEnv({ LOOMS_RUN: namespace })
+
+    const first = await startHeadlessSession(
+      { env },
+      request({ acting: person, idempotencyKey: 'wi-7', harness: 'claude-code' }),
+    )
+
+    const again = await startHeadlessSession(
+      { env },
+      request({ acting: person, idempotencyKey: 'wi-7', harness: 'codex' }),
+    )
+
+    expect(again.runId).toBe(first.runId)
+    expect(runs.get(first.runId)?.harness).toBe('claude-code')
+  })
+
+  test("refuses a key that names another person's session, and changes nothing on it", async () => {
+    const { namespace, runs } = recordingNamespace()
+    const env = fakeEnv({ LOOMS_RUN: namespace })
+
+    const { runId } = await startHeadlessSession(
+      { env },
+      request({ acting: person, idempotencyKey: 'wi-7' }),
+    )
+
+    const refused = await rejection(
+      startHeadlessSession({ env }, request({ acting: other, idempotencyKey: 'wi-7' })),
+    )
+
+    expect(refused).toBeInstanceOf(HeadlessRequestError)
+
+    expect(runs.get(runId)?.access).toEqual({
+      ownerId: 'u1',
+      memberIds: [],
+      visibility: 'private',
+    })
+  })
+
+  test("refuses an organization's key for a person's session", async () => {
+    const { namespace } = recordingNamespace()
+    const env = fakeEnv({ LOOMS_RUN: namespace })
+
+    await startHeadlessSession({ env }, request({ acting: person, idempotencyKey: 'wi-7' }))
+
+    const refused = await rejection(
+      startHeadlessSession({ env }, request({ acting: organization, idempotencyKey: 'wi-7' })),
+    )
+
+    expect(refused).toBeInstanceOf(HeadlessRequestError)
+  })
+})
 
 describe('startHeadlessSession', () => {
   test('requests a session with no folder, carrying the host metadata', async () => {
