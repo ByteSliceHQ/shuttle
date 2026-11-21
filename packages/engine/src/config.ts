@@ -148,7 +148,7 @@ export function resolveLlm(
   storage?: DurableObjectStorage,
   runId?: string,
 ): LlmAdapter {
-  const openRouter = resolveOpenRouterLlm(env, storage, runId)
+  const openRouter = resolveOpenRouterLlm(env, credentialPort, storage, runId)
 
   if (storage === undefined || runId === undefined || runId === '') {
     return openRouter
@@ -283,13 +283,47 @@ export function resolveLlm(
   }
 }
 
+/**
+ * The OpenRouter adapter for a run. When the host's credentials port names a model key for the
+ * run's organization, its model calls are made with that key, asked for on each call so a key
+ * the organization changes is taken up; otherwise with the deployment's `OPENROUTER_API_KEY`.
+ * With neither, the run answers from a stub.
+ */
 function resolveOpenRouterLlm(
   env: EngineEnv,
+  credentialPort: CredentialPort,
   storage?: DurableObjectStorage,
   runId?: string,
 ): LlmAdapter {
-  const apiKey = env.OPENROUTER_API_KEY
+  if (credentialPort.modelKey === undefined || runId === undefined || runId === '') {
+    return openRouterLlm(env, env.OPENROUTER_API_KEY, storage, runId)
+  }
 
+  // One adapter per key, so a run keeps the models it learned reject reasoning settings.
+  const adapters = new Map<string, LlmAdapter>()
+
+  return {
+    complete: async (args: LlmCompleteArgs) => {
+      const key =
+        (await credentialPort.modelKey?.({ orgId: orgOfRun(runId), runId })) ??
+        env.OPENROUTER_API_KEY ??
+        ''
+
+      const adapter = adapters.get(key) ?? openRouterLlm(env, key, storage, runId)
+
+      adapters.set(key, adapter)
+
+      return adapter.complete(args)
+    },
+  }
+}
+
+function openRouterLlm(
+  env: EngineEnv,
+  apiKey: string | undefined,
+  storage?: DurableObjectStorage,
+  runId?: string,
+): LlmAdapter {
   if (apiKey === undefined || apiKey === '') {
     return createStubThinkingLlm()
   }

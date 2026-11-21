@@ -39,6 +39,17 @@ export interface CredentialPort {
    * when it holds none, and then a person's turn runs on the sign-in Shuttle keeps for them.
    */
   apiKeys?(access: CredentialAccess): Promise<Readonly<Record<string, string>> | null>
+  /**
+   * The OpenRouter key Shuttle's own agent loop uses for a run, so the organization it works for
+   * pays for it. Null, or no `modelKey`, and the run uses the deployment's `OPENROUTER_API_KEY`.
+   */
+  modelKey?(request: ModelKeyRequest): Promise<string | null>
+}
+
+/** Which run is about to call a model, and the organization it belongs to. */
+export interface ModelKeyRequest {
+  readonly runId: string
+  readonly orgId: string | null
 }
 
 /** Shuttle's own behaviour: the person the turn is working for, and nobody when no one asked. */

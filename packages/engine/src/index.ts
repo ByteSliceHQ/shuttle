@@ -44,6 +44,7 @@ export {
   type CredentialAccess,
   type CredentialOwner,
   type CredentialPort,
+  type ModelKeyRequest,
   type TurnCredentialRequest,
 } from './ports/credentials'
 

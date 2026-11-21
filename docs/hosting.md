@@ -78,7 +78,9 @@ A turn runs on the credential of the person it is working for, and never on anot
 keys for them as environment variables (`apiKeys`). A person's sign-in with a vendor stays in
 Shuttle's own encrypted store, in the organization's workspace run, and is only ever placed in that
 person's turns: a port cannot read it, hold it, or supply one. An organization has API keys or
-nothing.
+nothing. `modelKey` is the same for Shuttle's own agent loop: the OpenRouter key a run's model calls
+use, so the organization it works for pays; without one the run uses the deployment's
+`OPENROUTER_API_KEY`.
 
 Approval expiry covers the pull request publish gate. A decision after the expiry is refused and the
 agent is told the proposal expired. Nothing wakes the session when the time passes; the gate is
