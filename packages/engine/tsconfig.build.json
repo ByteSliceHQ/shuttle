@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "types": ["@cloudflare/workers-types"],
+    "paths": {
+      "@shuttle/api": ["../api/dist/index.d.ts"],
+      "@shuttle/core/*": ["../core/dist/*.d.ts"],
+      "@shuttle/git/*": ["../git/dist/*.d.ts"],
+      "@shuttle/runner-protocol": ["../runner-protocol/dist/index.d.ts"],
+      "@shuttle/sandbox/bridge/*": ["../sandbox/dist/bridge/*.d.ts"],
+      "@shuttle/sandbox/*": ["../sandbox/dist/src/*.d.ts"]
+    }
+  },
+  "exclude": ["src/**/*.test.ts", "src/firehose/memory-sql.ts", "dist"]
+}
