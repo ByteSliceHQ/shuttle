@@ -2,10 +2,14 @@ schema-version = "1.13.0"
 
 [install]
 bun.pkg-path = "bun"
+bun.version = "1.4.4"
+bun.pkg-group = "bun"
 # Wrangler / Vite tooling expects a Node toolchain on PATH.
 nodejs.pkg-path = "nodejs"
+nodejs.version = "24.16.0"
 # Quick tunnels for local GitHub webhook delivery (`bun run dev`).
 cloudflared.pkg-path = "cloudflared"
+cloudflared.version = "2026.6.1"
 
 [vars]
 SHUTTLE_WORKER_PORT = "8790"
@@ -13,16 +17,16 @@ SHUTTLE_WEB_PORT = "5180"
 
 [hook]
 on-activate = '''
-  echo "Shuttle"
-  echo "  bun install"
+  echo
+  echo "📦 Installing dependencies..."
+  echo
+  bun install --frozen-lockfile
+  echo
+  echo "🪢 Shuttle"
   echo "  cp apps/worker/.dev.vars.example apps/worker/.dev.vars"
   echo "  bun run dev   # worker :$SHUTTLE_WORKER_PORT + web :$SHUTTLE_WEB_PORT (+ webhook tunnel when GitHub App is set)"
-'''
-
-[profile]
-common = '''
-  :
+  echo
 '''
 
 [options]
-# systems left default
+systems = ["aarch64-darwin", "aarch64-linux", "x86_64-linux"]
