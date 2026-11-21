@@ -31,7 +31,7 @@ import {
 } from './harness'
 import { loomsStub, type LoomsRunStub } from './looms-stub'
 import { shuttleModules } from './modules'
-import type { ShuttleHost } from './ports/host'
+import { projectorsFor, type ShuttleHost } from './ports/host'
 import {
   readSandboxBinding,
   readSandboxPlacement,
@@ -98,11 +98,17 @@ export abstract class ShuttleRun<Env extends EngineEnv = EngineEnv>
       throw new Error('a Shuttle run requires a named Durable Object id')
     }
 
+    const host = this.host(env)
+
     return {
-      modules: shuttleModules(this.host(env), runId, { storage: this.ctx.storage }),
+      modules: shuttleModules(host, runId, { storage: this.ctx.storage }),
       launcher: durableObjectLauncher(env.LOOMS_RUN),
       attributes: shuttleAttributes,
-      projectors: resolveProjectors(env, { runId, storage: this.ctx.storage }),
+      projectors: projectorsFor(
+        host,
+        runId,
+        resolveProjectors(env, { runId, storage: this.ctx.storage }),
+      ),
       // Only the Worker reaches this object, and it has already decided the request. It says who
       // the request acts as, and that is recorded on the events the request sends.
       authorize: forwardedActorAuth(),

@@ -1,4 +1,5 @@
 import type { GitAccess } from '@shuttle/git/access'
+import type { Projector } from '@swirls/looms/projectors'
 
 import type { EngineEnv } from '../env'
 import { neverExpire, type ApprovalPolicy } from './approvals'
@@ -39,6 +40,21 @@ export interface HostPorts {
 export interface ShuttleHost {
   readonly env: EngineEnv
   readonly ports?: Partial<HostPorts>
+  /**
+   * What the host also copies a run's events to, beside what Shuttle projects itself: an event
+   * log, a stream, an index of its own. Asked once for each run, when its object is configured,
+   * with the run's id. Standalone: nothing more.
+   */
+  readonly projectors?: (run: { readonly runId: string }) => readonly Projector[]
+}
+
+/** The projectors a run gets: Shuttle's own first, then the host's, in the order it gave them. */
+export function projectorsFor(
+  host: ShuttleHost,
+  runId: string,
+  own: readonly Projector[],
+): Projector[] {
+  return [...own, ...(host.projectors?.({ runId }) ?? [])]
 }
 
 export interface ResolvedHost {
