@@ -1,4 +1,10 @@
-import { personalWorkspaceRunId, playbookRunId, pullsRunId, workspaceRunId } from '../config'
+import {
+  personalWorkspaceRunId,
+  playbookRunId,
+  pullsRunId,
+  workspaceRunId,
+} from '@shuttle/engine/config'
+
 import { api } from './base'
 
 export const tenantRouter = {

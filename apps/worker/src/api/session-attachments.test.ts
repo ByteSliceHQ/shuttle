@@ -5,11 +5,11 @@ import type { ContractRouterClient } from '@orpc/contract'
 import { OpenAPILink } from '@orpc/openapi-client/fetch'
 
 import { contract } from '@shuttle/api'
+import type { Actor } from '@shuttle/engine/tenancy/access'
+import { fakeBucket } from '@shuttle/engine/testing/fake-r2'
 
 import type { ShuttleEnv } from '../env'
-import type { Actor } from '../tenancy/access'
 import { fakeEnv } from '../testing/fake-env'
-import { fakeBucket } from '../testing/fake-r2'
 import { handleApi } from './handler'
 
 const actor: Actor = {

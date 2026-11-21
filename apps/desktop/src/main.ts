@@ -187,7 +187,7 @@ if (!app.requestSingleInstanceLock()) {
       platform: process.platform,
     }
 
-    const sandboxContext = REPO_ROOT === null ? null : join(REPO_ROOT, 'apps/worker')
+    const sandboxContext = REPO_ROOT === null ? null : join(REPO_ROOT, 'packages/sandbox')
 
     const runner = new RunnerSupervisor({
       resourcesPath: process.resourcesPath,

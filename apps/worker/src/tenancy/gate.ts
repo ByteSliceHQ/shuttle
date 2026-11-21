@@ -1,10 +1,10 @@
+import { runKindFor, type RunKind } from '@shuttle/engine/firehose/run-kind'
+import { loomsStub } from '@shuttle/engine/looms-stub'
+import { canOpenSession, type Actor } from '@shuttle/engine/tenancy/access'
+import { parsePersonalRunId, parseRunId, sessionOfReflection } from '@shuttle/engine/tenancy/run-id'
 import { authAllowedAs, authDenied, type AuthDecision, type RouteInfo } from '@swirls/looms/runtime'
 
 import type { ShuttleEnv } from '../env'
-import { runKindFor, type RunKind } from '../firehose/run-kind'
-import { loomsStub } from '../looms-stub'
-import { canOpenSession, type Actor } from './access'
-import { parsePersonalRunId, parseRunId, sessionOfReflection } from './run-id'
 
 /**
  * Decides whether a signed-in person may reach a run. Every request that names a run passes

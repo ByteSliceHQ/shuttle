@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Copies `bridge/lsp` into a Daytona sandbox that already exists, at /opt/shuttle-bridge/lsp where
+ * Copies `packages/sandbox/bridge/lsp` into a Daytona sandbox that already exists, at /opt/shuttle-bridge/lsp where
  * the image puts it, and installs the TypeScript language servers there if they are missing.
  *
  * A sandbox keeps the image it was created from, so one made before shuttle-lsp existed has no
@@ -17,9 +17,9 @@ import { fileURLToPath } from 'node:url'
 
 import { Daytona } from '@daytona/sdk'
 
-import { daytonaSandboxName } from '../src/sandbox/daytona'
+import { daytonaSandboxName } from '@shuttle/sandbox/daytona'
 
-const source = join(dirname(fileURLToPath(import.meta.url)), '../bridge/lsp')
+const source = join(dirname(fileURLToPath(import.meta.url)), '../../../packages/sandbox/bridge/lsp')
 const target = '/opt/shuttle-bridge/lsp'
 const asked = process.argv[2]
 

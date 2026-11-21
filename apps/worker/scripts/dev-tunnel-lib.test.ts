@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
-import { verifyWebhookSignature } from '../src/github/webhooks'
+import { verifyWebhookSignature } from '@shuttle/git/github/webhooks'
+
 import {
   fillEmptyGithubToken,
   ensureCredentialsKeyLine,
@@ -132,12 +133,7 @@ describe('signWebhookBody', () => {
     const body = JSON.stringify({ zen: 'Design for failure.', hook_id: 1 })
     const signature = await signWebhookBody(secret, body)
 
-    // SAFETY: `verifyWebhookSignature` reads only GITHUB_WEBHOOK_SECRET from its env argument.
-    const ok = await verifyWebhookSignature(
-      { GITHUB_WEBHOOK_SECRET: secret } as never,
-      body,
-      signature,
-    )
+    const ok = await verifyWebhookSignature({ GITHUB_WEBHOOK_SECRET: secret }, body, signature)
 
     expect(ok).toBe(true)
     expect(signature.startsWith('sha256=')).toBe(true)

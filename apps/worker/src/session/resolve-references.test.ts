@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 
-import { personalWorkspaceRunId, workspaceRunId } from '../config'
-import type { SessionAccess } from '../tenancy/access'
-import { scopedRunId } from '../tenancy/run-id'
+import { personalWorkspaceRunId, workspaceRunId } from '@shuttle/engine/config'
+import { readDigestSource } from '@shuttle/engine/session/digest-source'
+import type { SessionAccess } from '@shuttle/engine/tenancy/access'
+import { scopedRunId } from '@shuttle/engine/tenancy/run-id'
+
 import { fakeEnv } from '../testing/fake-env'
-import { readDigestSource } from './digest-source'
-import { resolveReferences } from './resolve-references'
+import { resolveReferences, sessionDigest } from './resolve-references'
 
 const ORG = 'orgA0000000000000000000000000000'
 const here = scopedRunId(ORG, 'session_here')
@@ -151,5 +152,20 @@ describe('readDigestSource', () => {
       brief: '',
       replies: [],
     })
+  })
+})
+
+describe('sessionDigest', () => {
+  test('leaves out a brief that only repeats the goal, and clips long replies', () => {
+    const digest = sessionDigest({
+      goal: 'Fix login',
+      status: 'completed',
+      brief: 'Fix login',
+      replies: ['', 'x'.repeat(1_300)],
+    })
+
+    expect(digest).toBe(
+      `Goal: Fix login\nStatus: completed\nLatest from its agents:\n${'x'.repeat(1_200)}…`,
+    )
   })
 })

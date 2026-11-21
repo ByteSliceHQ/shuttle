@@ -9,7 +9,8 @@ import { existsSync } from 'node:fs'
  */
 import { spawn, which, type Subprocess } from 'bun'
 
-import { createAppJwt } from '../src/github/client'
+import { createAppJwt } from '@shuttle/git/github/client'
+
 import { parseTunnelUrl, parseTunnelUrlFromMetrics, signWebhookBody } from './dev-tunnel-lib'
 
 const WORKER_ORIGIN = 'http://127.0.0.1:8790'

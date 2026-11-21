@@ -1,31 +1,35 @@
 import { ORPCError } from '@orpc/server'
 
-import { DEVICE_ID } from '@shuttle/runner-protocol'
-
-import { isTerminalBridgeEvent, type BridgeEvent } from '../../bridge/protocol'
-import { workspaceRunId } from '../config'
-import { CredentialsKeyMissingError } from '../credentials/store'
-import { sandboxStub, type ShuttleEnv } from '../env'
-import { isVendorHarness, parseHarness, type VendorHarnessId } from '../harness'
-import { loomsStub } from '../looms-stub'
-import { shellQuote } from '../sandbox/exec-argv'
+import { workspaceRunId } from '@shuttle/engine/config'
+import { CredentialsKeyMissingError } from '@shuttle/engine/credentials/store'
+import { isVendorHarness, parseHarness, type VendorHarnessId } from '@shuttle/engine/harness'
+import { loomsStub } from '@shuttle/engine/looms-stub'
+import { parseTeam } from '@shuttle/engine/team'
+import type { Actor } from '@shuttle/engine/tenancy/access'
 import {
-  isLocalSandbox,
-  localSandboxName,
-  sandboxesArePersonal,
-  sandboxIsPersonal,
-  userSandboxName,
-} from '../sandbox/names'
-import { parseTeam } from '../team'
-import type { Actor } from '../tenancy/access'
-import { CONNECTABLE_HARNESSES, signInFilesPresent, vendorHarnessInfo } from '../vendor/harnesses'
+  CONNECTABLE_HARNESSES,
+  signInFilesPresent,
+  vendorHarnessInfo,
+} from '@shuttle/engine/vendor/harnesses'
 import {
   builtInVendorModels,
   CATALOGUE_TTL_MS,
   listsOwnModels,
   parseVendorModels,
   type VendorModel,
-} from '../vendor/models'
+} from '@shuttle/engine/vendor/models'
+import { DEVICE_ID } from '@shuttle/runner-protocol'
+import { isTerminalBridgeEvent, type BridgeEvent } from '@shuttle/sandbox/bridge/protocol'
+import { shellQuote } from '@shuttle/sandbox/exec-argv'
+import {
+  isLocalSandbox,
+  localSandboxName,
+  sandboxesArePersonal,
+  sandboxIsPersonal,
+  userSandboxName,
+} from '@shuttle/sandbox/names'
+
+import { sandboxStub, type ShuttleEnv } from '../env'
 import { api, badRequest, notFound, type ApiContext } from './base'
 
 /**

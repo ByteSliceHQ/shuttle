@@ -8,13 +8,13 @@ import {
   type SandboxPlace,
   type SandboxWorkspaceRepo,
 } from '@shuttle/api'
-
-import { LSP_CLI_PATH, LSP_DEFAULT_WAIT_MS } from '../../bridge/lsp/protocol'
-import { codeStorageClient, codeStorageConfigured } from '../codestorage/client'
-import type { ShuttleEnv } from '../env'
-import { sandboxStub } from '../env'
-import { loomsStub } from '../looms-stub'
-import { shellQuote } from '../sandbox/exec-argv'
+import { loomsStub } from '@shuttle/engine/looms-stub'
+import type { SessionStacks } from '@shuttle/engine/session/stack-state'
+import type { Actor } from '@shuttle/engine/tenancy/access'
+import { orgOfRun } from '@shuttle/engine/tenancy/run-id'
+import { codeStorageClient, codeStorageConfigured } from '@shuttle/git/codestorage/client'
+import { LSP_CLI_PATH, LSP_DEFAULT_WAIT_MS } from '@shuttle/sandbox/bridge/lsp/protocol'
+import { shellQuote } from '@shuttle/sandbox/exec-argv'
 import {
   DEMO_REPO,
   deviceOfSandbox,
@@ -27,9 +27,14 @@ import {
   sandboxIsPersonal,
   userOfSandbox,
   userSandboxName,
-} from '../sandbox/names'
-import { repoAccess } from '../sandbox/repo-access'
-import { edgeCache, sandboxPathsEtag, savedPaths, savedPathsEtag } from '../sandbox/saved-paths'
+} from '@shuttle/sandbox/names'
+import { repoAccess } from '@shuttle/sandbox/repo-access'
+import {
+  edgeCache,
+  sandboxPathsEtag,
+  savedPaths,
+  savedPathsEtag,
+} from '@shuttle/sandbox/saved-paths'
 import {
   findSavedWork,
   latestSave,
@@ -41,20 +46,20 @@ import {
   savedRepoSummary,
   type SavedRepo,
   type SavedWorkClient,
-} from '../sandbox/saved-work'
-import { worktreeRepoPath, type LinkedSandboxRepo } from '../sandbox/workspace'
+} from '@shuttle/sandbox/saved-work'
+import { worktreeRepoPath, type LinkedSandboxRepo } from '@shuttle/sandbox/workspace'
 import {
   branchesScript,
   fetchBranchScript,
   repoDiffScript,
   type SummaryRepo,
   type WorkspaceRepoSummary,
-} from '../sandbox/workspace-summary'
-import { parseWorktreePaths, worktreePathsScript } from '../sandbox/worktree-paths'
-import type { SessionStacks } from '../session/stack-state'
-import type { Actor } from '../tenancy/access'
+} from '@shuttle/sandbox/workspace-summary'
+import { parseWorktreePaths, worktreePathsScript } from '@shuttle/sandbox/worktree-paths'
+
+import type { ShuttleEnv } from '../env'
+import { sandboxStub } from '../env'
 import { previewKeyFor } from '../tenancy/previews'
-import { orgOfRun } from '../tenancy/run-id'
 import { api, badRequest, forbidden, notFound } from './base'
 
 const sandbox = api.sandbox

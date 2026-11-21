@@ -6,9 +6,10 @@ import {
   getAsset,
   putAsset,
   uploadMediaType,
-} from '../assets/store'
+} from '@shuttle/engine/assets/store'
+import type { Actor } from '@shuttle/engine/tenancy/access'
+
 import type { ShuttleEnv } from '../env'
-import type { Actor } from '../tenancy/access'
 
 const UNAVAILABLE = 'File storage is not set up for this Shuttle, so files cannot be attached.'
 

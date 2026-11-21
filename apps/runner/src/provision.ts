@@ -6,7 +6,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 /**
  * What a sandbox needs beyond a plain Linux image, for a backend that starts from one.
  *
- * Cloud sandboxes get all of this from the image built from `apps/worker/Dockerfile`. That
+ * Cloud sandboxes get all of this from the image built from `packages/sandbox/Dockerfile`. That
  * image is not something Shuttle may hand out: it holds the vendors' agent command lines, and
  * only Codex's licence lets anyone redistribute it. So a sandbox on a person's machine starts
  * from a public base image and fetches the tools from the vendors itself, the first time it
@@ -16,7 +16,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 /** A public image with Node, which the agent bridge and two of the agents run on. */
 export const BASE_IMAGE = 'node:24-bookworm-slim'
 
-/** Kept equal to the `ARG`s in `apps/worker/Dockerfile`; `provision.test.ts` checks it. */
+/** Kept equal to the `ARG`s in `packages/sandbox/Dockerfile`; `provision.test.ts` checks it. */
 export const TOOL_VERSIONS = {
   CODEX_VERSION: '0.169.0',
   CLAUDE_CODE_VERSION: '2.1.323',
@@ -112,7 +112,7 @@ export function findBridge(): string | null {
   const candidates = [
     process.env.SHUTTLE_BRIDGE_DIR,
     join(dirname(process.execPath), 'bridge'),
-    resolve(import.meta.dir, '../../worker/bridge'),
+    resolve(import.meta.dir, '../../../packages/sandbox/bridge'),
   ]
 
   return (

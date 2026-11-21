@@ -33,6 +33,9 @@ const LessonSchema = Schema.Struct({
   scope: Schema.optional(Schema.String),
 })
 
+/** The folder id of a session that has no folder: one a host started from a repository. */
+export const NO_FOLDER = ''
+
 export const SessionActivitySchema = Schema.Union([
   Schema.Literal('working'),
   Schema.Literal('needs_input'),
@@ -98,6 +101,7 @@ export const workspaceCatalog = defineEventCatalog('workspace', {
   }),
   'session.requested': Schema.Struct({
     runId: Schema.String,
+    /** `NO_FOLDER` for a session a host started from a repository, with no folder behind it. */
     folderId: Schema.String,
     goal: Schema.String,
     attachments: Schema.optional(Schema.Array(AttachmentRefSchema)),
@@ -120,6 +124,8 @@ export const workspaceCatalog = defineEventCatalog('workspace', {
         baseSha: Schema.String,
       }),
     ),
+    /** What the host that started the session attached to it. Shuttle carries it, never reads it. */
+    hostMetadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   }),
   /**
    * A session that already exists starts being listed in this workspace: it was shared with this

@@ -20,13 +20,13 @@ Use one of these types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`,
 
 Shuttle is a Looms application, not a Looms package.
 
-- `apps/worker` owns custom Looms modules (`session`, `reflect`) and Cloudflare hosting.
+- `packages/engine` (`@shuttle/engine`) owns the custom Looms modules (`session`, `pulls`, `reflect`, `workspace`) and `shuttleModules(host, …)`; `packages/sandbox` and `packages/git` sit under it. `apps/worker` is a host of them: Cloudflare hosting, auth and the HTTP API. The run's Durable Object is the engine's `ShuttleRun` (`@shuttle/engine/worker`), which a host subclasses. See `docs/hosting.md`.
 - `apps/web` is the session UI, assembled from `packages/react`.
 - `packages/react` is the UI as parts (`@shuttle/react`), for this app and for other hosts.
 - `packages/core` (`@shuttle/core`) holds what the runs say: the workspace and pulls runs'
   event catalogues and schemas, which the Worker registers and the UI reads.
 - `apps/desktop` hosts that UI in Electron and starts `apps/runner`, which keeps a sandbox on the machine.
-- Sandbox providers live in `apps/worker/src/sandbox/providers`; nothing outside it names one. See `docs/sandboxes.md`.
+- Sandbox providers live in `packages/sandbox/src/providers`; nothing outside it names one. See `docs/sandboxes.md`.
 - Depend on published `@swirls/looms`. Link a local Looms build only when developing SDK changes.
 
 ## HTTP API

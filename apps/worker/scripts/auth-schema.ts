@@ -10,7 +10,7 @@ import { Database } from 'bun:sqlite'
 
 import { getMigrations } from 'better-auth/db/migration'
 
-import { authOptions } from '../src/auth/auth.ts'
+import { authOptions } from '../src/auth/auth'
 
 export async function authSchemaSql(database = new Database(':memory:')): Promise<string> {
   const options = authOptions(

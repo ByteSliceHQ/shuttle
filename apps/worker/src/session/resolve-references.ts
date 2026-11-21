@@ -1,14 +1,19 @@
 import type { MessageReferenceInput } from '@shuttle/api'
+import { personalWorkspaceRunId, workspaceRunId } from '@shuttle/engine/config'
+import { loomsStub } from '@shuttle/engine/looms-stub'
+import {
+  BRIEF_CHARS,
+  clip,
+  REPLY_CHARS,
+  type DigestSource,
+} from '@shuttle/engine/session/digest-source'
+import type { MessageReference } from '@shuttle/engine/session/scope'
+import { canOpenSession, type Actor } from '@shuttle/engine/tenancy/access'
+import { parseRunId } from '@shuttle/engine/tenancy/run-id'
 
 import { forbidden } from '../api/base'
-import { personalWorkspaceRunId, workspaceRunId } from '../config'
 import type { ShuttleEnv } from '../env'
-import { loomsStub } from '../looms-stub'
-import { canOpenSession, type Actor } from '../tenancy/access'
-import { parseRunId } from '../tenancy/run-id'
 import { readListedSessions, type ListedSession } from '../workspace/listings'
-import { BRIEF_CHARS, clip, REPLY_CHARS, type DigestSource } from './digest-source'
-import type { MessageReference } from './scope'
 
 /**
  * Turns what the message box picked after `@` into what the session records. A file keeps its

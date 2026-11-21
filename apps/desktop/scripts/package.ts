@@ -66,7 +66,7 @@ writeFileSync(
 )
 
 // The agent bridge, which the built-in sandbox copies into itself. Tests stay behind.
-const bridge = stageBridge(resolve(root, '../worker/bridge'))
+const bridge = stageBridge(resolve(root, '../../packages/sandbox/bridge'))
 
 rmSync(join(staging, 'bridge'), { recursive: true, force: true })
 cpSync(bridge.path, join(staging, 'bridge'), { recursive: true })

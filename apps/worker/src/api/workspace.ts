@@ -9,36 +9,52 @@ import {
   type LinkedRepo,
   type WorkspaceSnapshot,
 } from '@shuttle/api'
-import { DEVICE_ID } from '@shuttle/runner-protocol'
-
-import { deleteAsset, putAsset, uploadMediaType, type AssetRef } from '../assets/store'
-import { getAuth } from '../auth/auth'
+import { deleteAsset, putAsset, uploadMediaType, type AssetRef } from '@shuttle/engine/assets/store'
 import {
   ensureNamedWorkspace,
   ensurePlaybookQuietly,
   ensurePullsQuietly,
   ensureWorkspaceQuietly,
-} from '../bootstrap'
-import { personalWorkspaceRunId, playbookRunId, pullsRunId, workspaceRunId } from '../config'
-import type { ShuttleEnv } from '../env'
-import { getInstallation, listInstallationRepos } from '../github/app'
-import { commentOnLine, getPullRequest, replyToThread, setThreadResolved } from '../github/pulls'
-import { GITHUB_NOT_CONNECTED, githubTokenOf } from '../github/user-token'
-import { loomsStub } from '../looms-stub'
-import { syncFolderRepos } from '../pulls/folder-sync'
-import type { AutoReviewMode } from '../pulls/scope'
+} from '@shuttle/engine/bootstrap'
+import {
+  personalWorkspaceRunId,
+  playbookRunId,
+  pullsRunId,
+  workspaceRunId,
+} from '@shuttle/engine/config'
+import { loomsStub } from '@shuttle/engine/looms-stub'
+import { syncFolderRepos } from '@shuttle/engine/pulls/folder-sync'
+import type { AutoReviewMode } from '@shuttle/engine/pulls/scope'
 import {
   linkReviewSession,
   setRepoPolicy,
   setThreadResolution,
   upsertComment,
-} from '../pulls/signals'
-import { syncPullThreads } from '../pulls/thread-sync'
-import type { Actor, SessionAccess } from '../tenancy/access'
+} from '@shuttle/engine/pulls/signals'
+import { syncPullThreads } from '@shuttle/engine/pulls/thread-sync'
+import type { Actor, SessionAccess } from '@shuttle/engine/tenancy/access'
+import { scopedRunId } from '@shuttle/engine/tenancy/run-id'
+import {
+  linkRepo,
+  reportActivity,
+  requestSession,
+  unlinkRepo,
+} from '@shuttle/engine/workspace/module'
+import { getInstallation, listInstallationRepos } from '@shuttle/git/github/app'
+import {
+  commentOnLine,
+  getPullRequest,
+  replyToThread,
+  setThreadResolved,
+} from '@shuttle/git/github/pulls'
+import { DEVICE_ID } from '@shuttle/runner-protocol'
+
+import { getAuth } from '../auth/auth'
+import type { ShuttleEnv } from '../env'
+import { GITHUB_NOT_CONNECTED, githubTokenOf } from '../github/user-token'
 import { installationConnected } from '../tenancy/installations'
-import { scopedRunId } from '../tenancy/run-id'
-import { linkRepo, reportActivity, requestSession, unlinkRepo } from '../workspace/module'
 import { api, badRequest, notFound } from './base'
+import { admitPersonStart } from './session-start'
 
 const workspace = api.workspace
 
@@ -406,6 +422,8 @@ export const workspaceRouter = {
       readWorkspaceFolders(env, orgId),
     ])
 
+    await admitPersonStart(env, actor, tree.folders[folderId]?.repos ?? [])
+
     const runId = scopedRunId(orgId, `session_${crypto.randomUUID()}`)
     const stub = loomsStub(env.LOOMS_RUN, personalRunId)
 
@@ -635,6 +653,8 @@ export const workspaceRouter = {
         ensureNamedWorkspace(env, personalRunId),
         readWorkspaceFolders(env, orgId),
       ])
+
+      await admitPersonStart(env, actor, tree.folders[folderId]?.repos ?? [])
 
       const runId = scopedRunId(orgId, crypto.randomUUID())
       const stub = loomsStub(env.LOOMS_RUN, personalRunId)

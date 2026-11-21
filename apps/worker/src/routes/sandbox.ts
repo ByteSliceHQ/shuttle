@@ -1,13 +1,14 @@
-import { resolveSandboxName } from '../api/sandbox'
-import type { ShuttleEnv } from '../env'
-import { sandboxStub } from '../env'
+import type { Actor } from '@shuttle/engine/tenancy/access'
 import {
   isLocalSandbox,
   sandboxesArePersonal,
   userOfSandbox,
   userSandboxName,
-} from '../sandbox/names'
-import type { Actor } from '../tenancy/access'
+} from '@shuttle/sandbox/names'
+
+import { resolveSandboxName } from '../api/sandbox'
+import type { ShuttleEnv } from '../env'
+import { sandboxStub } from '../env'
 
 /**
  * A session's terminal, which is a WebSocket and so not part of the API contract. Everything

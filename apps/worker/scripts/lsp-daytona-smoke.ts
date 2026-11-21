@@ -17,16 +17,16 @@ import { fileURLToPath } from 'node:url'
 
 import { Daytona } from '@daytona/sdk'
 
-import { parseJson, type JsonValue } from '../bridge/lsp/json'
+import { parseJson, type JsonValue } from '@shuttle/sandbox/bridge/lsp/json'
 import {
   decodeDiagnosticsReply,
   decodeStatusReply,
   type LspDiagnosticsReply,
   type LspStatusReply,
-} from '../bridge/lsp/protocol'
+} from '@shuttle/sandbox/bridge/lsp/protocol'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const source = join(root, 'bridge/lsp')
+const source = join(root, '../../packages/sandbox/bridge/lsp')
 
 if (!process.env.DAYTONA_API_KEY) {
   console.error('DAYTONA_API_KEY is not set')

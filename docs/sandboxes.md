@@ -12,7 +12,7 @@ session (LoomsRun DO)          decides which sandbox a turn runs in, and moves t
             └─ SandboxHost      exec + files: all a workspace, agent run or stack op needs
 ```
 
-- `apps/worker/src/sandbox/providers/` holds one file per provider and `registry.ts`. Nothing
+- `packages/sandbox/src/providers/` holds one file per provider and `registry.ts`. Nothing
   outside that folder names a provider. Adding one is a file there and a line in the registry.
 - A sandbox's **name** says where it runs. `local:<org>:<user>:<device>` is a person's own
   machine; every other name runs on the deployment's provider (`SHUTTLE_WORKSPACE_MODE`).

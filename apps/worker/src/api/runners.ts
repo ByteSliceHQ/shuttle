@@ -1,8 +1,9 @@
 import { ORPCError } from '@orpc/server'
 
+import type { Actor } from '@shuttle/engine/tenancy/access'
+import { localSandboxName } from '@shuttle/sandbox/names'
+
 import { sandboxStub, type ShuttleEnv } from '../env'
-import { localSandboxName } from '../sandbox/names'
-import type { Actor } from '../tenancy/access'
 import { listDevices, registerDevice, removeDevice } from '../tenancy/devices'
 import { api } from './base'
 
