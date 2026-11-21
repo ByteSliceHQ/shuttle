@@ -29,13 +29,8 @@ function argValue(argv: readonly string[], flag: string): string | undefined {
 }
 
 function isPackageSourcePath(path: string): boolean {
-  // The packages that are put together into `@swirls/shuttle` and `@swirls/shuttle-engine`, and
-  // the two that do it.
-  if (
-    !/^packages\/(api|core|react|shuttle|engine|sandbox|git|runner-protocol|shuttle-engine)\//.test(
-      path,
-    )
-  ) {
+  // The packages that are put together into `@swirls/shuttle`, and the one that does it.
+  if (!/^packages\/(api|core|react|shuttle|engine|sandbox|git|runner-protocol)\//.test(path)) {
     return false
   }
 

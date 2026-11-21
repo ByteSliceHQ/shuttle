@@ -1,7 +1,6 @@
 /**
- * Checks `@swirls/shuttle` and `@swirls/shuttle-engine` as someone else will get them: builds
- * them, packs them the way npm does, installs the tarballs in an empty project outside this
- * repository, and uses them there. It
+ * Checks `@swirls/shuttle` as someone else will get it: builds it, packs it the way npm does,
+ * installs the tarball in an empty project outside this repository, and uses it there. It
  * never publishes.
  */
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -91,9 +90,9 @@ interface PublishedPackage {
   readonly required: readonly string[]
 }
 
-const ui: PublishedPackage = {
+const shuttle: PublishedPackage = {
   folder: 'shuttle',
-  parts: ['api', 'core', 'react'],
+  parts: ['api', 'core', 'react', 'engine', 'sandbox', 'git', 'runner-protocol'],
   required: [
     'dist/api/index.js',
     'dist/api/index.d.ts',
@@ -103,13 +102,6 @@ const ui: PublishedPackage = {
     'dist/react/index.d.ts',
     'dist/react/ui.js',
     'dist/react/theme.css',
-  ],
-}
-
-const engine: PublishedPackage = {
-  folder: 'shuttle-engine',
-  parts: ['engine', 'sandbox', 'git', 'runner-protocol'],
-  required: [
     'dist/engine/index.js',
     'dist/engine/index.d.ts',
     'dist/engine/worker.js',
@@ -133,8 +125,12 @@ async function packed(spec: PublishedPackage): Promise<{ manifest: Manifest; tar
   for (const name of spec.parts) {
     const part = await manifestOf(join(root, 'packages', name))
 
+    // What a part depends on is a dependency of the package, or, for what only a host that runs
+    // the engine needs, a peer it installs itself. Either way at the range the part asks for.
     for (const [dependency, range] of Object.entries(part.dependencies ?? {})) {
-      if (!range.startsWith('workspace:') && manifest.dependencies?.[dependency] !== range) {
+      const listed = manifest.dependencies?.[dependency] ?? manifest.peerDependencies?.[dependency]
+
+      if (!range.startsWith('workspace:') && listed !== range) {
         drift.push(`${dependency}@${range} (from @shuttle/${name})`)
       }
     }
@@ -201,28 +197,9 @@ async function packed(spec: PublishedPackage): Promise<{ manifest: Manifest; tar
 }
 
 try {
-  await run(
-    [
-      'bun',
-      'x',
-      'turbo',
-      'run',
-      'build',
-      '--filter=@swirls/shuttle...',
-      '--filter=@swirls/shuttle-engine...',
-    ],
-    root,
-  )
+  await run(['bun', 'x', 'turbo', 'run', 'build', '--filter=@swirls/shuttle...'], root)
 
-  const { manifest: published, tarball } = await packed(ui)
-  const { manifest: publishedEngine, tarball: engineTarball } = await packed(engine)
-
-  // The engine is built against one version of the parts' contract and events, and says which.
-  if (publishedEngine.dependencies?.['@swirls/shuttle'] !== published.version) {
-    throw new Error(
-      `@swirls/shuttle-engine must depend on @swirls/shuttle@${published.version ?? '?'}, the version it is built with`,
-    )
-  }
+  const { manifest: published, tarball } = await packed(shuttle)
 
   const fixture = join(temporaryRoot, 'fixture')
 
@@ -235,7 +212,6 @@ try {
 
   const installed = [
     tarball,
-    engineTarball,
     'react@^19',
     'react-dom@^19',
     '@tanstack/react-query@^5',
@@ -245,6 +221,10 @@ try {
     '@opentelemetry/api',
     // The engine's types name a Worker's bindings, which a host's own tsconfig supplies.
     '@cloudflare/workers-types',
+    // What a host that runs the engine installs beside the package: its optional peers.
+    ...['ai', '@cloudflare/sandbox', '@daytona/sdk'].map(
+      (peer) => `${peer}@${published.peerDependencies?.[peer] ?? 'latest'}`,
+    ),
     // Looms takes any `effect` from the one we pin upwards. A host installs ours, as it has to
     // for the two to share one copy.
     ...(published.dependencies?.effect === undefined
@@ -261,25 +241,26 @@ try {
   // The engine's modules are exported by pattern. These stand for them: the root, ones a host
   // imports by name, and one from each part behind a pattern. None needs a Worker to load.
   const hosted = [
-    '@swirls/shuttle-engine',
-    '@swirls/shuttle-engine/agents/intake',
-    '@swirls/shuttle-engine/api/serve',
-    '@swirls/shuttle-engine/harness',
-    '@swirls/shuttle-engine/session/module',
-    '@swirls/shuttle-engine/tenancy/access',
-    '@swirls/shuttle-engine/tenancy/run-id',
-    '@swirls/shuttle-engine/testing/fake-env',
-    '@swirls/shuttle-engine/workspace/module',
-    '@swirls/shuttle-engine/git/access',
-    '@swirls/shuttle-engine/sandbox/names',
-    '@swirls/shuttle-engine/sandbox/bridge/protocol',
-    '@swirls/shuttle-engine/runner-protocol',
+    '@swirls/shuttle/engine',
+    '@swirls/shuttle/engine/agents/intake',
+    '@swirls/shuttle/engine/api/serve',
+    '@swirls/shuttle/engine/harness',
+    '@swirls/shuttle/engine/session/module',
+    '@swirls/shuttle/engine/tenancy/access',
+    '@swirls/shuttle/engine/tenancy/run-id',
+    '@swirls/shuttle/engine/testing/fake-env',
+    '@swirls/shuttle/engine/workspace/module',
+    '@swirls/shuttle/git/access',
+    '@swirls/shuttle/sandbox/names',
+    '@swirls/shuttle/sandbox/bridge/protocol',
+    '@swirls/shuttle/runner-protocol',
   ]
 
   // The engine's types name a Worker's bindings, so it is checked as a host's Worker would
   // compile it, further down, and not with the parts a page uses.
   const entries = Object.keys(published.exports ?? {})
     .filter((entry) => !entry.endsWith('.css') && !entry.includes('*'))
+    .filter((entry) => !/^\.\/(engine|runner-protocol)/.test(entry))
     .map((entry) => `@swirls/shuttle${entry.slice(1)}`)
 
   // What has no need of a browser loads in Node as it is, with every import naming its file.
@@ -362,13 +343,13 @@ import {
   type EngineEnv,
   type SessionOutcome,
   type ShuttleHost,
-} from '@swirls/shuttle-engine'
+} from '@swirls/shuttle/engine'
 import {
   EventFirehose,
   SessionSandbox,
   ShuttleRun,
   shuttleApiModules,
-} from '@swirls/shuttle-engine/worker'
+} from '@swirls/shuttle/engine/worker'
 
 export { EventFirehose }
 
@@ -445,7 +426,7 @@ void [${hosted.map((_, index) => `module${index}`).join(', ')}]
 
   await run(['bun', 'build', 'page.ts', '--target', 'browser', '--outdir', 'bundled'], fixture)
 
-  console.log('Validated the packed @swirls/shuttle and @swirls/shuttle-engine')
+  console.log('Validated the packed @swirls/shuttle')
 } finally {
   await rm(temporaryRoot, { force: true, recursive: true })
 }
