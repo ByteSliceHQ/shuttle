@@ -1,14 +1,14 @@
 import { z } from 'zod'
 
-import { ensureNamedWorkspace } from '@shuttle/engine/bootstrap'
-import { loomsStub } from '@shuttle/engine/looms-stub'
-import type { SessionAccess } from '@shuttle/engine/tenancy/access'
-import { listingChanges, listingRunIds } from '@shuttle/engine/tenancy/listings'
-import type { SessionActivity } from '@shuttle/engine/workspace/scope'
-import { listSession, shareSession, unlistSession } from '@shuttle/engine/workspace/signals'
 import type { EventInput } from '@swirls/looms/core'
 
-import type { ShuttleEnv } from '../env'
+import { ensureNamedWorkspace } from '../bootstrap'
+import type { EngineEnv } from '../env'
+import { loomsStub } from '../looms-stub'
+import type { SessionAccess } from '../tenancy/access'
+import { listingChanges, listingRunIds } from '../tenancy/listings'
+import type { SessionActivity } from '../workspace/scope'
+import { listSession, shareSession, unlistSession } from '../workspace/signals'
 
 /** A session as a workspace's tree shows it. */
 export interface ListedSession {
@@ -49,7 +49,7 @@ const ACTIVITIES: readonly SessionActivity[] = ['idle', 'working', 'needs_input'
 
 /** The session's entry in the first of `workspaceRunIds` that lists it. */
 export async function readListedSession(
-  env: ShuttleEnv,
+  env: EngineEnv,
   workspaceRunIds: readonly string[],
   sessionRunId: string,
 ): Promise<ListedSession | null> {
@@ -62,7 +62,7 @@ export async function readListedSession(
  * lists is left out.
  */
 export async function readListedSessions(
-  env: ShuttleEnv,
+  env: EngineEnv,
   workspaceRunIds: readonly string[],
   sessionRunIds: readonly string[],
 ): Promise<Map<string, ListedSession>> {
@@ -113,7 +113,7 @@ export async function readListedSessions(
 
 /** Sends `events` to every workspace that lists the session. */
 export async function signalListings(
-  env: ShuttleEnv,
+  env: EngineEnv,
   orgId: string,
   access: SessionAccess | null,
   events: readonly EventInput[],
@@ -131,7 +131,7 @@ export async function signalListings(
  * that still list it learn the new members.
  */
 export async function moveListings(
-  env: ShuttleEnv,
+  env: EngineEnv,
   orgId: string,
   sessionRunId: string,
   before: SessionAccess | null,

@@ -7,3 +7,4 @@ export { SessionSandbox } from '@shuttle/sandbox/session-sandbox'
 
 export { EventFirehose } from './firehose/durable-object'
 export { ShuttleRun } from './run'
+export { runsApi, shuttleApiModules } from './api/runs'

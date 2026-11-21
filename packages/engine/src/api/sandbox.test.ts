@@ -3,15 +3,15 @@ import { describe, expect, test } from 'bun:test'
 import { z } from 'zod'
 
 import { SandboxWorkspace } from '@shuttle/api'
-import type { SandboxPlacement } from '@shuttle/engine/session/bind-sandbox'
-import type { SessionStacks } from '@shuttle/engine/session/stack-state'
-import type { Actor } from '@shuttle/engine/tenancy/access'
 import { localSandboxName } from '@shuttle/sandbox/names'
 import type { SummaryRepo, WorkspaceRepoSummary } from '@shuttle/sandbox/workspace-summary'
 import type { JsonValue } from '@swirls/looms/core'
 
-import type { ShuttleEnv } from '../env'
-import { migratedD1 } from '../testing/fake-d1'
+import type { EngineEnv } from '../env'
+import type { HostPorts } from '../ports/host'
+import type { SandboxPlacement } from '../session/bind-sandbox'
+import type { SessionStacks } from '../session/stack-state'
+import type { Actor } from '../tenancy/access'
 import { fakeEnv } from '../testing/fake-env'
 import { handleApi } from './handler'
 import { publishedBranches } from './sandbox'
@@ -41,7 +41,7 @@ interface World {
 }
 
 /** An env whose session and sandbox objects answer from `world`, and record what was done. */
-function envWith(world: World = {}, overrides: Partial<ShuttleEnv> = {}) {
+function envWith(world: World = {}, overrides: Partial<EngineEnv> = {}) {
   const files = { ...world.files }
   const placed: (SandboxPlacement | null)[] = []
   const later: (SandboxPlacement | null)[] = []
@@ -122,7 +122,13 @@ function envWith(world: World = {}, overrides: Partial<ShuttleEnv> = {}) {
   return { env, files, placed, later, commands, measured }
 }
 
-async function call(env: ShuttleEnv, method: string, path: string, body?: JsonValue) {
+async function call(
+  env: EngineEnv,
+  method: string,
+  path: string,
+  body?: JsonValue,
+  ports?: Partial<HostPorts>,
+) {
   const init: RequestInit = { method }
 
   if (body !== undefined) {
@@ -133,6 +139,7 @@ async function call(env: ShuttleEnv, method: string, path: string, body?: JsonVa
   const response = await handleApi({
     env,
     actor,
+    ports,
     request: new Request(`http://worker.test/sessions/${RUN}/sandbox/${path}`, init),
   })
 
@@ -595,9 +602,23 @@ describe('where a session is', () => {
 
 describe('the preview address', () => {
   test('is a label, and the host when the deployment names one', async () => {
-    const { env } = envWith({}, { AUTH_DB: await migratedD1(), SHUTTLE_PREVIEW_HOST: 'pre.test' })
-    const first = await call(env, 'GET', 'preview')
-    const second = await call(env, 'GET', 'preview')
+    const { env } = envWith({}, { SHUTTLE_PREVIEW_HOST: 'pre.test' })
+    const kept = new Map<string, string>()
+
+    // A host's store of keys: one per session, made the first time it is asked for.
+    const previews = {
+      keyFor: async (runId: string) => {
+        const key = kept.get(runId) ?? `key${kept.size + 1}`
+
+        kept.set(runId, key)
+
+        return key
+      },
+      runOf: async () => null,
+    }
+
+    const first = await call(env, 'GET', 'preview', undefined, { previews })
+    const second = await call(env, 'GET', 'preview', undefined, { previews })
 
     expect(first.status).toBe(200)
     expect(z.string().safeParse(first.body.label).success).toBe(true)
@@ -605,7 +626,7 @@ describe('the preview address', () => {
     expect(second.body).toEqual(first.body)
   })
 
-  test('is a 503 without a database to keep labels in', async () => {
+  test('is a 503 for a host that keeps no preview keys', async () => {
     const { status, body } = await call(envWith().env, 'GET', 'preview')
 
     expect(status).toBe(503)

@@ -18,6 +18,8 @@
   "dependencies": {
     "@ai-sdk/typesafe-ai": "^3.0.35",
     "@openrouter/ai-sdk-provider": "^3.0.0",
+    "@orpc/openapi": "1.16.2",
+    "@orpc/server": "1.16.2",
     "@shuttle/api": "workspace:*",
     "@shuttle/core": "workspace:*",
     "@shuttle/git": "workspace:*",
@@ -29,6 +31,9 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260914.1",
+    "@orpc/client": "1.16.2",
+    "@orpc/contract": "1.16.2",
+    "@orpc/openapi-client": "1.16.2",
     "@types/bun": "^1.3.9",
     "typescript": "7.0.2"
   }

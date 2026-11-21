@@ -8,10 +8,6 @@ import {
   type SandboxPlace,
   type SandboxWorkspaceRepo,
 } from '@shuttle/api'
-import { loomsStub } from '@shuttle/engine/looms-stub'
-import type { SessionStacks } from '@shuttle/engine/session/stack-state'
-import type { Actor } from '@shuttle/engine/tenancy/access'
-import { orgOfRun } from '@shuttle/engine/tenancy/run-id'
 import { codeStorageClient, codeStorageConfigured } from '@shuttle/git/codestorage/client'
 import { LSP_CLI_PATH, LSP_DEFAULT_WAIT_MS } from '@shuttle/sandbox/bridge/lsp/protocol'
 import { shellQuote } from '@shuttle/sandbox/exec-argv'
@@ -57,9 +53,12 @@ import {
 } from '@shuttle/sandbox/workspace-summary'
 import { parseWorktreePaths, worktreePathsScript } from '@shuttle/sandbox/worktree-paths'
 
-import type { ShuttleEnv } from '../env'
+import type { EngineEnv } from '../env'
 import { sandboxStub } from '../env'
-import { previewKeyFor } from '../tenancy/previews'
+import { loomsStub } from '../looms-stub'
+import type { SessionStacks } from '../session/stack-state'
+import type { Actor } from '../tenancy/access'
+import { orgOfRun } from '../tenancy/run-id'
 import { api, badRequest, forbidden, notFound } from './base'
 
 const sandbox = api.sandbox
@@ -73,12 +72,12 @@ type SandboxStub = ReturnType<typeof sandboxStub>
  * the request chooses it, so a caller cannot name a sandbox it has no session in. A session that
  * has not bound a sandbox yet has nothing to show, and gets an empty one named after itself.
  */
-export async function resolveSandboxName(env: ShuttleEnv, runId: string): Promise<string> {
+export async function resolveSandboxName(env: EngineEnv, runId: string): Promise<string> {
   return (await loomsStub(env.LOOMS_RUN, runId).getSandboxName()) ?? runId
 }
 
 /** The sandbox that holds a session, and whether it is one person's. */
-async function sessionSandbox(env: ShuttleEnv, runId: string) {
+async function sessionSandbox(env: EngineEnv, runId: string) {
   const name = await resolveSandboxName(env, runId)
 
   return { name, stub: sandboxStub(env, name), personal: sandboxIsPersonal(name, env) }
@@ -117,7 +116,7 @@ async function reporting<T>(work: () => Promise<T>): Promise<T> {
  * machine, the machine and whether it is connected. `local` is set while the session is placed
  * on a machine, whoever it is working for at the moment.
  */
-async function sessionPlace(env: ShuttleEnv, actor: Actor, runId: string): Promise<SandboxPlace> {
+async function sessionPlace(env: EngineEnv, actor: Actor, runId: string): Promise<SandboxPlace> {
   const run = loomsStub(env.LOOMS_RUN, runId)
   const home = await run.getSandboxName()
   const placement = await run.getSandboxPlacement()
@@ -176,7 +175,7 @@ async function sessionPlace(env: ShuttleEnv, actor: Actor, runId: string): Promi
 }
 
 /** The repositories a session works in: the ones linked to its folder, or its scratch one. */
-async function sessionRepos(env: ShuttleEnv, runId: string): Promise<readonly LinkedSandboxRepo[]> {
+async function sessionRepos(env: EngineEnv, runId: string): Promise<readonly LinkedSandboxRepo[]> {
   const linked = await loomsStub(env.LOOMS_RUN, runId).getSessionRepos()
 
   return linked.length > 0 ? linked : [DEMO_REPO]
@@ -209,7 +208,7 @@ function worktreePath(sessionRoot: string, path: string | undefined): string | n
 }
 
 /** Splits `<repository>/<path>` into the session repository it names and the path inside it. */
-async function repoFile(env: ShuttleEnv, runId: string, path: string | undefined) {
+async function repoFile(env: EngineEnv, runId: string, path: string | undefined) {
   const relative = worktreePath(`/workspace/.wt/${runId}`, path)
   const slash = relative?.indexOf('/') ?? -1
 
@@ -254,7 +253,7 @@ function looksBinary(sample: string): boolean {
  * What the session last saved to Code Storage, for answering while its sandbox sleeps. `work` is
  * null when nothing was saved: there is nothing to show until someone asks for work.
  */
-async function savedWork(env: ShuttleEnv, runId: string) {
+async function savedWork(env: EngineEnv, runId: string) {
   const orgId = orgOfRun(runId)
   let client: SavedWorkClient | null = null
   let saved: SavedRepo[] = []
@@ -294,7 +293,7 @@ const PATHS_TIMEOUT_MS = 20_000
  * that is still starting is not an error to the person looking at a file.
  */
 async function diagnostics(
-  env: ShuttleEnv,
+  env: EngineEnv,
   runId: string,
   path: string,
   draft?: string,
@@ -363,7 +362,7 @@ const FETCH_RETRY_MS = 60_000
 const failedFetches = new Map<string, number>()
 
 /** The `-c` option that sends a repository's credential with one git command. */
-async function gitAuth(env: ShuttleEnv, runId: string, repo: LinkedSandboxRepo): Promise<string> {
+async function gitAuth(env: EngineEnv, runId: string, repo: LinkedSandboxRepo): Promise<string> {
   const { basicAuth } = await repoAccess(env, repo, orgOfRun(runId))
 
   return `-c http.extraheader=${shellQuote(`Authorization: Basic ${basicAuth}`)}`
@@ -389,7 +388,7 @@ function fetchableRefs(against: string): string[] {
  * them missing. True when any fetch was tried, so the comparison is worth measuring again.
  */
 async function fetchForComparison(
-  env: ShuttleEnv,
+  env: EngineEnv,
   stub: SandboxStub,
   runId: string,
   repo: LinkedSandboxRepo,
@@ -1029,14 +1028,16 @@ export const sandboxRouter = {
     }),
   },
 
-  preview: sandbox.preview.handler(async ({ input, context: { env } }) => {
-    if (!env.AUTH_DB) {
+  preview: sandbox.preview.handler(async ({ input, context: { env, ports } }) => {
+    const previews = ports?.previews ?? null
+
+    if (previews === null) {
       throw new ORPCError('SERVICE_UNAVAILABLE', { message: 'Previews are unavailable' })
     }
 
-    // The label for this session's preview hostname (see `tenancy/previews.ts`), and the domain
+    // The label for this session's preview hostname (see `ports/previews.ts`), and the domain
     // the deployment serves previews under.
-    const label = await previewKeyFor(env.AUTH_DB, input.id)
+    const label = await previews.keyFor(input.id)
     const host = env.SHUTTLE_PREVIEW_HOST
 
     return host === undefined || host === '' ? { label } : { label, host }

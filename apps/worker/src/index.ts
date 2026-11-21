@@ -1,28 +1,27 @@
+import { serveShuttle, type ApiModule } from '@shuttle/engine/api/serve'
 import { loomsStub } from '@shuttle/engine/looms-stub'
-import { shuttleModules } from '@shuttle/engine/modules'
 import type { ShuttleHost } from '@shuttle/engine/ports/host'
-import { actorOfActing } from '@shuttle/engine/ports/identity'
-import { EventFirehose, SessionSandbox, ShuttleRun } from '@shuttle/engine/worker'
+import {
+  EventFirehose,
+  SessionSandbox,
+  ShuttleRun,
+  shuttleApiModules,
+} from '@shuttle/engine/worker'
 import { sandboxNameFor } from '@shuttle/engine/workspace/thread'
 import { httpsRedirect, withHsts } from '@shuttle/sandbox/https'
 import { sandboxesArePersonal } from '@shuttle/sandbox/names'
 import { isOwnHost, parsePreviewHost } from '@shuttle/sandbox/preview-host'
-import { routeToDurableObject, type LoomsDurableObjectConfig } from '@swirls/looms/cloudflare'
+import type { LoomsDurableObjectConfig } from '@swirls/looms/cloudflare'
 
 import { handleApi } from './api/handler'
 import { handlePublicApi } from './api/public'
-import { AUTH_BASE_PATH, AuthUnavailableError, getAuth } from './auth/auth'
+import { AUTH_BASE_PATH, AuthUnavailableError, getAuth, trustedWebOrigins } from './auth/auth'
 import { refuseSignUp } from './auth/signup-code'
 import type { ShuttleEnv } from './env'
 import { sandboxStub } from './env'
-import { workerHost, workerIdentity } from './host'
-import { handleAssetRoutes } from './routes/assets'
-import { handleFirehoseRoutes } from './routes/firehose'
+import { workerHost, workerPreviews } from './host'
 import { handleGithubPublicRoutes, handleGithubRoutes } from './routes/github'
 import { handleRunnerTokenRoutes } from './routes/runners'
-import { handleSandboxRoutes } from './routes/sandbox'
-import { authorizeLoomsRoute, authorizeRun, runIdOfPath } from './tenancy/gate'
-import { runOfPreviewKey } from './tenancy/previews'
 import { runTimingObserver } from './timing'
 import { isWebAppRequest } from './web-app'
 
@@ -110,54 +109,29 @@ async function route(
     return runner
   }
 
-  const acting = await workerIdentity(env).resolve(request)
-  const actor = acting === null ? null : actorOfActing(acting)
-
-  if (!actor) {
-    return Response.json({ error: 'Sign in to continue' }, { status: 401 })
-  }
-
-  // A request that names a run is checked against that run before anything else sees it.
-  const runId = runIdOfPath(url.pathname)
-
-  if (runId === null && /^\/(?:runs|sessions)\/./.test(url.pathname)) {
-    return Response.json({ error: 'Not found' }, { status: 404 })
-  }
-
-  if (runId !== null) {
-    const denied = await authorizeRun(env, actor, runId)
-
-    if (denied) {
-      return denied
-    }
-  }
-
-  const handled =
-    (await handleApi({ env, actor, request, ctx })) ??
-    (await handleFirehoseRoutes(request, env, actor)) ??
-    (await handleGithubRoutes(request, env, actor)) ??
-    (await handleSandboxRoutes(request, env, actor)) ??
-    (await handleAssetRoutes(request, env, actor))
-
-  if (handled) {
-    return handled
-  }
-
-  // What is left is Looms' own API. Looms says which of its routes a request is for; only reads
-  // and the signals a browser may send get through, each recorded as this person's.
-  if (url.pathname.startsWith('/runs') && runId === null) {
-    return Response.json({ error: 'Not found' }, { status: 404 })
-  }
-
-  const response = await routeToDurableObject(env.LOOMS_RUN, request, {
-    modules: () => {
-      // Definitions listing does not need a session-specific sandbox binding.
-      return shuttleModules(workerHost(env), 'definitions')
-    },
-    authorize: (_request, loomsRoute) => authorizeLoomsRoute(env, actor, loomsRoute),
+  // Everything else is for someone signed in: the engine's own modules, then this app's routes.
+  // `serveShuttle` finds who is asking and checks the run a path names before any of them answer.
+  const serve = serveShuttle(workerHost(env), {
+    modules: [...shuttleApiModules, appApi(env)],
+    origins: trustedWebOrigins(env),
   })
 
-  return response ?? new Response('Not Found', { status: 404 })
+  return (await serve(request, ctx)) ?? new Response('Not Found', { status: 404 })
+}
+
+/**
+ * This app's own routes, as one more module beside the engine's: the rest of the API contract
+ * (the workspace, connections, runners) and GitHub's. It is offered whatever no other module
+ * answered.
+ */
+function appApi(env: ShuttleEnv): ApiModule {
+  return {
+    name: 'app',
+    claims: () => true,
+    handle: async ({ actor, request, ctx, ports, trustedOrigins }) =>
+      (await handleApi({ env, actor, request, ctx, ports, trustedOrigins })) ??
+      handleGithubRoutes(request, env, actor),
+  }
 }
 
 async function handlePreviewHost(request: Request, env: ShuttleEnv): Promise<Response | null> {
@@ -170,7 +144,7 @@ async function handlePreviewHost(request: Request, env: ShuttleEnv): Promise<Res
 
   // The label is a session's preview key, which leads to the sandbox the session is working in
   // right now, whoever's that is.
-  const runId = env.AUTH_DB ? await runOfPreviewKey(env.AUTH_DB, parsed.folderId) : null
+  const runId = (await workerPreviews(env)?.runOf(parsed.folderId)) ?? null
 
   if (runId !== null) {
     const sandboxName = (await loomsStub(env.LOOMS_RUN, runId).getSandboxName()) ?? runId

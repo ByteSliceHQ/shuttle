@@ -78,3 +78,18 @@ export {
   type SessionPullRequest,
   type SessionQuestion,
 } from './headless/outcome'
+
+export { noPeople, type PeoplePort } from './ports/people'
+export type { PreviewKeys } from './ports/previews'
+
+export {
+  assetsApi,
+  firehoseApi,
+  portableApiModules,
+  serveShuttle,
+  sessionApi,
+  terminalApi,
+  type ApiModule,
+  type ServeOptions,
+} from './api/serve'
+export type { ApiContext } from './api/base'
