@@ -70,12 +70,24 @@ const UNAVAILABLE_STYLE = [
   'pre{margin:16px 0 0;white-space:pre-wrap;text-align:left;color:var(--muted);font:11px ui-monospace,monospace;opacity:.8}',
 ].join('')
 
-/** Reloads the page once the port stops answering with the page itself. */
+/** The first wait between preview polls, and the longest wait it grows to while the port stays down. */
+export const PREVIEW_POLL_START_MS = 2000
+export const PREVIEW_POLL_MAX_MS = 30_000
+
+/**
+ * Reloads the page once the port stops answering with the page itself. A port that never comes up
+ * answers for as long as its tab stays open, and the Worker logs every answer at error level, so
+ * each tab must not keep asking at a fixed rate.
+ */
 const UNAVAILABLE_SCRIPT = [
-  '(function(){var t=setInterval(function(){',
-  "fetch(location.href,{cache:'no-store',headers:{accept:'text/plain'}}).then(function(r){",
-  `if(!r.headers.get('${PREVIEW_UNAVAILABLE_HEADER}')){clearInterval(t);location.reload()}`,
-  '}).catch(function(){})},2000)})()',
+  '(function(){',
+  `var d=${PREVIEW_POLL_START_MS},m=${PREVIEW_POLL_MAX_MS},t=null;`,
+  'function s(){if(t===null&&!document.hidden)t=setTimeout(p,d)}',
+  'function p(){t=null;fetch(location.href,{cache:"no-store",headers:{accept:"text/plain"}}).then(function(r){',
+  `if(!r.headers.get("${PREVIEW_UNAVAILABLE_HEADER}")){location.reload();return}g()}).catch(g)}`,
+  'function g(){d=Math.min(d*2,m);s()}',
+  `function v(){clearTimeout(t);t=null;d=${PREVIEW_POLL_START_MS};s()}`,
+  'document.addEventListener("visibilitychange",v);s()})()',
 ].join('')
 
 /**
@@ -90,7 +102,7 @@ export function previewUnavailableResponse(
   const hasDetail = detail !== undefined && detail !== ''
 
   const headers = new Headers({
-    'retry-after': '2',
+    'retry-after': String(PREVIEW_POLL_START_MS / 1000),
     'cache-control': 'no-store',
     [PREVIEW_UNAVAILABLE_HEADER]: '1',
   })
