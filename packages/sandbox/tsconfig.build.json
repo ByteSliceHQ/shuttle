@@ -6,7 +6,6 @@
     "declaration": true,
     "outDir": "dist",
     "rootDir": ".",
-    "types": ["@cloudflare/workers-types", "node"],
     "paths": {
       "@shuttle/api": ["../api/dist/index.d.ts"],
       "@shuttle/git/*": ["../git/dist/*.d.ts"],
