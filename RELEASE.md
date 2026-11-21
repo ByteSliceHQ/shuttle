@@ -33,7 +33,8 @@ that an older Worker or an older host cannot read is a breaking change, whatever
 3. The Release workflow opens or updates the `Release @swirls/shuttle` PR.
 4. Review its changelog and version. Merging it runs the full verification and packed-package smoke
    tests, publishes to npm, creates the `@swirls/shuttle@x.y.z` tag, and creates a GitHub release.
-5. Confirm the npm page shows provenance and install the released version in a clean project.
+5. Approve the version on npmjs.com if npm holds it as a staged publish, confirm the npm page
+   shows provenance, and install the released version in a clean project.
 
 Do not run `changeset publish` from a developer checkout during the normal flow.
 
@@ -68,6 +69,13 @@ preview version.
 tarball, installs it into a temporary project outside the repository, loads what needs no browser
 in Node, type-checks every entry point along with the declarations it ships, and bundles a page
 built from the parts. It never publishes.
+
+npm can hold a publish as a staged version that a maintainer approves on npmjs.com. While it
+waits, the version does not answer at its own npm address. A push to main that arrives before the
+approval finds the version absent, and npm refuses the publish of a second staged version. The
+Release workflow ends successfully in that case and prints the version to approve, because the
+staged version is what gets released. If the staged version is wrong, reject it on npmjs.com and
+ship the correction as a new version: a rerun stages the same version again.
 
 If a release fails before npm accepts it, fix the cause and rerun the workflow. If npm accepted the
 version but tag or GitHub release creation failed, do not reuse or republish that version; create
