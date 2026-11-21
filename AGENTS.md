@@ -31,15 +31,19 @@ Shuttle is a Looms application, not a Looms package.
 
 ## HTTP API
 
-Every JSON route the Worker serves is declared once, in `packages/api` (`@shuttle/api`), as an
+Every JSON route is declared once, in `packages/api` (`@shuttle/api`), as an
 [oRPC](https://orpc.dev) contract: method, path, and zod schemas for input and output.
 
-- **Adding a route:** declare it in `packages/api/src/<domain>.ts`, implement it in
-  `apps/worker/src/api/<domain>.ts` with `api.<domain>.<name>.handler(...)`. Input and output are
+- **Where routes live:** what any host serves (a session, its sandbox, assets, the terminal, the
+  firehose, a run's log) is in `packages/engine/src/api`, grouped into the `ApiModule`s that
+  `serveShuttle` mounts. What only Shuttle's own app serves (the workspace, connections, runners,
+  GitHub, the tenant) is in `apps/worker/src/api`, mounted as one more module.
+- **Adding a route:** declare it in `packages/api/src/<domain>.ts` and implement it with
+  `api.<domain>.<name>.handler(...)` in whichever of the two it belongs to. Input and output are
   validated against the contract; throw `ORPCError` (or `badRequest`/`forbidden`/`notFound`) for
   failures. Never parse a body by hand or cast it.
-- **Not on the contract:** WebSocket upgrades, redirects and binary bodies stay as plain handlers
-  in `apps/worker/src/routes`. Looms' own routes (`/runs/…`) are forwarded to the run.
+- **Not on the contract:** WebSocket upgrades, redirects and binary bodies stay plain handlers.
+  Looms' own routes (`/runs/…`) are forwarded to the run by `runsApi`.
 - Types shared by the Worker and the web app come from the contract's schemas (`z.infer`), not
   from hand-written interfaces.
 
