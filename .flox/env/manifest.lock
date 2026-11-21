@@ -22,7 +22,7 @@
       "SHUTTLE_WORKER_PORT": "8790"
     },
     "hook": {
-      "on-activate": "  echo \"Shuttle\"\n  echo \"  bun install\"\n  echo \"  cp apps/worker/.dev.vars.example apps/worker/.dev.vars\"\n  echo \"  bun run dev   # worker :$SHUTTLE_WORKER_PORT + web :$SHUTTLE_WEB_PORT (+ webhook tunnel when GitHub App is set)\"\n"
+      "on-activate": "  echo\n  echo \"📦 Installing dependencies...\"\n  echo\n  bun install --frozen-lockfile\n  echo\n  echo \"🪢 Shuttle\"\n  echo \"  cp apps/worker/.dev.vars.example apps/worker/.dev.vars\"\n  echo \"  bun run dev   # worker :$SHUTTLE_WORKER_PORT + web :$SHUTTLE_WEB_PORT (+ webhook tunnel when GitHub App is set)\"\n  echo\n"
     },
     "options": {
       "systems": [

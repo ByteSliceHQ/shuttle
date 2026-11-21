@@ -17,10 +17,15 @@ SHUTTLE_WEB_PORT = "5180"
 
 [hook]
 on-activate = '''
-  echo "Shuttle"
-  echo "  bun install"
+  echo
+  echo "📦 Installing dependencies..."
+  echo
+  bun install --frozen-lockfile
+  echo
+  echo "🪢 Shuttle"
   echo "  cp apps/worker/.dev.vars.example apps/worker/.dev.vars"
   echo "  bun run dev   # worker :$SHUTTLE_WORKER_PORT + web :$SHUTTLE_WEB_PORT (+ webhook tunnel when GitHub App is set)"
+  echo
 '''
 
 [options]
