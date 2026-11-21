@@ -116,6 +116,28 @@ describe('outcomeOf', () => {
     })
   })
 
+  test('a review an agent asks to submit is a decision, not a question', () => {
+    const outcome = outcomeOf({
+      activity: 'needs_input',
+      state: {},
+      asked: [
+        { approvalId: 'pr_review_1', title: 'Submit pull request review?', description: null },
+      ],
+    })
+
+    expect(outcome).toMatchObject({
+      state: 'blocked',
+      question: { approvalId: 'pr_review_1', kind: 'submit-review' },
+    })
+  })
+
+  test('a session waiting on nothing the run can name is blocked with no id to answer', () => {
+    expect(outcomeOf({ activity: 'needs_input', state: {} })).toMatchObject({
+      state: 'blocked',
+      question: { approvalId: null, kind: 'question' },
+    })
+  })
+
   test('an open proposal blocks a session that is otherwise at rest or still in a tool call', () => {
     const state = {
       pendingPrPublish: { approvalId: 'pr_publish_1', title: 'Fix', status: 'awaiting_approval' },

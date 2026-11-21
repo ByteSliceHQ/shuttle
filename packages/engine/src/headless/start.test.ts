@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import type { EventInput } from '@swirls/looms/core'
 
 import type { EngineEnv } from '../env'
+import type { ShuttleHost } from '../ports/host'
 import type { ActingFor } from '../ports/identity'
 import type { SessionStartRequest } from '../ports/session-start'
 import type { SessionAccess } from '../tenancy/access'
@@ -112,6 +113,28 @@ describe('starting again with the same idempotency key', () => {
 
     expect(again.runId).toBe(first.runId)
     expect(runs.get(first.runId)?.harness).toBe('claude-code')
+  })
+
+  test('asks the host once, however often the start is repeated', async () => {
+    const { namespace } = recordingNamespace()
+    let asked = 0
+
+    const host: ShuttleHost = {
+      env: fakeEnv({ LOOMS_RUN: namespace }),
+      ports: {
+        sessionStart: {
+          admit: async () => {
+            asked += 1
+            return { allowed: true }
+          },
+        },
+      },
+    }
+
+    await startHeadlessSession(host, request({ idempotencyKey: 'wi-7' }))
+    await startHeadlessSession(host, request({ idempotencyKey: 'wi-7' }))
+
+    expect(asked).toBe(1)
   })
 
   test("refuses a key that names another person's session, and changes nothing on it", async () => {

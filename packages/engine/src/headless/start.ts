@@ -1,3 +1,5 @@
+import type { RunState } from '@swirls/looms/core'
+
 import { ensureNamedWorkspace, ensureWorkspaceQuietly } from '../bootstrap'
 import { personalWorkspaceRunId, workspaceRunId } from '../config'
 import { parseHarness, type HarnessId } from '../harness'
@@ -6,11 +8,17 @@ import { resolveHost, type ShuttleHost } from '../ports/host'
 import { actorOfActing, orgOfActing, ownerOfActing, type ActingFor } from '../ports/identity'
 import { admitSessionStart } from '../ports/session-start'
 import type { JsonObjectBuilder } from '../session/json-object'
-import type { SessionAccess } from '../tenancy/access'
+import { canOpenSession, type SessionAccess } from '../tenancy/access'
 import { orgOfRun, scopedRunId } from '../tenancy/run-id'
 import { NO_FOLDER } from '../workspace/scope'
 import { requestSession } from '../workspace/signals'
-import { sessionOutcome, type SessionOutcome } from './outcome'
+import {
+  openQuestions,
+  sessionOutcome,
+  type QuestionKind,
+  type SessionOutcome,
+  type SessionQuestion,
+} from './outcome'
 
 /** A repository for a session to work in. The host knows its GitHub App installation. */
 export interface HeadlessRepository {
@@ -119,8 +127,8 @@ function sameAccess(recorded: SessionAccess, access: SessionAccess): boolean {
  *
  * The host's `sessionStart` port decides first, and a refusal is thrown as
  * `SessionStartRefusedError` before anything is created. Asking again with the same idempotency
- * key returns the session already started and changes nothing on it; a key that names a session
- * someone else started is refused.
+ * key returns the session already started, changes nothing on it and does not ask the port again;
+ * a key that names a session someone else started is refused.
  */
 export async function startHeadlessSession(
   host: ShuttleHost,
@@ -151,14 +159,30 @@ export async function startHeadlessSession(
 
   const repos = linkedRepos(request.repositories)
   const orgId = orgOfActing(request.acting)
+  const runId = scopedRunId(orgId, `session_${request.idempotencyKey ?? crypto.randomUUID()}`)
+  const access = accessFor(request.acting)
 
-  await admitSessionStart(ports.sessionStart, {
-    kind: 'host',
-    orgId,
-    acting: request.acting,
-    repos: repos.map((repo) => repo.fullName),
-    metadata: request.metadata,
-  })
+  // Only a key can name a session that is already there. Without one the session is new, and
+  // nothing is reached before the host has allowed it.
+  const recorded =
+    request.idempotencyKey === undefined ? null : await loomsStub(env.LOOMS_RUN, runId).getAccess()
+
+  if (recorded !== null && !sameAccess(recorded, access)) {
+    // A key names one session in the organization. Someone else's is not theirs to take over.
+    throw new HeadlessRequestError('that idempotency key names a session someone else started')
+  }
+
+  // The host is asked once for a session: asking again with the same key is not another start,
+  // so a port that counts starts counts this one once.
+  if (recorded === null) {
+    await admitSessionStart(ports.sessionStart, {
+      kind: 'host',
+      orgId,
+      acting: request.acting,
+      repos: repos.map((repo) => repo.fullName),
+      metadata: request.metadata,
+    })
+  }
 
   const owner = ownerOfActing(request.acting)
 
@@ -168,13 +192,9 @@ export async function startHeadlessSession(
 
   await Promise.all([ensureWorkspaceQuietly(env, orgId), ensureNamedWorkspace(env, listedIn)])
 
-  const runId = scopedRunId(orgId, `session_${request.idempotencyKey ?? crypto.randomUUID()}`)
-
-  const session = loomsStub(env.LOOMS_RUN, runId)
-  const access = accessFor(request.acting)
-  const recorded = await session.getAccess()
-
   if (recorded === null) {
+    const session = loomsStub(env.LOOMS_RUN, runId)
+
     // Recorded before the session exists, so there is no moment when it is open to everyone, and
     // its first turn already runs on the harness the host chose.
     await session.setAccess(access)
@@ -182,9 +202,6 @@ export async function startHeadlessSession(
     if (request.harness !== undefined) {
       await session.setHarness(request.harness)
     }
-  } else if (!sameAccess(recorded, access)) {
-    // A key names one session in the organization. Someone else's is not theirs to take over.
-    throw new HeadlessRequestError('that idempotency key names a session someone else started')
   }
 
   // Asking again leaves the session's access and harness as they are. The request is sent again,
@@ -208,7 +225,10 @@ export async function startHeadlessSession(
   return { runId }
 }
 
-/** Where a headless session stands: working, completed with its pull requests, or blocked. */
+/**
+ * Where a headless session stands: working, completed with its pull requests, or blocked. It
+ * answers for any run it is given: the host decides who may read which session before it calls.
+ */
 export async function headlessOutcome(host: ShuttleHost, runId: string): Promise<SessionOutcome> {
   const { env } = resolveHost(host)
 
@@ -224,10 +244,59 @@ export type HeadlessAnswer =
   | { readonly decision: 'approve' | 'reject' }
   | null
 
+/** The action a decision takes on each kind of question, as the approval itself names them. */
+const DECISION_ACTIONS: Record<
+  Exclude<QuestionKind, 'question'>,
+  { readonly approve: string; readonly reject: string }
+> = {
+  'publish-pull-request': { approve: 'approve', reject: 'discard' },
+  'submit-review': { approve: 'submit', reject: 'discard' },
+}
+
+/**
+ * The decision `answer` makes on `question`. An answer of the wrong shape is refused, so words
+ * meant for an agent never approve a pull request, and a bare approval never stands in for an
+ * answer in words.
+ */
+function decisionFor(question: SessionQuestion, answer: HeadlessAnswer): JsonObjectBuilder {
+  if (question.kind === 'question') {
+    if (answer === null) {
+      return { actionId: 'defer', outcome: 'reject' }
+    }
+
+    if ('text' in answer) {
+      return { actionId: 'answer', outcome: 'approve', payload: { answer: answer.text } }
+    }
+
+    throw new HeadlessRequestError('a question is answered with { text }, or null')
+  }
+
+  if (answer === null || !('decision' in answer)) {
+    throw new HeadlessRequestError(`a ${question.kind} is decided with { decision }`)
+  }
+
+  return { actionId: DECISION_ACTIONS[question.kind][answer.decision], outcome: answer.decision }
+}
+
+/** The question `approvalId` names among those `run` has open. */
+function openQuestion(run: RunState, approvalId: string): SessionQuestion {
+  const question = openQuestions(run).find((open) => open.approvalId === approvalId)
+
+  if (question === undefined) {
+    throw new HeadlessRequestError('that session has no open question with that id')
+  }
+
+  return question
+}
+
 /**
  * Answers the question a blocked session is waiting on. `null` has the agent use its own
- * judgment, as a person choosing "use your judgment" does. A question that is a pull request
- * proposal is decided with `approve` or `reject`.
+ * judgment, as a person choosing "use your judgment" does. A pull request proposal, or a review
+ * an agent asks to submit, is decided with `approve` or `reject`. An answer that does not fit the
+ * question, or names one the session does not have open, is refused with `HeadlessRequestError`.
+ *
+ * `acting` has to be able to open the session: anyone in its organization for an organization's
+ * session, and for a person's only that person or someone they shared it with.
  */
 export async function answerHeadlessQuestion(
   host: ShuttleHost,
@@ -243,23 +312,19 @@ export async function answerHeadlessQuestion(
   }
 
   const actor = actorOfActing(acting)
+  const session = loomsStub(env.LOOMS_RUN, runId)
 
-  const decided: JsonObjectBuilder = { approvalId }
+  if (!canOpenSession(await session.getAccess(), actor)) {
+    throw new HeadlessRequestError('that session is private to someone else')
+  }
 
-  if (answer === null) {
-    decided.actionId = 'defer'
-    decided.outcome = 'reject'
-  } else if ('text' in answer) {
-    decided.actionId = 'answer'
-    decided.outcome = 'approve'
-    decided.payload = { answer: answer.text }
-  } else {
-    decided.actionId = answer.decision === 'approve' ? 'approve' : 'discard'
-    decided.outcome = answer.decision
+  const decided: JsonObjectBuilder = {
+    approvalId,
+    ...decisionFor(openQuestion(await session.getRun(), approvalId), answer),
   }
 
   // Recorded as decided by whoever the host acts for, as a decision made in the app is.
-  await loomsStub(env.LOOMS_RUN, runId).signal([
+  await session.signal([
     {
       type: 'approval.decided',
       payload: decided,

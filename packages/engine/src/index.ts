@@ -73,6 +73,7 @@ export {
 export {
   outcomeOf,
   sessionOutcome,
+  type QuestionKind,
   type SessionOutcome,
   type SessionPullRequest,
   type SessionQuestion,

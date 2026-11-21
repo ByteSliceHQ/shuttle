@@ -180,6 +180,17 @@ async function outcomeWhen(
 
 const organization: ActingFor = { kind: 'organization', orgId: 'org1', service: 'build-host' }
 
+/** Why a call was refused. Fails when it was not. */
+async function refusal(call: Promise<void>): Promise<string> {
+  try {
+    await call
+  } catch (cause) {
+    return cause instanceof Error ? cause.message : String(cause)
+  }
+
+  throw new Error('expected the call to be refused')
+}
+
 const request = {
   acting: organization,
   brief: 'Fix the flaky checkout test',
@@ -350,6 +361,108 @@ describe('a headless session, from start to finished', () => {
 
       expect(discarded.approvalId).toBe('pr_publish_r1')
       expect(discarded.message).toContain('expired')
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('words do not decide a pull request proposal, and it stays open', async () => {
+    const { host, looms } = memoryHost()
+
+    try {
+      const { runId } = await startHeadlessSession(host, request)
+
+      await outcomeWhen(host, runId, 'completed')
+
+      await looms.signal(runId, [
+        requestPullRequest({ requestId: 'r1', title: 'Fix the test', body: '', draft: true }),
+      ])
+
+      await outcomeWhen(host, runId, 'blocked')
+
+      expect(
+        await refusal(
+          answerHeadlessQuestion(host, runId, 'pr_publish_r1', { text: 'Not yet' }, organization),
+        ),
+      ).toContain('decided with { decision }')
+
+      expect(
+        await refusal(answerHeadlessQuestion(host, runId, 'pr_publish_r1', null, organization)),
+      ).toContain('decided with { decision }')
+
+      expect((await headlessOutcome(host, runId)).state).toBe('blocked')
+
+      const events = await looms.getEvents(runId)
+
+      expect(events.some((event) => event.type === 'approval.decided')).toBe(false)
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test("a decision does not answer an agent's question", async () => {
+    const { host, looms } = memoryHost({ conductor: askingConductor() })
+
+    try {
+      const { runId } = await startHeadlessSession(host, request)
+
+      await outcomeWhen(host, runId, 'blocked')
+
+      expect(
+        await refusal(
+          answerHeadlessQuestion(host, runId, 'ask_1', { decision: 'approve' }, organization),
+        ),
+      ).toContain('answered with { text }')
+
+      expect((await headlessOutcome(host, runId)).state).toBe('blocked')
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('an answer to a question the session does not have open is refused', async () => {
+    const { host, looms } = memoryHost()
+
+    try {
+      const { runId } = await startHeadlessSession(host, request)
+
+      await outcomeWhen(host, runId, 'completed')
+
+      expect(
+        await refusal(
+          answerHeadlessQuestion(host, runId, 'ask_9', { text: 'Postgres' }, organization),
+        ),
+      ).toContain('no open question')
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test("a person's session is not answered by someone it is not shared with", async () => {
+    const { host, looms } = memoryHost({ conductor: askingConductor() })
+
+    const actor = { orgId: 'org1', role: 'member', email: '' } as const
+    const ada: ActingFor = { kind: 'person', actor: { ...actor, userId: 'u1', name: 'Ada' } }
+    const grace: ActingFor = { kind: 'person', actor: { ...actor, userId: 'u2', name: 'Grace' } }
+
+    try {
+      const { runId } = await startHeadlessSession(host, { ...request, acting: ada })
+
+      await outcomeWhen(host, runId, 'blocked')
+
+      expect(
+        await refusal(answerHeadlessQuestion(host, runId, 'ask_1', { text: 'Postgres' }, grace)),
+      ).toContain('private to someone else')
+
+      expect(
+        await refusal(
+          answerHeadlessQuestion(host, runId, 'ask_1', { text: 'Postgres' }, organization),
+        ),
+      ).toContain('private to someone else')
+
+      await answerHeadlessQuestion(host, runId, 'ask_1', { text: 'Postgres' }, ada)
+
+      expect((await outcomeWhen(host, runId, 'completed')).state).toBe('completed')
     } finally {
       await looms.stop()
     }

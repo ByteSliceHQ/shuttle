@@ -14,17 +14,26 @@ export interface SessionPullRequest {
   readonly draft: boolean
 }
 
+export type QuestionKind = 'question' | 'submit-review' | ApprovalKind
+
+/** The prefix of the approval id an agent gives a review it asks to submit. */
+const REVIEW_APPROVAL = 'pr_review_'
+
 /** A question the session has put to a person and cannot go on without. */
 export interface SessionQuestion {
-  /** Pass this back to `answerHeadlessQuestion`. */
-  readonly approvalId: string
+  /**
+   * Pass this back to `answerHeadlessQuestion`. Null when the run is waiting on a person and does
+   * not say for which approval, so there is nothing to answer by id.
+   */
+  readonly approvalId: string | null
   readonly title: string
   readonly description: string | null
   /**
    * What is being asked. A `question` is answered in words, or left to the agent's judgment. A
-   * `publish-pull-request` is a proposal, approved or rejected.
+   * `publish-pull-request` is a proposal, and a `submit-review` a pull request review an agent
+   * has drafted: each is approved or rejected.
    */
-  readonly kind: 'question' | ApprovalKind
+  readonly kind: QuestionKind
   /** When a decision stops being accepted, as epoch milliseconds. Null: it waits for as long as it takes. */
   readonly expiresAt: number | null
 }
@@ -112,35 +121,41 @@ export function pullRequestsOf(state: JsonObject): SessionPullRequest[] {
 }
 
 /**
- * What the session is waiting on a person for. A pull request proposal comes first: it is the
- * session's own, and nothing else moves until it is decided.
+ * Everything the session is waiting on a person for. A pull request proposal comes first: it is
+ * the session's own, and nothing else moves until it is decided.
  */
-export function questionOf(source: Omit<OutcomeSource, 'activity'>): SessionQuestion | null {
+export function questionsOf(source: Omit<OutcomeSource, 'activity'>): SessionQuestion[] {
   const proposal = asObject(source.state.pendingPrPublish)
 
-  if (proposal.status === 'awaiting_approval' && Predicate.isString(proposal.approvalId)) {
-    return {
-      approvalId: proposal.approvalId,
-      title: 'Publish this pull request?',
-      description: Predicate.isString(proposal.title) ? proposal.title : null,
-      kind: 'publish-pull-request',
-      expiresAt: Predicate.isNumber(proposal.expiresAt) ? proposal.expiresAt : null,
-    }
-  }
+  const proposed: SessionQuestion[] =
+    proposal.status === 'awaiting_approval' && Predicate.isString(proposal.approvalId)
+      ? [
+          {
+            approvalId: proposal.approvalId,
+            title: 'Publish this pull request?',
+            description: Predicate.isString(proposal.title) ? proposal.title : null,
+            kind: 'publish-pull-request',
+            expiresAt: Predicate.isNumber(proposal.expiresAt) ? proposal.expiresAt : null,
+          },
+        ]
+      : []
 
-  const [asked] = source.asked ?? []
+  const asked = (source.asked ?? [])
+    .filter((entry) => proposed.every((question) => question.approvalId !== entry.approvalId))
+    .map((entry): SessionQuestion => ({
+      approvalId: entry.approvalId,
+      title: entry.title ?? 'Needs your decision',
+      description: entry.description,
+      kind: entry.approvalId.startsWith(REVIEW_APPROVAL) ? 'submit-review' : 'question',
+      expiresAt: null,
+    }))
 
-  if (asked === undefined) {
-    return null
-  }
+  return [...proposed, ...asked]
+}
 
-  return {
-    approvalId: asked.approvalId,
-    title: asked.title ?? 'Needs your decision',
-    description: asked.description,
-    kind: 'question',
-    expiresAt: null,
-  }
+/** The question the session is blocked on: the first of {@link questionsOf}. */
+export function questionOf(source: Omit<OutcomeSource, 'activity'>): SessionQuestion | null {
+  return questionsOf(source)[0] ?? null
 }
 
 /** The approval requests an agent thread has made from its tool calls, by approval id. */
@@ -225,7 +240,7 @@ export function outcomeOf(source: OutcomeSource): SessionOutcome {
       return {
         state: 'blocked',
         question: {
-          approvalId: '',
+          approvalId: null,
           title: 'Needs your decision',
           description: null,
           kind: 'question',
@@ -242,6 +257,14 @@ export function outcomeOf(source: OutcomeSource): SessionOutcome {
       return exhaustive
     }
   }
+}
+
+/** Every question a session's run has open, for checking an answer against the one it names. */
+export function openQuestions(run: RunState): SessionQuestion[] {
+  const rootId = run.rootThreadId
+  const root = rootId === null ? undefined : run.threads[rootId]
+
+  return root === undefined ? [] : questionsOf({ state: asObject(root.state), asked: askedOf(run) })
 }
 
 /** The outcome of a session, read from its run. A run with no session thread yet is working. */
