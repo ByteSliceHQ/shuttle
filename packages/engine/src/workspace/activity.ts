@@ -1,3 +1,4 @@
+import { orgOfRun } from '@shuttle/api'
 import { readRunLaunchSource, type EventEnvelope } from '@swirls/looms/core'
 import type { Projector } from '@swirls/looms/projectors'
 
@@ -10,7 +11,6 @@ import { readSandboxBinding } from '../session/bind-sandbox'
 import { applyPendingPlacement, saveSessionWork } from '../session/handoff'
 import { readSessionAccess } from '../tenancy/access'
 import { listingRunIds } from '../tenancy/listings'
-import { orgOfRun } from '../tenancy/run-id'
 import {
   deriveSessionActivity,
   initialSessionActivityState,

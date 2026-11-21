@@ -1,5 +1,6 @@
+import { isOrgId } from '@shuttle/api'
+
 import type { Actor } from '../tenancy/access'
-import { isOrgId } from '../tenancy/run-id'
 
 /**
  * Who a request, or a host call, acts for: the host port for identity and tenancy.

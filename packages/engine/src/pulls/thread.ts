@@ -1,5 +1,6 @@
 import { Predicate } from 'effect'
 
+import { orgOfRun, scopedRunId } from '@shuttle/api'
 import {
   createWaitId,
   emit,
@@ -9,7 +10,6 @@ import {
   type ThreadDefinition,
 } from '@swirls/looms/core'
 
-import { orgOfRun, scopedRunId } from '../tenancy/run-id'
 import { pullKey, pullsModule, type AutoReviewMode, type PullLinkedRole } from './scope'
 
 export interface PullRecord {

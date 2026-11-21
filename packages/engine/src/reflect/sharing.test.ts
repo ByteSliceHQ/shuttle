@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 
+import { scopedRunId } from '@shuttle/api'
+
 import type { SessionAccess } from '../tenancy/access'
-import { scopedRunId } from '../tenancy/run-id'
 import { fakeEnv } from '../testing/fake-env'
 import { mayShareLessons } from './sharing'
 

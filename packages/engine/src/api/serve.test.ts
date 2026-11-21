@@ -148,4 +148,84 @@ describe('serveShuttle', () => {
 
     expect(elsewhere?.status).toBe(404)
   })
+
+  describe('under a basePath', () => {
+    const options = { basePath: '/shuttle', origins: ['https://app.example'] }
+
+    test('leaves every path outside it to the host, even one a module would claim', async () => {
+      expect(await ask(`/sessions/${RUN}/harness`, asAda, options)).toBeNull()
+      expect(await ask('/shuttlecock', asAda, options)).toBeNull()
+
+      expect(
+        await ask(
+          '/runs',
+          { method: 'OPTIONS', headers: { origin: 'https://app.example' } },
+          options,
+        ),
+      ).toBeNull()
+    })
+
+    test('takes it off before a module sees the path', async () => {
+      const response = await ask(`/shuttle/sessions/${RUN}/harness`, asAda, options)
+
+      expect(response?.status).toBe(200)
+      expect(Body.parse(await response?.json())).toEqual({ harness: 'shuttle' })
+    })
+
+    test('says which modules are mounted at its own capabilities', async () => {
+      const response = await ask('/shuttle/capabilities', {}, { ...options, grantSecret: SECRET })
+
+      expect(Body.parse(await response?.json())).toEqual({
+        modules: ['session', 'firehose'],
+        previews: false,
+        grants: true,
+      })
+
+      expect(await ask('/capabilities', {}, options)).toBeNull()
+    })
+
+    test('gives a read grant under it', async () => {
+      const granted = await ask(
+        `/shuttle/runs/${RUN}/grant`,
+        { method: 'POST', ...asAda },
+        { ...options, grantSecret: SECRET, modules: [sessionApi, runs] },
+      )
+
+      expect(granted?.status).toBe(200)
+    })
+
+    test('answers a path no module claims with a 404 a listed page can read', async () => {
+      const listed = await ask(
+        '/shuttle/nothing-here',
+        { headers: { origin: 'https://app.example' } },
+        options,
+      )
+
+      expect(listed?.status).toBe(404)
+      expect(listed?.headers.get('access-control-allow-origin')).toBe('https://app.example')
+
+      const bare = await ask('/shuttle', {}, options)
+
+      expect(bare?.status).toBe(404)
+      expect(bare?.headers.get('access-control-allow-origin')).toBeNull()
+    })
+
+    test('answers a preflight under it', async () => {
+      const preflight = await ask(
+        `/shuttle/sessions/${RUN}/harness`,
+        { method: 'OPTIONS', headers: { origin: 'https://app.example' } },
+        options,
+      )
+
+      expect(preflight?.status).toBe(204)
+    })
+
+    test('takes a trailing slash and refuses a basePath that is not a path', () => {
+      expect(() => serveShuttle(hostWith(), { modules: [], basePath: 'shuttle' })).toThrow(
+        'basePath',
+      )
+
+      expect(() => serveShuttle(hostWith(), { modules: [], basePath: '/shuttle/' })).not.toThrow()
+    })
+  })
 })

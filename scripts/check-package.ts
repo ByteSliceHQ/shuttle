@@ -247,7 +247,7 @@ try {
     '@swirls/shuttle/engine/harness',
     '@swirls/shuttle/engine/session/module',
     '@swirls/shuttle/engine/tenancy/access',
-    '@swirls/shuttle/engine/tenancy/run-id',
+    '@swirls/shuttle/engine/tenancy/run-names',
     '@swirls/shuttle/engine/testing/fake-env',
     '@swirls/shuttle/engine/workspace/module',
     '@swirls/shuttle/git/access',
@@ -272,9 +272,11 @@ try {
   await writeFile(
     join(fixture, 'smoke.tsx'),
     `${imports(entries)}
+import { sessionTenant } from '@swirls/shuttle/api'
 import { createShuttleHost, defaultArtifactTypes, Shuttle, useSession, type ArtifactType } from '@swirls/shuttle/react'
 
-const host = createShuttleHost({ baseUrl: 'https://shuttle.example' })
+const host = createShuttleHost({ baseUrl: 'https://shuttle.example/shuttle' })
+const tenant = sessionTenant({ user: { id: 'u1', name: 'Ada', email: 'ada@example.com' }, orgId: 'org1' })
 const notes: ArtifactType = { kind: 'acme:notes', label: 'Notes', icon: null, render: () => null }
 
 function Strip() {
@@ -293,7 +295,7 @@ export function App({ sessionId }: { sessionId: string }) {
   )
 }
 
-void [host, ${entries.map((_, index) => `module${index}`).join(', ')}]
+void [host, tenant, ${entries.map((_, index) => `module${index}`).join(', ')}]
 `,
   )
 

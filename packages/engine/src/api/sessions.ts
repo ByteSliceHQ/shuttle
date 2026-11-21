@@ -1,6 +1,7 @@
 import { ORPCError } from '@orpc/server'
 
 import { PlaybookState } from '@shuttle/api'
+import { scopedRunId } from '@shuttle/api'
 import {
   codeStorageClient,
   codeStorageConfigured,
@@ -19,7 +20,6 @@ import { resolveReferences } from '../session/resolve-references'
 import { requestPullRequest, say } from '../session/signals'
 import { parseTeam } from '../team'
 import { canShareSession, isPublicSession, type Actor, type SessionAccess } from '../tenancy/access'
-import { scopedRunId } from '../tenancy/run-id'
 import { vendorHarnessInfo } from '../vendor/harnesses'
 import { parseVendorModelChoice } from '../vendor/models'
 import { moveListings, signalListings } from '../workspace/listings'

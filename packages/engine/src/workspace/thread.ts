@@ -1,3 +1,4 @@
+import { orgOfRun } from '@shuttle/api'
 import {
   cleanUndefined,
   createWaitId,
@@ -12,7 +13,6 @@ import {
 
 import { jsonObject } from '../json'
 import type { AttachmentRef } from '../session/scope'
-import { orgOfRun } from '../tenancy/run-id'
 import { isEventOf } from './event-guard'
 import type { LinkedRepo, SessionActivity } from './scope'
 import { NO_FOLDER, workspaceModule } from './scope'

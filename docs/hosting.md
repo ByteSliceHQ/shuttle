@@ -115,7 +115,18 @@ shows what `runsApi` streams, so a host that mounts any of them mounts it. A mod
 Shuttle's app does for its workspace routes.
 
 `serveShuttle` answers `null` for a path no mounted module claims, which is how a host puts it in
-front of routes of its own. For a path it does claim it asks the `identity` port who the request
+front of routes of its own. A host whose own routes share Shuttle's paths (a `/runs` or
+`/sessions` of its own) mounts Shuttle under a path with `basePath`:
+
+```ts
+const shuttle = serveShuttle(host(env), { modules: shuttleApiModules, basePath: '/shuttle' })
+```
+
+It then answers every path under `/shuttle` and `null` for the rest. It takes `/shuttle` off before
+a module sees the path, so `GET /shuttle/capabilities`, `POST /shuttle/runs/:id/grant` and
+`/shuttle/sessions/…` reach the routes they name. A path under it that no module claims gets a 404,
+which carries the cross-origin headers for a listed origin, so a page there can read it. The page's
+`baseUrl` includes the path: `createShuttleHost({ baseUrl: 'https://app.example/shuttle' })`. For a path it does claim it asks the `identity` port who the request
 acts for (401 for nobody), checks that they may open the run the path names (404 otherwise), and
 only then offers the request to the modules. `GET /capabilities` says which modules are mounted,
 so a page can leave out what the host does not serve.
@@ -171,8 +182,14 @@ const host = createShuttleHost({
 - **Watching only.** `readOnly` on `Shuttle.Session` shows a session without the means to change
   it: `Shuttle.Composer` draws nothing, and questions and proposals are shown and cannot be
   answered.
+- **Who is signed in.** `identity.tenant` names the person, their organization and the
+  organization's runs. A host that serves `GET /me` reads it from there. One that serves sessions
+  only builds it with `sessionTenant` from `@swirls/shuttle/api`, which knows how Shuttle names
+  runs: `sessionTenant({ user: { id, name, email }, orgId })`. It gives `role` as `member` unless
+  told otherwise, and takes `runNames` when the engine renames its runs with
+  `SHUTTLE_WORKSPACE_RUN_ID` or `SHUTTLE_PLAYBOOK_RUN_ID`.
 - **No pull request inbox.** A host that keeps none gives `identity.tenant.runs.pulls` as `null`,
-  and the parts that read it show nothing from it.
+  and the parts that read it show nothing from it. `sessionTenant` does.
 
 ## Host ports
 

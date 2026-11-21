@@ -1,5 +1,5 @@
+import { isOrgId } from '@shuttle/api'
 import type { Actor, OrgRole } from '@shuttle/engine/tenancy/access'
-import { isOrgId } from '@shuttle/engine/tenancy/run-id'
 
 import type { Auth } from './auth'
 

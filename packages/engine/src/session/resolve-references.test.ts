@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 
+import { scopedRunId } from '@shuttle/api'
+
 import { personalWorkspaceRunId, workspaceRunId } from '../config'
 import { readDigestSource } from '../session/digest-source'
 import type { SessionAccess } from '../tenancy/access'
-import { scopedRunId } from '../tenancy/run-id'
 import { fakeEnv } from '../testing/fake-env'
 import { resolveReferences, sessionDigest } from './resolve-references'
 

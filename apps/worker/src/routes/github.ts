@@ -1,3 +1,4 @@
+import { isOrgId } from '@shuttle/api'
 import { ensurePullsQuietly, ensureWorkspaceQuietly } from '@shuttle/engine/bootstrap'
 import { pullsRunId, workspaceRunId } from '@shuttle/engine/config'
 import { loomsStub } from '@shuttle/engine/looms-stub'
@@ -8,7 +9,6 @@ import {
   upsertComment,
 } from '@shuttle/engine/pulls/signals'
 import type { Actor } from '@shuttle/engine/tenancy/access'
-import { isOrgId } from '@shuttle/engine/tenancy/run-id'
 import { connectGithub } from '@shuttle/engine/workspace/module'
 import { getInstallation, signState, verifyState } from '@shuttle/git/github/app'
 import {

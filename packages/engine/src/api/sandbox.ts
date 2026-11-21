@@ -8,6 +8,7 @@ import {
   type SandboxPlace,
   type SandboxWorkspaceRepo,
 } from '@shuttle/api'
+import { orgOfRun } from '@shuttle/api'
 import { codeStorageClient, codeStorageConfigured } from '@shuttle/git/codestorage/client'
 import { LSP_CLI_PATH, LSP_DEFAULT_WAIT_MS } from '@shuttle/sandbox/bridge/lsp/protocol'
 import { shellQuote } from '@shuttle/sandbox/exec-argv'
@@ -58,7 +59,6 @@ import { sandboxStub } from '../env'
 import { loomsStub } from '../looms-stub'
 import type { SessionStacks } from '../session/stack-state'
 import type { Actor } from '../tenancy/access'
-import { orgOfRun } from '../tenancy/run-id'
 import { api, badRequest, forbidden, notFound } from './base'
 
 const sandbox = api.sandbox

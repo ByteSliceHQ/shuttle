@@ -1,12 +1,12 @@
 import { Schema } from 'effect'
 
+import { orgOfRun } from '@shuttle/api'
 import { shellQuote } from '@shuttle/sandbox/exec-argv'
 import { worktreeRepoPath } from '@shuttle/sandbox/workspace'
 
 import type { EngineEnv } from '../env'
 import { sandboxStub } from '../env'
 import { expiryOf, neverExpire, type ApprovalPolicy } from '../ports/approvals'
-import { orgOfRun } from '../tenancy/run-id'
 import { readSandboxBinding, sandboxNameForSession } from './bind-sandbox'
 import { prepareSessionSandbox } from './handoff'
 import { shuttleModule } from './scope'

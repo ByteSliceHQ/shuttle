@@ -107,3 +107,43 @@ export function parsePersonalRunId(
 export function localRunName(runId: string): string {
   return parsePersonalRunId(runId)?.local ?? parseRunId(runId).local
 }
+
+/**
+ * The names an organization's own runs go by inside it. A deployment can rename them (the
+ * engine's `SHUTTLE_WORKSPACE_RUN_ID`, `SHUTTLE_PLAYBOOK_RUN_ID` and `SHUTTLE_PULLS_RUN_ID`), and
+ * a page that builds its tenant itself is then given the same names.
+ */
+export interface RunNames {
+  readonly workspace: string
+  readonly playbook: string
+  readonly pulls: string
+}
+
+export const DEFAULT_RUN_NAMES: RunNames = {
+  workspace: 'shuttle-workspace',
+  playbook: 'shuttle-playbook',
+  pulls: 'shuttle-pulls',
+}
+
+/** An organization's runs as one of its members reaches them. */
+export interface TenantRunIds {
+  readonly workspace: string
+  /** The member's own workspace run, which no one else in the organization opens. */
+  readonly personal: string
+  readonly pulls: string
+  readonly playbook: string
+}
+
+/** The run ids of `orgId`'s workspace, playbook and pulls runs, and `userId`'s own workspace. */
+export function tenantRunIds(
+  orgId: string,
+  userId: string,
+  names: RunNames = DEFAULT_RUN_NAMES,
+): TenantRunIds {
+  return {
+    workspace: scopedRunId(orgId, names.workspace),
+    personal: personalRunId(orgId, userId, names.workspace),
+    pulls: scopedRunId(orgId, names.pulls),
+    playbook: scopedRunId(orgId, names.playbook),
+  }
+}

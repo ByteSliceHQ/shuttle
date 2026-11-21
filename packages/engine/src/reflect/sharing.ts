@@ -1,7 +1,8 @@
+import { orgOfRun } from '@shuttle/api'
+
 import type { EngineEnv } from '../env'
 import { loomsStub } from '../looms-stub'
 import { isPublicSession } from '../tenancy/access'
-import { orgOfRun } from '../tenancy/run-id'
 
 /**
  * Whether lessons drawn from a session may go to its organization's playbook, which every member

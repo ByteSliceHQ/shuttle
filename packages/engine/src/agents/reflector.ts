@@ -1,12 +1,12 @@
 import { z } from 'zod'
 
+import { orgOfRun, sessionOfReflection } from '@shuttle/api'
 import { defineAgent, defineTool } from '@swirls/looms/agent'
 
 import { playbookRunId } from '../config'
 import type { EngineEnv } from '../env'
 import { loomsStub } from '../looms-stub'
 import { mayShareLessons } from '../reflect/sharing'
-import { orgOfRun, sessionOfReflection } from '../tenancy/run-id'
 import { createHistoryTools } from '../tools/history'
 
 export function createReflectorAgent(env: EngineEnv, runId: string) {

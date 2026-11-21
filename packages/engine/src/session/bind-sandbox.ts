@@ -1,9 +1,9 @@
 import { Schema } from 'effect'
 
+import { orgOfRun } from '@shuttle/api'
 import { localSandboxName, sandboxesArePersonal, userSandboxName } from '@shuttle/sandbox/names'
 
 import type { EngineEnv } from '../env'
-import { orgOfRun } from '../tenancy/run-id'
 import { shuttleModule } from './scope'
 import { readSponsor } from './sponsor'
 

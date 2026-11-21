@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 
+import { scopedRunId } from '@shuttle/api'
 import { daytonaSandboxName } from '@shuttle/sandbox/daytona'
 import { orgOfSandbox, sandboxesArePersonal, userSandboxName } from '@shuttle/sandbox/names'
 
 import { sandboxNameForSession } from '../session/bind-sandbox'
 import { SPONSOR_STORAGE_KEY } from '../session/sponsor'
 import { ACCESS_STORAGE_KEY } from '../tenancy/access'
-import { scopedRunId } from '../tenancy/run-id'
 
 const ORG = 'orgA0000000000000000000000000000'
 const session = scopedRunId(ORG, 'session_1')

@@ -1,5 +1,6 @@
 import { Predicate } from 'effect'
 
+import { reflectionRunId } from '@shuttle/api'
 import {
   createWaitId,
   deterministicThreadId,
@@ -19,7 +20,6 @@ import {
 import { AttachmentInputSchema } from '../agents/attachment-input'
 import { isHardStop } from '../agents/intake'
 import { withAttachmentManifest } from '../assets/sandbox'
-import { reflectionRunId } from '../tenancy/run-id'
 import {
   buildConductorInput,
   conductorChildThreadId,
