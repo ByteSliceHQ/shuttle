@@ -2,7 +2,8 @@ schema-version = "1.13.0"
 
 [install]
 bun.pkg-path = "bun"
-bun.version = "1.3.13"
+bun.version = "1.4.4"
+bun.pkg-group = "bun"
 # Wrangler / Vite tooling expects a Node toolchain on PATH.
 nodejs.pkg-path = "nodejs"
 nodejs.version = "24.16.0"
