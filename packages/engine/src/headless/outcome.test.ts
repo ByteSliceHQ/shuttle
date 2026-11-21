@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 
-import { outcomeOf, pullRequestsOf, questionOf } from './outcome'
+import { emptyRunState, type ThreadRecord } from '@swirls/looms/core'
+
+import { outcomeOf, pullRequestsOf, questionOf, sessionOutcome } from './outcome'
 
 const published = {
   stacks: {
@@ -127,6 +129,44 @@ describe('outcomeOf', () => {
     expect(outcomeOf({ activity: 'error', state: { error: { message: 'boom' } } })).toEqual({
       state: 'failed',
       error: 'boom',
+      pullRequests: [],
+    })
+  })
+})
+
+const thread = (threadId: string, overrides: Partial<ThreadRecord>): ThreadRecord => ({
+  threadId,
+  kind: 'agent',
+  definitionName: 'agent',
+  definitionVersion: '1',
+  parentThreadId: null,
+  status: 'running',
+  input: null,
+  output: null,
+  error: null,
+  state: {},
+  ...overrides,
+})
+
+describe('sessionOutcome', () => {
+  test('a failed run whose root says nothing gives the error of the thread that failed under it', () => {
+    const run = {
+      ...emptyRunState('session'),
+      status: 'failed' as const,
+      rootThreadId: 'root',
+      threads: {
+        root: thread('root', { status: 'failed' }),
+        turn: thread('turn', {
+          parentThreadId: 'root',
+          status: 'failed',
+          error: 'This request requires more credits',
+        }),
+      },
+    }
+
+    expect(sessionOutcome(run)).toEqual({
+      state: 'failed',
+      error: 'This request requires more credits',
       pullRequests: [],
     })
   })

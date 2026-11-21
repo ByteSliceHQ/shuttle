@@ -259,8 +259,23 @@ export function sessionOutcome(run: RunState): SessionOutcome {
     asked: askedOf(run),
   })
 
-  // A session that failed outright, not in its conductor, says why on its thread.
+  // A session that failed outright, not in its conductor, says why on its thread, or on the
+  // thread or effect that failed under it (a model call refused, say).
   return outcome.state === 'failed' && outcome.error === null
-    ? { ...outcome, error: root.error ?? null }
+    ? { ...outcome, error: root.error ?? failureOf(run) }
     : outcome
+}
+
+/** Why a run failed when its root thread does not say: a failed thread's error, else an effect's last. */
+function failureOf(run: RunState): string | null {
+  const threads = Object.values(run.threads)
+  const thread = threads.find((record) => record.status === 'failed' && record.error !== null)
+
+  if (thread?.error != null) {
+    return thread.error
+  }
+
+  const effect = Object.values(run.effectExecutions).find((record) => record.lastError !== null)
+
+  return effect?.lastError ?? null
 }
