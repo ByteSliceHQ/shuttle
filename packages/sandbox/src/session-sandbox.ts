@@ -63,7 +63,7 @@ import {
 /** Longest a look at the session's files may take, in milliseconds. */
 const SUMMARY_TIMEOUT_MS = 30_000
 
-export class SessionSandbox extends DurableObject<SandboxEnv> {
+export class SessionSandbox<Env extends SandboxEnv = SandboxEnv> extends DurableObject<Env> {
   private readonly machine: SandboxMachine
   private preparedRepos = false
 
@@ -73,9 +73,22 @@ export class SessionSandbox extends DurableObject<SandboxEnv> {
    */
   private setup: Promise<unknown> = Promise.resolve()
 
-  constructor(ctx: DurableObjectState, env: SandboxEnv) {
+  /** The environment the sandbox works in: its own, with what the host supplies. */
+  private readonly hosted: SandboxEnv
+
+  constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
-    this.machine = openSandbox({ ctx, env, name: ctx.id.name ?? 'unnamed' })
+    this.hosted = this.environment(env)
+    this.machine = openSandbox({ ctx, env: this.hosted, name: ctx.id.name ?? 'unnamed' })
+  }
+
+  /**
+   * What a host adds to the sandbox's environment, as a run's host does with its ports: a
+   * host that mints GitHub tokens itself supplies `GIT_ACCESS` here, so the sandbox clones
+   * and pushes without the App's key. Called once, while the object is being built.
+   */
+  protected environment(env: Env): SandboxEnv {
+    return env
   }
 
   /** The machine this sandbox runs on. Not available for a sandbox kept in memory. */
@@ -426,7 +439,12 @@ export class SessionSandbox extends DurableObject<SandboxEnv> {
   }
 
   private async syncEnds(runId: string, repo: LinkedSandboxRepo) {
-    const remote = await sessionRemote(this.env, repo, orgOfSandbox(this.ctx.id.name ?? ''), runId)
+    const remote = await sessionRemote(
+      this.hosted,
+      repo,
+      orgOfSandbox(this.ctx.id.name ?? ''),
+      runId,
+    )
 
     if (!remote) {
       throw new Error(
