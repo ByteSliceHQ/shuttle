@@ -1,6 +1,6 @@
 {
   "name": "@swirls/shuttle",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Shuttle as parts: React components for a development environment built around coding agents, with the API contract and run events they speak",
   "homepage": "https://github.com/ByteSliceHQ/shuttle#readme",
   "bugs": {
