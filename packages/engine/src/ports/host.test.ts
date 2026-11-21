@@ -7,6 +7,7 @@ import { neverExpire } from './approvals'
 import { sponsorCredentials } from './credentials'
 import { resolveHost } from './host'
 import { noIdentity } from './identity'
+import { noPeople } from './people'
 import { openSessionStart } from './session-start'
 
 describe('a host that replaces nothing', () => {
@@ -22,6 +23,8 @@ describe('a host that replaces nothing', () => {
       credentials: sponsorCredentials,
       approvals: neverExpire,
       git: null,
+      people: noPeople,
+      previews: null,
     })
 
     expect(

@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 
-import type { Actor, SessionAccess } from '@shuttle/engine/tenancy/access'
-import { personalRunId, reflectionRunId, scopedRunId } from '@shuttle/engine/tenancy/run-id'
 import { describeRoute, type AuthDecision } from '@swirls/looms/runtime'
 
+import type { Actor, SessionAccess } from '../tenancy/access'
+import { personalRunId, reflectionRunId, scopedRunId } from '../tenancy/run-id'
 import { fakeEnv } from '../testing/fake-env'
 import { authorizeLoomsRoute, authorizeRun, runIdOfPath } from './gate'
 

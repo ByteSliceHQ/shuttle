@@ -5,7 +5,7 @@
  * - not a pull request (local / push to main)
  * - PR title starts with `chore(release)`
  * - PR has label `skip-changeset`
- * - the diff does not touch package source that can affect `@swirls/shuttle`
+ * - the diff does not touch package source that can affect a published package
  */
 
 import { resolve } from 'node:path'
@@ -30,7 +30,7 @@ function argValue(argv: readonly string[], flag: string): string | undefined {
 
 function isPackageSourcePath(path: string): boolean {
   // The packages that are put together into `@swirls/shuttle`, and the one that does it.
-  if (!/^packages\/(api|core|react|shuttle)\//.test(path)) {
+  if (!/^packages\/(api|core|react|shuttle|engine|sandbox|git|runner-protocol)\//.test(path)) {
     return false
   }
 

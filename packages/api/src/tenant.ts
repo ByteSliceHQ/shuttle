@@ -12,7 +12,8 @@ export const Tenant = z.object({
     workspace: z.string(),
     /** The person's own workspace run, which no one else in the organization opens. */
     personal: z.string(),
-    pulls: z.string(),
+    /** Null for a host that keeps no pull request inbox. */
+    pulls: z.string().nullable(),
     playbook: z.string(),
   }),
 })

@@ -1,10 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 
-import { personalWorkspaceRunId, workspaceRunId } from '@shuttle/engine/config'
-import { readDigestSource } from '@shuttle/engine/session/digest-source'
-import type { SessionAccess } from '@shuttle/engine/tenancy/access'
-import { scopedRunId } from '@shuttle/engine/tenancy/run-id'
-
+import { personalWorkspaceRunId, workspaceRunId } from '../config'
+import { readDigestSource } from '../session/digest-source'
+import type { SessionAccess } from '../tenancy/access'
+import { scopedRunId } from '../tenancy/run-id'
 import { fakeEnv } from '../testing/fake-env'
 import { resolveReferences, sessionDigest } from './resolve-references'
 

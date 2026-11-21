@@ -1,7 +1,6 @@
-import { firehoseStub } from '@shuttle/engine/firehose/stub'
-import type { Actor } from '@shuttle/engine/tenancy/access'
-
-import type { ShuttleEnv } from '../env'
+import type { EngineEnv } from '../env'
+import { firehoseStub } from '../firehose/stub'
+import type { Actor } from '../tenancy/access'
 
 /**
  * Proxy `/firehose/*` onto the organization's EventFirehose Durable Object. Every member can read
@@ -9,7 +8,7 @@ import type { ShuttleEnv } from '../env'
  */
 export async function handleFirehoseRoutes(
   request: Request,
-  env: ShuttleEnv,
+  env: EngineEnv,
   actor: Actor,
 ): Promise<Response | null> {
   const url = new URL(request.url)

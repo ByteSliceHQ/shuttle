@@ -1,10 +1,10 @@
-import { runKindFor, type RunKind } from '@shuttle/engine/firehose/run-kind'
-import { loomsStub } from '@shuttle/engine/looms-stub'
-import { canOpenSession, type Actor } from '@shuttle/engine/tenancy/access'
-import { parsePersonalRunId, parseRunId, sessionOfReflection } from '@shuttle/engine/tenancy/run-id'
 import { authAllowedAs, authDenied, type AuthDecision, type RouteInfo } from '@swirls/looms/runtime'
 
-import type { ShuttleEnv } from '../env'
+import type { EngineEnv } from '../env'
+import { runKindFor, type RunKind } from '../firehose/run-kind'
+import { loomsStub } from '../looms-stub'
+import { canOpenSession, type Actor } from '../tenancy/access'
+import { parsePersonalRunId, parseRunId, sessionOfReflection } from '../tenancy/run-id'
 
 /**
  * Decides whether a signed-in person may reach a run. Every request that names a run passes
@@ -45,7 +45,7 @@ const BROWSER_SIGNALS: Record<RunKind, readonly string[]> = {
 /** A personal workspace lists sessions and their tabs. Folders belong to the organization. */
 const PERSONAL_WORKSPACE_SIGNALS: readonly string[] = TAB_SIGNALS
 
-function browserSignals(env: ShuttleEnv, runId: string): readonly string[] {
+function browserSignals(env: EngineEnv, runId: string): readonly string[] {
   return parsePersonalRunId(runId)
     ? PERSONAL_WORKSPACE_SIGNALS
     : BROWSER_SIGNALS[runKindFor(env, runId)]
@@ -68,7 +68,7 @@ export function runIdOfPath(pathname: string): string | null {
 
 /** Null when `actor` may reach `runId`; otherwise the response to send instead. */
 export async function authorizeRun(
-  env: ShuttleEnv,
+  env: EngineEnv,
   actor: Actor,
   runId: string,
 ): Promise<Response | null> {
@@ -98,7 +98,7 @@ export async function authorizeRun(
  * names. Reads are allowed. The only writes allowed are the signals listed above. Either way the
  * request is recorded as `actor`'s, so the events it sends carry their id.
  */
-export function authorizeLoomsRoute(env: ShuttleEnv, actor: Actor, route: RouteInfo): AuthDecision {
+export function authorizeLoomsRoute(env: EngineEnv, actor: Actor, route: RouteInfo): AuthDecision {
   if (route.access === 'read') {
     return authAllowedAs(actor.userId)
   }

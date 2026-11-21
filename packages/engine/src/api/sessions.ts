@@ -1,22 +1,6 @@
 import { ORPCError } from '@orpc/server'
 
 import { PlaybookState } from '@shuttle/api'
-import { headAsset, type AssetRef } from '@shuttle/engine/assets/store'
-import { playbookRunId, workspaceRunId } from '@shuttle/engine/config'
-import { isVendorHarness } from '@shuttle/engine/harness'
-import { loomsStub } from '@shuttle/engine/looms-stub'
-import { requestPullRequest, say } from '@shuttle/engine/session/signals'
-import { parseTeam } from '@shuttle/engine/team'
-import {
-  canShareSession,
-  isPublicSession,
-  type Actor,
-  type SessionAccess,
-} from '@shuttle/engine/tenancy/access'
-import { scopedRunId } from '@shuttle/engine/tenancy/run-id'
-import { vendorHarnessInfo } from '@shuttle/engine/vendor/harnesses'
-import { parseVendorModelChoice } from '@shuttle/engine/vendor/models'
-import { archiveSession, renameSession } from '@shuttle/engine/workspace/module'
 import {
   codeStorageClient,
   codeStorageConfigured,
@@ -25,10 +9,21 @@ import {
 } from '@shuttle/git/codestorage/client'
 import { ACTOR_HEADER } from '@swirls/looms/runtime'
 
-import { getAuth } from '../auth/auth'
-import type { ShuttleEnv } from '../env'
+import { headAsset, type AssetRef } from '../assets/store'
+import { playbookRunId, workspaceRunId } from '../config'
+import type { EngineEnv } from '../env'
+import { isVendorHarness } from '../harness'
+import { loomsStub } from '../looms-stub'
+import { noPeople } from '../ports/people'
 import { resolveReferences } from '../session/resolve-references'
+import { requestPullRequest, say } from '../session/signals'
+import { parseTeam } from '../team'
+import { canShareSession, isPublicSession, type Actor, type SessionAccess } from '../tenancy/access'
+import { scopedRunId } from '../tenancy/run-id'
+import { vendorHarnessInfo } from '../vendor/harnesses'
+import { parseVendorModelChoice } from '../vendor/models'
 import { moveListings, signalListings } from '../workspace/listings'
+import { archiveSession, renameSession } from '../workspace/module'
 import { api, badRequest, forbidden, notFound } from './base'
 
 const sessions = api.sessions
@@ -43,7 +38,7 @@ function describeAccess(current: SessionAccess | null, actor: Actor) {
 }
 
 /** A session's vendor model choices. Its own win; without one it runs on the most recent made anywhere. */
-async function vendorModelChoices(env: ShuttleEnv, orgId: string, runId: string) {
+async function vendorModelChoices(env: EngineEnv, orgId: string, runId: string) {
   const session = loomsStub(env.LOOMS_RUN, runId)
   const workspace = loomsStub(env.LOOMS_RUN, workspaceRunId(env, orgId))
 
@@ -104,7 +99,9 @@ export const sessionsRouter = {
       describeAccess(await loomsStub(env.LOOMS_RUN, input.id).getAccess(), actor),
     ),
 
-    update: sessions.access.update.handler(async ({ input, context: { env, actor, request } }) => {
+    update: sessions.access.update.handler(async ({ input, context }) => {
+      const { env, actor, request } = context
+
       const session = loomsStub(env.LOOMS_RUN, input.id)
       const access = await session.getAccess()
 
@@ -116,12 +113,8 @@ export const sessionsRouter = {
       const visibility = input.visibility ?? access.visibility
 
       // A session can only be shared with people in its organization.
-      const { members } = await getAuth(env).api.listMembers({
-        headers: request.headers,
-        query: { organizationId: actor.orgId, limit: 1000 },
-      })
-
-      const inOrg = new Set(members.map((member) => member.userId))
+      const people = context.ports?.people ?? noPeople
+      const inOrg = new Set(await people.members(actor.orgId, request))
 
       if (!memberIds.every((id) => inOrg.has(id))) {
         throw badRequest('Everyone must be in this organization')

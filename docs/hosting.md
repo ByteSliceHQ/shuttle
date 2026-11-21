@@ -70,9 +70,109 @@ The host's `@swirls/looms` and `effect` versions have to be the ones `@swirls/sh
 so it installs one copy of each. Its `tsconfig` has `@cloudflare/workers-types` in `types`, for the
 bindings the engine's types name, and `skipLibCheck` on.
 
+What only the engine needs is not installed with the package, so a page that uses the React parts
+does not carry it. A host that runs the engine installs these beside it, at the ranges in the
+package's `peerDependencies`: `ai`, `@cloudflare/sandbox` and `@daytona/sdk`.
+
 The sandbox's container image is not in the npm package. A host that runs sandboxes in containers
 or on Daytona builds it from `packages/sandbox/Dockerfile` in this repository; one that runs them
 in memory or on people's own machines needs no image.
+
+## Serving the API
+
+A page that shows a session (the parts in `@swirls/shuttle/react`) talks to Shuttle's HTTP API. The
+engine serves it in modules, and a host mounts the ones it wants:
+
+```ts
+import { serveShuttle } from '@swirls/shuttle/engine'
+import { shuttleApiModules } from '@swirls/shuttle/engine/worker'
+
+export default {
+  async fetch(request: Request, env: HostEnv, ctx: ExecutionContext) {
+    const shuttle = serveShuttle(host(env), {
+      modules: shuttleApiModules,
+      origins: ['https://app.example'],
+      grantSecret: env.SHUTTLE_GRANT_SECRET,
+    })
+
+    return (await shuttle(request, ctx)) ?? theHostsOwnRoutes(request, env)
+  },
+}
+```
+
+| Module        | Serves                                                                      | Needs               |
+| ------------- | --------------------------------------------------------------------------- | ------------------- |
+| `runsApi`     | A run's log, live, and the signals a browser may send it. `/runs/:id/…`     | A Worker            |
+| `sessionApi`  | A session, its playbook and its sandbox's files. `/sessions/…`, `/playbook` |                     |
+| `assetsApi`   | Attachments and the media agents make. `/sessions/:id/assets`               | The `ASSETS` bucket |
+| `terminalApi` | A session's terminal. `/sessions/:id/sandbox/terminal`                      | A container sandbox |
+| `firehoseApi` | The organization's stream of what its public sessions do. `/firehose`       |                     |
+
+`shuttleApiModules` is all of them. `runsApi` forwards to Durable Objects, so it is exported from
+`@swirls/shuttle/engine/worker`; the others, in `portableApiModules`, load anywhere. Every module
+shows what `runsApi` streams, so a host that mounts any of them mounts it. A module is an object
+(`ApiModule`: a name, the paths it claims, a handler), so a host adds its own beside these, as
+Shuttle's app does for its workspace routes.
+
+`serveShuttle` answers `null` for a path no mounted module claims, which is how a host puts it in
+front of routes of its own. For a path it does claim it asks the `identity` port who the request
+acts for (401 for nobody), checks that they may open the run the path names (404 otherwise), and
+only then offers the request to the modules. `GET /capabilities` says which modules are mounted,
+so a page can leave out what the host does not serve.
+
+A page on the host's own origin needs nothing more. For a page on another origin:
+
+- `origins` lists the pages' origins, and answers to them carry the headers a browser needs.
+- `grantSecret` lets the page read a run's log over a WebSocket, which cannot carry a sign-in:
+  `POST /runs/:id/grant` gives someone who may open the run a short-lived read grant, and the run's
+  log accepts it in place of a sign-in (`grant` on `LoomsProvider`, in `@swirls/looms/react`).
+
+Two more ports feed the API: `people` says who is in an organization, which sharing a session is
+checked against, and `previews` keeps the keys of preview hostnames. Without them a session is
+shared with no one and has no preview.
+
+## Showing a session
+
+The page is built from the parts in `@swirls/shuttle/react`, pointed at the Worker that serves the
+API:
+
+```tsx
+import { createShuttleHost, Shuttle } from '@swirls/shuttle/react'
+
+const host = createShuttleHost({
+  baseUrl: 'https://engine.example',
+  headers: () => ({ authorization: `Bearer ${token()}` }),
+})
+
+<Shuttle.Provider host={host} router={router} identity={identity}>
+  <Suspense>
+    <Shuttle.Session id={runId} readOnly>
+      <Shuttle.SessionHeader />
+      <Shuttle.Conversation />
+      <Shuttle.Artifacts />
+    </Shuttle.Session>
+  </Suspense>
+</Shuttle.Provider>
+```
+
+- **Credentials.** `headers` is asked before every request that can carry one (the API, signals,
+  a run's log, an upload) and added to it. When the backend is on another origin the parts also ask the browser
+  to send its cookie. An image, a download and a terminal are addresses the browser opens by
+  itself: they carry no header, so they need the cookie.
+- **A live log across origins.** A run's live log is a WebSocket, which carries no header. When
+  the backend is on another origin the parts ask it for a read grant for each run
+  (`POST /runs/:id/grant`), open the log with it, and renew it before it runs out. The backend
+  gives grants when it is served with a `grantSecret`. `grants` on `createShuttleHost` turns
+  this on or off by hand.
+- **What is mounted.** The parts read `GET /capabilities` once and leave out what the backend does
+  not serve: no Terminal tab without `terminalApi`, no Media tab without `assetsApi`, no Browser
+  tab without the `previews` port. An artifact type of the host's own says what it needs with
+  `needs: ['<module name>']`, and is left out the same way until the host mounts that module.
+- **Watching only.** `readOnly` on `Shuttle.Session` shows a session without the means to change
+  it: `Shuttle.Composer` draws nothing, and questions and proposals are shown and cannot be
+  answered.
+- **No pull request inbox.** A host that keeps none gives `identity.tenant.runs.pulls` as `null`,
+  and the parts that read it show nothing from it.
 
 ## Host ports
 

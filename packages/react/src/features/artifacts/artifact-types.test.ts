@@ -4,6 +4,7 @@ import {
   artifactTypeFor,
   defaultArtifactTypes,
   launchableArtifactTypes,
+  servedArtifactTypes,
   type ArtifactType,
 } from './artifact-types'
 
@@ -59,5 +60,41 @@ describe('artifact types', () => {
     expect(
       launchableArtifactTypes(defaultArtifactTypes).some((type) => type.kind === 'changes'),
     ).toBe(false)
+  })
+})
+
+const kinds = (types: readonly ArtifactType[]) => types.map((type) => type.kind)
+
+describe('what the backend serves', () => {
+  test('a backend that does not say what it serves is taken to serve everything', () => {
+    expect(servedArtifactTypes(defaultArtifactTypes, null)).toBe(defaultArtifactTypes)
+  })
+
+  test('a type is left out when the backend lacks a module it needs', () => {
+    const served = servedArtifactTypes(defaultArtifactTypes, {
+      modules: ['session', 'runs'],
+      previews: false,
+      grants: false,
+    })
+
+    expect(kinds(served)).toEqual(['files', 'review', 'changes', 'file', 'events'])
+  })
+
+  test("a host's own type names the module of its own that it needs", () => {
+    const boards: ArtifactType = { ...designs, kind: 'acme:boards', needs: ['acme-boards'] }
+    const types = [...defaultArtifactTypes, designs, boards]
+    const all = ['session', 'runs', 'assets', 'terminal']
+
+    const without = servedArtifactTypes(types, { modules: all, previews: true, grants: false })
+
+    const withIt = servedArtifactTypes(types, {
+      modules: [...all, 'acme-boards'],
+      previews: true,
+      grants: false,
+    })
+
+    expect(kinds(without)).toContain('acme:designs')
+    expect(kinds(without)).not.toContain('acme:boards')
+    expect(kinds(withIt)).toContain('acme:boards')
   })
 })

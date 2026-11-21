@@ -9,6 +9,7 @@ const api: ProxyOptions = {
 }
 
 const paths = [
+  '/capabilities',
   '/definitions',
   '/operations',
   '/playbook',

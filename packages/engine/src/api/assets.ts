@@ -6,10 +6,9 @@ import {
   getAsset,
   putAsset,
   uploadMediaType,
-} from '@shuttle/engine/assets/store'
-import type { Actor } from '@shuttle/engine/tenancy/access'
-
-import type { ShuttleEnv } from '../env'
+} from '../assets/store'
+import type { EngineEnv } from '../env'
+import type { Actor } from '../tenancy/access'
 
 const UNAVAILABLE = 'File storage is not set up for this Shuttle, so files cannot be attached.'
 
@@ -25,7 +24,7 @@ const UNAVAILABLE = 'File storage is not set up for this Shuttle, so files canno
  */
 export async function handleAssetRoutes(
   request: Request,
-  env: ShuttleEnv,
+  env: EngineEnv,
   actor: Actor,
 ): Promise<Response | null> {
   const url = new URL(request.url)

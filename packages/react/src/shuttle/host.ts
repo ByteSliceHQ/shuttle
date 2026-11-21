@@ -2,6 +2,7 @@ import { createORPCClient, ORPCError } from '@orpc/client'
 import type { ContractRouterClient } from '@orpc/contract'
 import { OpenAPILink } from '@orpc/openapi-client/fetch'
 import { createTanstackQueryUtils } from '@orpc/tanstack-query'
+import { z } from 'zod'
 
 import { clientContract } from '@shuttle/api'
 import type { JsonObject } from '@swirls/looms/core'
@@ -50,6 +51,20 @@ export interface ShuttleHostOptions {
   readonly baseUrl?: string
   /** Makes every HTTP request, so a host can add its own credentials. Defaults to `fetch`. */
   readonly fetch?: ShuttleFetch
+  /**
+   * What the backend authenticates a request by, when that is not a cookie: asked before every
+   * request that can carry a header (the API, signals, a run's log, an upload) and added to it.
+   * An image, a download and a terminal are addresses the browser opens by itself and cannot
+   * carry one; they need the backend's cookie.
+   */
+  readonly headers?: () => Readonly<Record<string, string>>
+  /**
+   * Whether to ask the backend for read grants, which a run's live log is opened with when the
+   * page cannot put a credential on its WebSocket. Left out, it is on exactly when the backend
+   * is on another origin than the page. The backend gives them when it is served with a
+   * `grantSecret`.
+   */
+  readonly grants?: boolean
   /** The machine this is running on, when it has one. */
   readonly device?: ShuttleDevice | null
   /**
@@ -65,6 +80,27 @@ export interface ShuttleHostOptions {
   /** Added to how a run's event store is opened: an observer, a different cache. */
   readonly runStore?: (userId: string) => Partial<RunStoreOptions>
 }
+
+/** What the backend serves, as `GET /capabilities` says it. */
+export interface ShuttleCapabilities {
+  /** The API modules the backend mounted, by name: `session`, `assets`, `terminal`, … */
+  readonly modules: readonly string[]
+  /** Whether sessions have previews. */
+  readonly previews: boolean
+  /** Whether the backend gives read grants for a run's log. */
+  readonly grants: boolean
+}
+
+const CapabilitiesSchema = z.object({
+  modules: z.array(z.string()),
+  previews: z.boolean().optional(),
+  grants: z.boolean().optional(),
+})
+
+const GrantSchema = z.object({ grant: z.string().min(1), expiresAt: z.number() })
+
+/** A grant is renewed this long before it runs out, so a reconnect never offers a dead one. */
+const GRANT_RENEW_MS = 60_000
 
 /**
  * Everything Shuttle's components need from where they are running that is not React: how to
@@ -87,6 +123,15 @@ export interface ShuttleHost {
   url(path: string): string
   /** The same, for a WebSocket. */
   socketUrl(path: string): string
+  /** What a request that cannot go through `fetch`, such as an upload, carries: see `headers`. */
+  headers(): Readonly<Record<string, string>>
+  /** Whether the backend is on another origin than the page, so its cookie has to be asked for. */
+  crossOrigin(): boolean
+  /**
+   * What the backend serves. Null when it does not say (an older backend), which the parts take
+   * to mean everything. Asked once.
+   */
+  capabilities(): Promise<ShuttleCapabilities | null>
   /**
    * What a call sends so the backend answers for this machine's sandbox as well as the cloud.
    * With no device, the call is about the cloud alone.
@@ -107,6 +152,15 @@ export interface ShuttleHost {
    * from it arrives whole. After a few seconds it goes ahead regardless. Never rejects.
    */
   whenRunSynced(runId: string, userId: string): Promise<void>
+}
+
+/** What the backend serves, as a query: asked once and kept for as long as the page is open. */
+export function capabilitiesQuery(host: ShuttleHost) {
+  return {
+    queryKey: ['shuttle', 'capabilities', host.origin()] as const,
+    queryFn: () => host.capabilities(),
+    staleTime: Infinity,
+  }
 }
 
 /** A run refused a signal. `status` is the HTTP status it answered with. */
@@ -140,10 +194,88 @@ const WAIT_MS = 4000
 export function createShuttleHost(options: ShuttleHostOptions = {}): ShuttleHost {
   const baseUrl = (options.baseUrl ?? '').replace(/\/+$/, '')
   const device = options.device ?? null
-  const request: ShuttleFetch = options.fetch ?? ((input, init) => fetch(input, init))
+  const send: ShuttleFetch = options.fetch ?? ((input, init) => fetch(input, init))
+  const extraHeaders = () => options.headers?.() ?? {}
 
   /** The backend's origin: the one it was given, or the page's own. */
   const origin = () => (baseUrl !== '' ? baseUrl : window.location.origin)
+
+  const crossOrigin = () =>
+    baseUrl !== '' &&
+    typeof window !== 'undefined' &&
+    new URL(baseUrl, window.location.href).origin !== window.location.origin
+
+  /** Every request the parts send through `fetch`: with the host's headers, and its cookie. */
+  const request: ShuttleFetch = (input, init) => {
+    const headers = new Headers(init?.headers)
+
+    for (const [name, value] of Object.entries(extraHeaders())) {
+      headers.set(name, value)
+    }
+
+    // A browser leaves the cookie off a request to another origin unless it is asked for.
+    return send(input, {
+      ...init,
+      headers,
+      credentials: init?.credentials ?? (crossOrigin() ? 'include' : undefined),
+    })
+  }
+
+  const grantsWanted = () => options.grants ?? crossOrigin()
+  const grants = new Map<string, z.infer<typeof GrantSchema>>()
+  const asking = new Map<string, Promise<void>>()
+
+  /** Asks the backend for a run's read grant, once at a time. A refusal leaves the run without. */
+  const renewGrant = (runId: string): Promise<void> => {
+    const pending = asking.get(runId)
+
+    if (pending) {
+      return pending
+    }
+
+    const asked = request(`${baseUrl}/runs/${encodeURIComponent(runId)}/grant`, { method: 'POST' })
+      .then(async (response) => {
+        const given = response.ok ? GrantSchema.safeParse(await response.json()) : null
+
+        if (given?.success === true) {
+          grants.set(runId, given.data)
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        asking.delete(runId)
+      })
+
+    asking.set(runId, asked)
+
+    return asked
+  }
+
+  /**
+   * The run's read grant, for its store's next connection. One that is missing or about to run
+   * out is asked for now, and is there by the time the store connects again.
+   */
+  const grantFor = (runId: string): string | undefined => {
+    if (runId === '' || !grantsWanted()) {
+      return undefined
+    }
+
+    const held = grants.get(runId)
+
+    if (held === undefined || held.expiresAt - Date.now() < GRANT_RENEW_MS) {
+      void renewGrant(runId)
+    }
+
+    return held !== undefined && held.expiresAt > Date.now() ? held.grant : undefined
+  }
+
+  // Where the types are Bun's, `fetch` also has a `preconnect`, which a run store never calls.
+  const storeFetch: typeof fetch = Object.assign(
+    (input: RequestInfo | URL, init?: RequestInit) => request(input, init),
+    { preconnect: () => {} },
+  )
+
+  let capabilities: Promise<ShuttleCapabilities | null> | undefined
 
   const client: ShuttleClient = createORPCClient(
     new OpenAPILink<CallContext>(clientContract, {
@@ -170,6 +302,10 @@ export function createShuttleHost(options: ShuttleHostOptions = {}): ShuttleHost
       transport: 'websocket',
       retainMs: SESSION_RETAIN_MS,
       cache: eventCacheFor(userId),
+      // The run's log is read with the same credentials as every other call, and its live
+      // socket, which can carry none, with a grant.
+      fetch: storeFetch,
+      grant: grantFor,
       ...options.runStore?.(userId),
     }
 
@@ -188,6 +324,26 @@ export function createShuttleHost(options: ShuttleHostOptions = {}): ShuttleHost
     origin,
     url: (path) => `${baseUrl}${path}`,
     socketUrl: (path) => `${origin().replace(/^http/, 'ws')}${path}`,
+    headers: extraHeaders,
+    crossOrigin,
+
+    capabilities() {
+      capabilities ??= request(`${baseUrl}/capabilities`)
+        .then(async (response) => {
+          const said = response.ok ? CapabilitiesSchema.safeParse(await response.json()) : null
+
+          return said?.success === true
+            ? {
+                modules: said.data.modules,
+                previews: said.data.previews ?? true,
+                grants: said.data.grants ?? false,
+              }
+            : null
+        })
+        .catch(() => null)
+
+      return capabilities
+    },
     deviceContext: () => ({ deviceId: device?.deviceId ?? null }),
     runStoreOptions,
 
@@ -214,6 +370,11 @@ export function createShuttleHost(options: ShuttleHostOptions = {}): ShuttleHost
     },
 
     async whenRunSynced(runId, userId) {
+      // With a grant in hand the store's first connection is live, with no refusal to recover from.
+      if (grantsWanted()) {
+        await renewGrant(runId)
+      }
+
       await preloadRunStore(runId, {
         ...runStoreOptions(userId),
         signal: AbortSignal.timeout(WAIT_MS),

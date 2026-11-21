@@ -2,11 +2,10 @@ import { describe, expect, test } from 'bun:test'
 
 import { z } from 'zod'
 
-import { MAX_ASSET_BYTES, type AssetRef } from '@shuttle/engine/assets/store'
-import type { Actor } from '@shuttle/engine/tenancy/access'
-import { fakeBucket } from '@shuttle/engine/testing/fake-r2'
-
+import { MAX_ASSET_BYTES, type AssetRef } from '../assets/store'
+import type { Actor } from '../tenancy/access'
 import { fakeEnv } from '../testing/fake-env'
+import { fakeBucket } from '../testing/fake-r2'
 import { handleAssetRoutes } from './assets'
 
 const actor: Actor = {

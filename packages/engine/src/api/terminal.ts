@@ -1,4 +1,3 @@
-import type { Actor } from '@shuttle/engine/tenancy/access'
 import {
   isLocalSandbox,
   sandboxesArePersonal,
@@ -6,9 +5,10 @@ import {
   userSandboxName,
 } from '@shuttle/sandbox/names'
 
-import { resolveSandboxName } from '../api/sandbox'
-import type { ShuttleEnv } from '../env'
+import type { EngineEnv } from '../env'
 import { sandboxStub } from '../env'
+import type { Actor } from '../tenancy/access'
+import { resolveSandboxName } from './sandbox'
 
 /**
  * A session's terminal, which is a WebSocket and so not part of the API contract. Everything
@@ -18,7 +18,7 @@ import { sandboxStub } from '../env'
  */
 export async function handleSandboxRoutes(
   request: Request,
-  env: ShuttleEnv,
+  env: EngineEnv,
   actor: Actor,
 ): Promise<Response | null> {
   const url = new URL(request.url)
@@ -60,7 +60,7 @@ export async function handleSandboxRoutes(
 async function forwardTerminal(
   request: Request,
   stub: ReturnType<typeof sandboxStub>,
-  env: ShuttleEnv,
+  env: EngineEnv,
 ): Promise<Response> {
   const mode = await stub.getMode().catch(() => ({ mode: 'memory' as const }))
 

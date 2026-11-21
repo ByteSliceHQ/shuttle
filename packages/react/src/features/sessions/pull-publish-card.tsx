@@ -16,6 +16,8 @@ import { decideStructuredApproval } from './signals'
 
 export interface PullPublishCardContext {
   readonly runId: string
+  /** Whether the proposal is shown without the means to decide it. */
+  readonly readOnly: boolean
   readonly identities: ReadonlyMap<string, AgentIdentity>
   readonly onInspect: (threadId: string, seq?: number) => void
 }
@@ -128,14 +130,14 @@ export function PullPublishCard({
             <input
               value={title}
               onChange={(event) => setTitle(event.target.value)}
-              disabled={pending}
+              disabled={context.readOnly || pending}
               className="border-input bg-background text-foreground h-9 rounded-md border px-3 text-[13px]"
               placeholder="Pull request title"
             />
             <Textarea
               value={body}
               onChange={(event) => setBody(event.target.value)}
-              disabled={pending}
+              disabled={context.readOnly || pending}
               placeholder="Summary, testing, risks…"
               className="min-h-24 resize-none text-[13px]"
             />
@@ -149,7 +151,7 @@ export function PullPublishCard({
                 type="button"
                 variant="ghost"
                 size="sm"
-                disabled={pending}
+                disabled={context.readOnly || pending}
                 onClick={() => decide.mutate('discard')}
               >
                 Discard
@@ -159,7 +161,7 @@ export function PullPublishCard({
                   type="button"
                   variant="brand"
                   size="sm"
-                  disabled={pending}
+                  disabled={context.readOnly || pending}
                   onClick={() => decide.mutate('update')}
                 >
                   Push update
@@ -170,7 +172,7 @@ export function PullPublishCard({
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={pending}
+                    disabled={context.readOnly || pending}
                     onClick={() => decide.mutate('draft')}
                   >
                     Publish as draft
@@ -179,7 +181,7 @@ export function PullPublishCard({
                     type="button"
                     variant="brand"
                     size="sm"
-                    disabled={pending}
+                    disabled={context.readOnly || pending}
                     onClick={() => decide.mutate('publish')}
                   >
                     Publish

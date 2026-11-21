@@ -4,6 +4,8 @@ import type { EngineEnv } from '../env'
 import { neverExpire, type ApprovalPolicy } from './approvals'
 import { sponsorCredentials, type CredentialPort } from './credentials'
 import { noIdentity, type IdentityPort } from './identity'
+import { noPeople, type PeoplePort } from './people'
+import type { PreviewKeys } from './previews'
 import { openSessionStart, type SessionStartPort } from './session-start'
 
 /**
@@ -24,6 +26,10 @@ export interface HostPorts {
   readonly approvals: ApprovalPolicy
   /** GitHub access. Standalone: Shuttle's own GitHub App, from `env`. */
   readonly git: GitAccess | null
+  /** Who is in an organization, for sharing a session. Standalone: supplied by the app. */
+  readonly people: PeoplePort
+  /** Where preview keys are kept. Without one, sessions have no previews. */
+  readonly previews: PreviewKeys | null
 }
 
 /**
@@ -54,6 +60,8 @@ export function resolveHost(host: ShuttleHost): ResolvedHost {
       credentials: supplied.credentials ?? sponsorCredentials,
       approvals: supplied.approvals ?? neverExpire,
       git,
+      people: supplied.people ?? noPeople,
+      previews: supplied.previews ?? null,
     },
   }
 }
