@@ -59,7 +59,7 @@ jobs:
         run: bun x wrangler d1 migrations apply AUTH_DB --remote --config wrangler.deploy.jsonc
       - name: Deploy Worker and hosted UI
         working-directory: apps/worker
-        run: bun x wrangler deploy --config wrangler.deploy.jsonc
+        run: bun x wrangler deploy --config wrangler.deploy.jsonc --secrets-file .prod.vars.json
       - name: Deploy download endpoint
         working-directory: apps/site
         run: bun run deploy
