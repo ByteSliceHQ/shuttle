@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { orgOfRun } from '@shuttle/api'
 import {
   durableObjectLauncher,
   LoomsDurableObject,
@@ -52,7 +53,6 @@ import { readSessionStacks } from './session/session-stacks'
 import type { SessionStacks } from './session/stack-state'
 import { DEFAULT_TEAM, readPinnedTeam, writeStoredTeam, type Team, type TeamInput } from './team'
 import { readSessionAccess, writeSessionAccess, type SessionAccess } from './tenancy/access'
-import { orgOfRun } from './tenancy/run-id'
 import { CONNECTABLE_HARNESSES } from './vendor/harnesses'
 import {
   readVendorCatalogue,

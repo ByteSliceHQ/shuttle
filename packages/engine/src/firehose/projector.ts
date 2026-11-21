@@ -1,10 +1,10 @@
+import { orgOfRun, parsePersonalRunId, sessionOfReflection } from '@shuttle/api'
 import type { EventEnvelope } from '@swirls/looms/core'
 import type { Projector } from '@swirls/looms/projectors'
 
 import type { EngineEnv } from '../env'
 import { loomsStub } from '../looms-stub'
 import { isPublicSession, readSessionAccess } from '../tenancy/access'
-import { orgOfRun, parsePersonalRunId, sessionOfReflection } from '../tenancy/run-id'
 import { runKindFor } from './run-kind'
 import { firehoseStub } from './stub'
 

@@ -1,3 +1,4 @@
+import { orgOfRun, scopedRunId } from '@shuttle/api'
 import type { RunState } from '@swirls/looms/core'
 
 import { ensureNamedWorkspace, ensureWorkspaceQuietly } from '../bootstrap'
@@ -9,7 +10,6 @@ import { actorOfActing, orgOfActing, ownerOfActing, type ActingFor } from '../po
 import { admitSessionStart } from '../ports/session-start'
 import type { JsonObjectBuilder } from '../session/json-object'
 import { canOpenSession, type SessionAccess } from '../tenancy/access'
-import { orgOfRun, scopedRunId } from '../tenancy/run-id'
 import { NO_FOLDER } from '../workspace/scope'
 import { requestSession } from '../workspace/signals'
 import {

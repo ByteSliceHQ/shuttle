@@ -1,6 +1,7 @@
 import { createTypeSafeAi } from '@ai-sdk/typesafe-ai'
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
 
+import { orgOfRun, personalRunId, scopedRunId } from '@shuttle/api'
 import { isLocalSandbox, sandboxIsPersonal } from '@shuttle/sandbox/names'
 import { sessionWorkDir } from '@shuttle/sandbox/workspace'
 import type { LlmAdapter, LlmCompleteArgs } from '@swirls/looms/agent'
@@ -29,7 +30,7 @@ import { readSandboxBinding, sandboxNameForSession } from './session/bind-sandbo
 import { prepareSessionSandbox } from './session/handoff'
 import { resolveSponsor } from './session/sponsor'
 import { onTeam, readPinnedTeam, writeStoredTeam, type Team } from './team'
-import { orgOfRun, personalRunId, scopedRunId } from './tenancy/run-id'
+import { runNames } from './tenancy/run-names'
 import { signInFilesPresent, vendorHarnessInfo } from './vendor/harnesses'
 import { readVendorModelChoice } from './vendor/models'
 import { runVendorTurn } from './vendor/turn'
@@ -467,14 +468,14 @@ export function resolveProjectors(env: EngineEnv, context?: ProjectorContext): P
 
 /**
  * Each organization has one playbook, one workspace and one pulls run. `orgId` is null only for
- * a run that belongs to no organization (see `tenancy/run-id.ts`).
+ * a run that belongs to no organization (see `run-id.ts` in `@shuttle/api`).
  */
 export function playbookRunId(env: EngineEnv, orgId: string | null): string {
-  return scopedRunId(orgId, env.SHUTTLE_PLAYBOOK_RUN_ID ?? 'shuttle-playbook')
+  return scopedRunId(orgId, runNames(env).playbook)
 }
 
 export function workspaceRunId(env: EngineEnv, orgId: string | null): string {
-  return scopedRunId(orgId, env.SHUTTLE_WORKSPACE_RUN_ID ?? 'shuttle-workspace')
+  return scopedRunId(orgId, runNames(env).workspace)
 }
 
 /**
@@ -482,9 +483,9 @@ export function workspaceRunId(env: EngineEnv, orgId: string | null): string {
  * them; the organization's workspace run lists the public ones.
  */
 export function personalWorkspaceRunId(env: EngineEnv, orgId: string, userId: string): string {
-  return personalRunId(orgId, userId, env.SHUTTLE_WORKSPACE_RUN_ID ?? 'shuttle-workspace')
+  return personalRunId(orgId, userId, runNames(env).workspace)
 }
 
 export function pullsRunId(env: EngineEnv, orgId: string | null): string {
-  return scopedRunId(orgId, env.SHUTTLE_PULLS_RUN_ID ?? 'shuttle-pulls')
+  return scopedRunId(orgId, runNames(env).pulls)
 }

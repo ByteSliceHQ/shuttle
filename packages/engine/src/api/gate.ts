@@ -1,10 +1,10 @@
+import { parsePersonalRunId, parseRunId, sessionOfReflection } from '@shuttle/api'
 import { authAllowedAs, authDenied, type AuthDecision, type RouteInfo } from '@swirls/looms/runtime'
 
 import type { EngineEnv } from '../env'
 import { runKindFor, type RunKind } from '../firehose/run-kind'
 import { loomsStub } from '../looms-stub'
 import { canOpenSession, type Actor } from '../tenancy/access'
-import { parsePersonalRunId, parseRunId, sessionOfReflection } from '../tenancy/run-id'
 
 /**
  * Decides whether a signed-in person may reach a run. Every request that names a run passes

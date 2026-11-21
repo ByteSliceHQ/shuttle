@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 
+import { orgOfRun } from '@shuttle/api'
 import type { LinkedSandboxRepo } from '@shuttle/sandbox/workspace'
 
 import { pullsRunId } from '../config'
@@ -7,7 +8,6 @@ import type { EngineEnv } from '../env'
 import { sandboxStub } from '../env'
 import { loomsStub } from '../looms-stub'
 import { recordPublished } from '../pulls/signals'
-import { orgOfRun } from '../tenancy/run-id'
 import { readSandboxBinding, sandboxNameForSession } from './bind-sandbox'
 import { prepareSessionSandbox } from './handoff'
 import { githubMirror, mirrorRepoStack, type MirroredStack } from './mirror-stack'

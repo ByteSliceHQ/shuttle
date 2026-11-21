@@ -1,6 +1,7 @@
 import { Schema } from 'effect'
 
-import { orgOfRun } from '../tenancy/run-id'
+import { orgOfRun } from '@shuttle/api'
+
 import { isEventOf } from './event-guard'
 import { TabKindSchema, workspaceModule, type ArtifactTab } from './scope'
 import { mutateSessionTabs, type SessionTabSet } from './tab-set'

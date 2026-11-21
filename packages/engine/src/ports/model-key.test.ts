@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 
+import { scopedRunId } from '@shuttle/api'
 import type { LlmCompleteArgs } from '@swirls/looms/agent'
 
 import { resolveLlm } from '../config'
-import { scopedRunId } from '../tenancy/run-id'
 import { fakeEnv } from '../testing/fake-env'
 import { sponsorCredentials, type CredentialPort, type ModelKeyRequest } from './credentials'
 

@@ -9,6 +9,7 @@ import {
   type LinkedRepo,
   type WorkspaceSnapshot,
 } from '@shuttle/api'
+import { scopedRunId } from '@shuttle/api'
 import { deleteAsset, putAsset, uploadMediaType, type AssetRef } from '@shuttle/engine/assets/store'
 import {
   ensureNamedWorkspace,
@@ -33,7 +34,6 @@ import {
 } from '@shuttle/engine/pulls/signals'
 import { syncPullThreads } from '@shuttle/engine/pulls/thread-sync'
 import type { Actor, SessionAccess } from '@shuttle/engine/tenancy/access'
-import { scopedRunId } from '@shuttle/engine/tenancy/run-id'
 import {
   linkRepo,
   reportActivity,

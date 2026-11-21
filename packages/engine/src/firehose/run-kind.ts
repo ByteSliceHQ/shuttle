@@ -1,6 +1,8 @@
 import { z } from 'zod'
 
-import { localRunName } from '../tenancy/run-id'
+import { localRunName } from '@shuttle/api'
+
+import { runNames, type RunNamesEnv } from '../tenancy/run-names'
 
 export const RUN_KINDS = ['session', 'workspace', 'playbook', 'pulls'] as const
 
@@ -8,11 +10,7 @@ export const RunKindSchema = z.enum(RUN_KINDS)
 
 export type RunKind = (typeof RUN_KINDS)[number]
 
-export interface RunKindEnv {
-  readonly SHUTTLE_WORKSPACE_RUN_ID?: string
-  readonly SHUTTLE_PLAYBOOK_RUN_ID?: string
-  readonly SHUTTLE_PULLS_RUN_ID?: string
-}
+export type RunKindEnv = RunNamesEnv
 
 /**
  * Classify a Looms run id, whichever organization it belongs to. A person's own workspace run is
@@ -20,16 +18,17 @@ export interface RunKindEnv {
  */
 export function runKindFor(env: RunKindEnv, runId: string): RunKind {
   const local = localRunName(runId)
+  const names = runNames(env)
 
-  if (local === (env.SHUTTLE_WORKSPACE_RUN_ID ?? 'shuttle-workspace')) {
+  if (local === names.workspace) {
     return 'workspace'
   }
 
-  if (local === (env.SHUTTLE_PLAYBOOK_RUN_ID ?? 'shuttle-playbook')) {
+  if (local === names.playbook) {
     return 'playbook'
   }
 
-  if (local === (env.SHUTTLE_PULLS_RUN_ID ?? 'shuttle-pulls')) {
+  if (local === names.pulls) {
     return 'pulls'
   }
 

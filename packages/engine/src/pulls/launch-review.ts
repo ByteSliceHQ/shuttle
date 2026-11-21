@@ -1,10 +1,11 @@
 import { Schema } from 'effect'
 
+import { orgOfRun } from '@shuttle/api'
+
 import { workspaceRunId } from '../config'
 import type { EngineEnv } from '../env'
 import { loomsStub } from '../looms-stub'
 import { admitSessionStart, openSessionStart, type SessionStartPort } from '../ports/session-start'
-import { orgOfRun } from '../tenancy/run-id'
 import { requestSession } from '../workspace/signals'
 import { pullsModule } from './scope'
 import { reviewerLinked } from './signals'

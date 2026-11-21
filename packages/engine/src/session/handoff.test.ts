@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 
+import { scopedRunId } from '@shuttle/api'
 import { localSandboxName, userSandboxName } from '@shuttle/sandbox/names'
 import type { SessionSnapshot } from '@shuttle/sandbox/session-sync'
 import type { JsonValue } from '@swirls/looms/core'
 
 import type { EngineEnv } from '../env'
 import { ACCESS_STORAGE_KEY } from '../tenancy/access'
-import { scopedRunId } from '../tenancy/run-id'
 import { fakeEnv } from '../testing/fake-env'
 import { SANDBOX_PLACEMENT_KEY } from './bind-sandbox'
 import {

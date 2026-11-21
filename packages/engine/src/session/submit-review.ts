@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 
+import { orgOfRun } from '@shuttle/api'
 import { getPullRequest, listPullFiles, submitPullReview } from '@shuttle/git/github/pulls'
 
 import { bodyWithUnanchored, partitionByAnchor } from '../agents/tools/review'
@@ -7,7 +8,6 @@ import { pullsRunId } from '../config'
 import type { EngineEnv } from '../env'
 import { loomsStub } from '../looms-stub'
 import { recordReview } from '../pulls/signals'
-import { orgOfRun } from '../tenancy/run-id'
 import { readSandboxBinding } from './bind-sandbox'
 import { shuttleModule } from './scope'
 

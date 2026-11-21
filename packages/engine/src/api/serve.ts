@@ -92,6 +92,13 @@ export interface ServeOptions {
   readonly grantSecret?: string
   /** How long a grant lasts, in milliseconds. Defaults to five minutes. */
   readonly grantTtlMs?: number
+  /**
+   * The path Shuttle is mounted under, such as `/shuttle`, when the host serves routes of its
+   * own beside it. Only paths under it are answered, with it taken off before a module sees
+   * them (`/shuttle/sessions/…` reaches the session module as `/sessions/…`). A path under it
+   * that no module claims is answered 404, so a page on a listed origin can read that too.
+   */
+  readonly basePath?: string
 }
 
 const DEFAULT_GRANT_TTL_MS = 5 * 60_000
@@ -132,6 +139,40 @@ function preflight(origin: string): Response {
   })
 }
 
+/** `basePath` without a trailing slash, or null when Shuttle is mounted at the root. */
+function normalizeBasePath(basePath: string | undefined): string | null {
+  if (basePath === undefined) {
+    return null
+  }
+
+  const trimmed = basePath.replace(/\/+$/, '')
+
+  if (trimmed === '') {
+    return null
+  }
+
+  if (!trimmed.startsWith('/') || /[?#]/.test(trimmed)) {
+    throw new Error(`basePath must be a path such as '/shuttle', not '${basePath}'`)
+  }
+
+  return trimmed
+}
+
+/** The request with `basePath` taken off its path, or null for a path outside it. */
+function withinBase(request: Request, basePath: string): Request | null {
+  const url = new URL(request.url)
+
+  if (url.pathname !== basePath && !url.pathname.startsWith(`${basePath}/`)) {
+    return null
+  }
+
+  const rest = url.pathname.slice(basePath.length)
+
+  url.pathname = rest === '' ? '/' : rest
+
+  return new Request(url, request)
+}
+
 /**
  * Makes the function that answers Shuttle's HTTP API for a host: the modules it mounts, behind
  * its own identity port and the check of who may open which run. It answers null for a path
@@ -142,6 +183,8 @@ function preflight(origin: string): Response {
  *
  * return (await shuttle(request, ctx)) ?? theHostsOwnRoutes(request)
  * ```
+ *
+ * With `basePath`, it answers everything under that path and null for the rest.
  */
 export function serveShuttle(host: ShuttleHost, options: ServeOptions) {
   const resolved = resolveHost(host)
@@ -150,6 +193,7 @@ export function serveShuttle(host: ShuttleHost, options: ServeOptions) {
   const origins = options.origins ?? []
   const grantSecret = options.grantSecret
   const grantTtlMs = options.grantTtlMs ?? DEFAULT_GRANT_TTL_MS
+  const basePath = normalizeBasePath(options.basePath)
 
   const answer = async (request: Request, ctx?: ExecutionContext): Promise<Response | null> => {
     const url = new URL(request.url)
@@ -234,14 +278,21 @@ export function serveShuttle(host: ShuttleHost, options: ServeOptions) {
   }
 
   return async (request: Request, ctx?: ExecutionContext): Promise<Response | null> => {
-    const origin = request.headers.get('origin')
+    const inner = basePath === null ? request : withinBase(request, basePath)
+
+    if (inner === null) {
+      return null
+    }
+
+    const origin = inner.headers.get('origin')
     const allowed = origin !== null && origins.includes(origin) ? origin : null
 
-    if (allowed !== null && request.method === 'OPTIONS') {
+    if (allowed !== null && inner.method === 'OPTIONS') {
       return preflight(allowed)
     }
 
-    const response = await answer(request, ctx)
+    const response =
+      (await answer(inner, ctx)) ?? (basePath === null ? null : refused(404, 'Not found'))
 
     return response === null ? null : shared(response, allowed)
   }

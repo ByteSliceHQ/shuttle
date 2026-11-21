@@ -1,4 +1,5 @@
 import type { MessageReferenceInput } from '@shuttle/api'
+import { parseRunId } from '@shuttle/api'
 
 import { forbidden } from '../api/base'
 import { personalWorkspaceRunId, workspaceRunId } from '../config'
@@ -7,7 +8,6 @@ import { loomsStub } from '../looms-stub'
 import { BRIEF_CHARS, clip, REPLY_CHARS, type DigestSource } from '../session/digest-source'
 import type { MessageReference } from '../session/scope'
 import { canOpenSession, type Actor } from '../tenancy/access'
-import { parseRunId } from '../tenancy/run-id'
 import { readListedSessions, type ListedSession } from '../workspace/listings'
 
 /**
