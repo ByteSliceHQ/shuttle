@@ -98,6 +98,8 @@ export type OpenArtifact = (
 
 interface ConversationContext {
   readonly runId: string
+  /** Whether questions and proposals are shown without the means to answer them. */
+  readonly readOnly: boolean
   readonly feed: SessionFeed
   readonly activity: SessionActivityState
   readonly identities: ReadonlyMap<string, AgentIdentity>
@@ -199,6 +201,7 @@ export function Conversation({
   root,
   openThreadId,
   onOpenThread,
+  readOnly = false,
 }: {
   runId: string
   feed: SessionFeed
@@ -213,6 +216,8 @@ export function Conversation({
   /** The agent whose own timeline is open. Left out, it is the session's top level. */
   openThreadId?: string
   onOpenThread: (threadId: string) => void
+  /** Shows questions and proposals without the means to answer them. */
+  readOnly?: boolean
 }) {
   const { parents, threadNodes } = useMemo(() => {
     const nodes = new Map<string, ThreadNode>()
@@ -355,6 +360,7 @@ export function Conversation({
   const context = useMemo<ConversationContext>(
     () => ({
       runId,
+      readOnly,
       feed,
       activity,
       identities,
@@ -371,6 +377,7 @@ export function Conversation({
     }),
     [
       runId,
+      readOnly,
       feed,
       activity,
       identities,
@@ -1686,7 +1693,7 @@ function AskUserCard({
                 }
               }}
               placeholder="Type your answer…"
-              disabled={pending !== null}
+              disabled={context.readOnly || pending !== null}
               className="max-h-40 min-h-10 resize-none"
             />
             <div className="flex items-center justify-end gap-2">
@@ -1697,7 +1704,7 @@ function AskUserCard({
                 type="button"
                 variant="ghost"
                 size="sm"
-                disabled={pending !== null}
+                disabled={context.readOnly || pending !== null}
                 onClick={() => answer.mutate(null)}
               >
                 {pending === 'defer' ? <LoaderCircle className="animate-spin" /> : null}
@@ -1707,7 +1714,7 @@ function AskUserCard({
                 type="submit"
                 variant="brand"
                 size="sm"
-                disabled={pending !== null || draft.trim() === ''}
+                disabled={context.readOnly || pending !== null || draft.trim() === ''}
               >
                 {pending === 'answer' ? <LoaderCircle className="animate-spin" /> : null}
                 Answer
@@ -1804,7 +1811,7 @@ function PullReviewCard({
             <Textarea
               value={summary}
               onChange={(event) => setSummary(event.target.value)}
-              disabled={pending}
+              disabled={context.readOnly || pending}
               className="min-h-20 resize-none text-[13px]"
             />
             {drafts.length > 0 ? (
@@ -1817,7 +1824,7 @@ function PullReviewCard({
                     <input
                       type="checkbox"
                       checked={enabled[comment.commentId] !== false}
-                      disabled={pending}
+                      disabled={context.readOnly || pending}
                       onChange={(event) =>
                         setEnabled((prev) => ({
                           ...prev,
@@ -1845,7 +1852,7 @@ function PullReviewCard({
                   type="button"
                   size="sm"
                   variant={verdict === option ? 'brand' : 'outline'}
-                  disabled={pending}
+                  disabled={context.readOnly || pending}
                   onClick={() => setVerdict(option)}
                 >
                   {option === 'request_changes'
@@ -1864,7 +1871,7 @@ function PullReviewCard({
                 type="button"
                 variant="ghost"
                 size="sm"
-                disabled={pending}
+                disabled={context.readOnly || pending}
                 onClick={() => decide.mutate('discard')}
               >
                 Discard
@@ -1873,7 +1880,7 @@ function PullReviewCard({
                 type="button"
                 variant="brand"
                 size="sm"
-                disabled={pending}
+                disabled={context.readOnly || pending}
                 onClick={() => decide.mutate('submit')}
               >
                 Submit review

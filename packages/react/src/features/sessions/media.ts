@@ -147,6 +147,13 @@ export function uploadAsset(
       ),
     )
 
+    // An upload does not go through `fetch`, so it is given what `fetch` would have carried.
+    request.withCredentials = host.crossOrigin()
+
+    for (const [name, value] of Object.entries(host.headers())) {
+      request.setRequestHeader(name, value)
+    }
+
     const contentType = file.type === '' ? 'application/octet-stream' : file.type
     request.setRequestHeader('content-type', contentType)
     request.responseType = 'json'
