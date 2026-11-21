@@ -24,7 +24,7 @@
     "@shuttle/core": "workspace:*",
     "@shuttle/git": "workspace:*",
     "@shuttle/sandbox": "workspace:*",
-    "@swirls/looms": "0.20.0",
+    "@swirls/looms": "0.22.0",
     "ai": "^7.0.0",
     "effect": "4.1.4",
     "zod": "^4.6.7"

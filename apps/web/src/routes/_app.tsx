@@ -86,7 +86,7 @@ export const Route = createFileRoute('/_app')({
     // Pull requests are folded from the organization's pulls run, and the sidebar and most
     // pages show them. Waiting here means they are there when a page shows, not a moment after.
     // Once the log is in this costs nothing, so it is asked on every page change.
-    if (!preload) {
+    if (!preload && tenant.runs.pulls !== null) {
       await whenRunSynced(tenant.runs.pulls, tenant.user.id)
     }
 

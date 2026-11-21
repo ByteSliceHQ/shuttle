@@ -56,6 +56,7 @@ export default defineConfig({
     proxy: {
       '/definitions': api,
       '/health': api,
+      '/capabilities': api,
       '/operations': api,
       '/runs': { ...api, ws: true },
       '/sessions': { ...api, ws: true },

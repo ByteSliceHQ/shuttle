@@ -109,8 +109,12 @@ repository's web and desktop apps, and other products. It has three entry points
 - **Outside this repository** the parts are `@swirls/shuttle`, the only package published from
   here. `@shuttle/api`, `@shuttle/core` and `@shuttle/react` stay private and are what the apps
   use; `packages/shuttle` puts their compiled output together under `@swirls/shuttle/api`,
-  `/core/…` and `/react`. A dependency added to one of the three is added to
-  `packages/shuttle/package.json` too, and `bun run check:package` fails until it is. A type
+  `/core/…` and `/react`. The engine goes out the same way, from `@shuttle/engine`,
+  `@shuttle/sandbox`, `@shuttle/git` and `@shuttle/runner-protocol`, under
+  `@swirls/shuttle/engine`, `/sandbox/…` and `/git/…`. A dependency added to any of them is
+  added to `packages/shuttle/package.json` too, as a dependency, or as an optional peer when
+  only a host that runs the engine needs it (as `ai` is); `bun run check:package` fails until
+  it is. A type
   that is exported has to be nameable in a declaration file, so give a query's options an
   explicit type where the inferred one carries the query library's tags.
 - **Changesets:** a pull request that changes `packages/api`, `core`, `react` or `shuttle` in a

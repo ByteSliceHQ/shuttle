@@ -9,12 +9,14 @@
  */
 export { isolationLabel, type DeviceRunnerStatus, type ShuttleDevice } from './device'
 export {
+  capabilitiesQuery,
   createShuttleHost,
   isSignedOut,
   SignalError,
   statusOf,
   type CallContext,
   type ShuttleApi,
+  type ShuttleCapabilities,
   type ShuttleClient,
   type ShuttleFetch,
   type ShuttleHost,

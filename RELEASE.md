@@ -3,7 +3,11 @@
 `@swirls/shuttle` is the repository's only public npm package. `@shuttle/api`, `@shuttle/core` and
 `@shuttle/react` remain private build units, used as source by the apps here; `packages/shuttle`
 assembles their compiled output into one package with module subpaths (`@swirls/shuttle/react`,
-`@swirls/shuttle/api`, `@swirls/shuttle/core/workspace`, `@swirls/shuttle/core/pulls`).
+`@swirls/shuttle/api`, `@swirls/shuttle/core/workspace`, `@swirls/shuttle/core/pulls`). The engine
+a host runs sessions on (`@shuttle/engine`, `@shuttle/sandbox`, `@shuttle/git`,
+`@shuttle/runner-protocol`) goes out in the same package, under `@swirls/shuttle/engine`,
+`/sandbox/…` and `/git/…`. What only the engine needs is an optional peer dependency, so a page
+that uses the parts does not install it.
 
 ## Version policy
 
