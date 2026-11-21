@@ -28,7 +28,7 @@
     "@shuttle/git": "workspace:*",
     "@shuttle/runner-protocol": "workspace:*",
     "@shuttle/sandbox": "workspace:*",
-    "@swirls/looms": "0.23.0",
+    "@swirls/looms": "0.24.0",
     "ai": "^7.0.0",
     "better-auth": "^1.7.23",
     "effect": "4.1.4",

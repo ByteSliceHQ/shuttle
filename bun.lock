@@ -67,7 +67,7 @@
         "@fontsource-variable/jetbrains-mono": "^5.3.0",
         "@shuttle/api": "workspace:*",
         "@shuttle/react": "workspace:*",
-        "@swirls/looms": "0.23.0",
+        "@swirls/looms": "0.24.0",
         "@tanstack/react-query": "^5.107.1",
         "@tanstack/react-router": "^1.170.32",
         "better-auth": "1.7.23",
@@ -109,7 +109,7 @@
         "@shuttle/git": "workspace:*",
         "@shuttle/runner-protocol": "workspace:*",
         "@shuttle/sandbox": "workspace:*",
-        "@swirls/looms": "0.23.0",
+        "@swirls/looms": "0.24.0",
         "ai": "^7.0.0",
         "better-auth": "^1.7.23",
         "effect": "4.1.4",
@@ -160,7 +160,7 @@
       "name": "@shuttle/core",
       "version": "0.0.1",
       "dependencies": {
-        "@swirls/looms": "0.23.0",
+        "@swirls/looms": "0.24.0",
         "effect": "4.1.4",
       },
       "devDependencies": {
@@ -179,7 +179,7 @@
         "@shuttle/core": "workspace:*",
         "@shuttle/git": "workspace:*",
         "@shuttle/sandbox": "workspace:*",
-        "@swirls/looms": "0.23.0",
+        "@swirls/looms": "0.24.0",
         "ai": "^7.0.0",
         "effect": "4.1.4",
         "zod": "^4.6.7",
@@ -220,7 +220,7 @@
         "@pierre/words": "0.2.2",
         "@shuttle/api": "workspace:*",
         "@shuttle/core": "workspace:*",
-        "@swirls/looms": "0.23.0",
+        "@swirls/looms": "0.24.0",
         "@tanstack/react-virtual": "^3.14.26",
         "@xterm/addon-fit": "^0.11.0",
         "@xterm/addon-webgl": "^0.19.0",
@@ -276,7 +276,7 @@
     },
     "packages/shuttle": {
       "name": "@swirls/shuttle",
-      "version": "0.5.1",
+      "version": "0.7.0",
       "dependencies": {
         "@ai-sdk/typesafe-ai": "^3.0.35",
         "@openrouter/ai-sdk-provider": "^3.0.0",
@@ -290,7 +290,7 @@
         "@pierre/highlights": "0.5.1",
         "@pierre/sdk": "^0.1.2",
         "@pierre/words": "0.2.2",
-        "@swirls/looms": "0.23.0",
+        "@swirls/looms": "0.24.0",
         "@tanstack/react-virtual": "^3.14.26",
         "@xterm/addon-fit": "^0.11.0",
         "@xterm/addon-webgl": "^0.19.0",
@@ -1241,7 +1241,7 @@
 
     "@swc/helpers": ["@swc/helpers@0.5.24", "", {}, "sha512-6tcXo4kA8HgGO7AVmawB57RYi/piBPYVHVcO6dXjX+SZw8GoHmi262sp4v2Ha2kNP9Cx84qei27yT+fjS1lxgg=="],
 
-    "@swirls/looms": ["@swirls/looms@0.23.0", "", { "dependencies": { "@effect/platform-bun": "^4.1.4", "@nats-io/jetstream": "3.4.0", "@nats-io/nats-core": "3.4.0", "@noble/hashes": "^2.0.1", "@s2-dev/streamstore": "^0.23.0", "@standard-schema/spec": "^1.1.0", "@tanstack/react-virtual": "^3.14.11", "clsx": "^2.1.1", "cmdk": "^1.1.1", "lucide-react": "^1.43.0", "radix-ui": "^1.6.7", "react-resizable-panels": "^4.13.3", "tailwind-merge": "^3.6.0" }, "peerDependencies": { "@cloudflare/workers-types": "^5.20260914.1", "ai": "^7.0.0", "drizzle-orm": "^0.44.0", "effect": "^4.1.4", "postgres": "^3.4.0", "react": "^19.0.0", "react-dom": "^19.0.0" }, "optionalPeers": ["@cloudflare/workers-types", "ai", "drizzle-orm", "postgres", "react", "react-dom"], "bin": { "looms": "dist/cli/cli.js" } }, "sha512-g/yzihMeU6GD1hU6dybhEa3RbtaJCt4bpP5wBMznpp2julnGVKqMkqCLnvg3aWLz8AYG9qtamkNFGtt3B3229w=="],
+    "@swirls/looms": ["@swirls/looms@0.24.0", "", { "dependencies": { "@effect/platform-bun": "^4.1.4", "@nats-io/jetstream": "3.4.0", "@nats-io/nats-core": "3.4.0", "@noble/hashes": "^2.0.1", "@s2-dev/streamstore": "^0.23.0", "@standard-schema/spec": "^1.1.0", "@tanstack/react-virtual": "^3.14.11", "clsx": "^2.1.1", "cmdk": "^1.1.1", "lucide-react": "^1.43.0", "radix-ui": "^1.6.7", "react-resizable-panels": "^4.13.3", "tailwind-merge": "^3.6.0" }, "peerDependencies": { "@cloudflare/workers-types": "^5.20260914.1", "ai": "^7.0.0", "drizzle-orm": "^0.44.0", "effect": "^4.1.4", "postgres": "^3.4.0", "react": "^19.0.0", "react-dom": "^19.0.0" }, "optionalPeers": ["@cloudflare/workers-types", "ai", "drizzle-orm", "postgres", "react", "react-dom"], "bin": { "looms": "dist/cli/cli.js" } }, "sha512-jmJk7toR8t9PoTZZ26z1hpLbDhNTwjSio1adVSNaeg098W+aw7NF0DXVq4cth02u6MuCATvtjKReABSpOuGSJw=="],
 
     "@swirls/shuttle": ["@swirls/shuttle@workspace:packages/shuttle"],
 
