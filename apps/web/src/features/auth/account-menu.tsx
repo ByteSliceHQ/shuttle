@@ -1,7 +1,7 @@
 import { Check, ChevronsUpDown, Copy, LogOut, Plus, UserPlus } from 'lucide-react'
 import { useState, type SubmitEvent } from 'react'
 
-import { shuttleVersion, versionReport, webVersion, type ShuttleVersion } from '@/lib/version'
+import { shuttleVersion, versionLines, versionReport, type ShuttleVersion } from '@/lib/version'
 import { forgetEventCache, useTenant } from '@shuttle/react'
 import {
   Button,
@@ -129,6 +129,7 @@ export function AccountMenu() {
 /** The foot of the account menu: which Shuttle this is. A click copies it for a bug report. */
 function VersionDetails({ version }: { version: ShuttleVersion }) {
   const [copied, setCopied] = useState<'copied' | 'failed' | null>(null)
+  const lines = versionLines(version)
 
   function copy(event: Event) {
     // Stay open, so the item can say whether it worked.
@@ -144,14 +145,15 @@ function VersionDetails({ version }: { version: ShuttleVersion }) {
     <DropdownMenuItem
       onSelect={copy}
       title="Copy version info"
-      aria-label={`Shuttle ${webVersion(version)}. Copy version info`}
+      aria-label={`${lines.join(', ')}. Copy version info`}
       className="group text-muted-foreground items-start text-[11px] leading-snug tabular-nums"
     >
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate">Shuttle {webVersion(version)}</span>
-        {version.desktop !== null ? (
-          <span className="truncate">Desktop app {version.desktop}</span>
-        ) : null}
+        {lines.map((line) => (
+          <span key={line} className="truncate">
+            {line}
+          </span>
+        ))}
       </span>
       <span role="status" aria-live="polite" className="shrink-0">
         {copied === 'copied' ? (

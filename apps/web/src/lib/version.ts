@@ -30,19 +30,35 @@ export function shuttleVersion(): ShuttleVersion {
 }
 
 /**
- * The web app as a person reads it: `0.1.150 · e4cb471` once released, the commit alone for a
- * local build, and `unknown` when it has neither.
+ * The web app as a person reads it: its release once deployed, the commit for a local build,
+ * which has no release, and `unknown` when it has neither.
  */
 export function webVersion(version: ShuttleVersion): string {
-  const parts = [version.release, version.commit].filter((part) => part !== '')
+  if (version.release !== '') {
+    return version.release
+  }
 
-  return parts.length > 0 ? parts.join(' · ') : 'unknown'
+  return version.commit !== '' ? version.commit : 'unknown'
+}
+
+/**
+ * The lines the account menu shows. One release describes both apps when they match, so it is
+ * one line; a desktop app behind the web app it shows gets a line of its own.
+ */
+export function versionLines(version: ShuttleVersion): string[] {
+  const web = webVersion(version)
+
+  return version.desktop !== null && version.desktop !== web
+    ? [`Shuttle ${web}`, `Desktop ${version.desktop}`]
+    : [`Shuttle ${web}`]
 }
 
 /** What a click on the version puts on the clipboard, for a bug report. */
 export function versionReport(version: ShuttleVersion, userAgent: string): string {
+  const commit = version.release !== '' && version.commit !== '' ? ` (${version.commit})` : ''
+
   return [
-    `Shuttle web ${webVersion(version)}`,
+    `Shuttle web ${webVersion(version)}${commit}`,
     `Built ${version.builtAt}`,
     ...(version.desktop !== null ? [`Shuttle desktop ${version.desktop}`] : []),
     userAgent,

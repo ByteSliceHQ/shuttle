@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { versionReport, webVersion, type ShuttleVersion } from './version'
+import { versionLines, versionReport, webVersion, type ShuttleVersion } from './version'
 
 const released: ShuttleVersion = {
   release: '0.1.150',
@@ -10,11 +10,11 @@ const released: ShuttleVersion = {
 }
 
 describe('webVersion', () => {
-  test('names the release and its commit once deployed', () => {
-    expect(webVersion(released)).toBe('0.1.150 · e4cb471')
+  test('names the release once deployed', () => {
+    expect(webVersion(released)).toBe('0.1.150')
   })
 
-  test('names the commit alone for a local build', () => {
+  test('names the commit for a local build', () => {
     expect(webVersion({ ...released, release: '' })).toBe('e4cb471')
   })
 
@@ -23,11 +23,28 @@ describe('webVersion', () => {
   })
 })
 
+describe('versionLines', () => {
+  test('is one line in a browser', () => {
+    expect(versionLines(released)).toEqual(['Shuttle 0.1.150'])
+  })
+
+  test('is one line when the desktop app matches the web app', () => {
+    expect(versionLines({ ...released, desktop: '0.1.150' })).toEqual(['Shuttle 0.1.150'])
+  })
+
+  test('names a desktop app that is behind on a line of its own', () => {
+    expect(versionLines({ ...released, desktop: '0.1.142' })).toEqual([
+      'Shuttle 0.1.150',
+      'Desktop 0.1.142',
+    ])
+  })
+})
+
 describe('versionReport', () => {
-  test('lists both apps, when it was built and the browser', () => {
+  test('lists both apps, the commit, when it was built and the browser', () => {
     expect(versionReport({ ...released, desktop: '0.1.142' }, 'UA')).toBe(
       [
-        'Shuttle web 0.1.150 · e4cb471',
+        'Shuttle web 0.1.150 (e4cb471)',
         'Built 2026-11-22T10:00:00.000Z',
         'Shuttle desktop 0.1.142',
         'UA',
@@ -35,7 +52,7 @@ describe('versionReport', () => {
     )
   })
 
-  test('leaves out a desktop app it is not running in', () => {
+  test('names a local build by its commit once', () => {
     expect(versionReport({ ...released, release: '' }, 'UA')).toBe(
       ['Shuttle web e4cb471', 'Built 2026-11-22T10:00:00.000Z', 'UA'].join('\n'),
     )
