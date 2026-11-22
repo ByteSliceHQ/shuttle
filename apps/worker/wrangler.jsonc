@@ -15,7 +15,8 @@
     "SHUTTLE_PULLS_RUN_ID": "shuttle-pulls",
     "SHUTTLE_WEB_URL": "http://127.0.0.1:5180",
     // Hostname used for container preview iframes (`p3000-<folderId>.<host>`).
-    // Locally, `*.localhost` resolves to loopback; production needs wildcard DNS.
+    // Locally, `*.localhost` resolves to loopback. A deployment replaces this with the domain of
+    // its wildcard route (see `scripts/deploy-config.ts`), so previews load in a visitor's browser.
     "SHUTTLE_PREVIEW_HOST": "localhost",
   },
   "durable_objects": {
