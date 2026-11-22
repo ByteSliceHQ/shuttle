@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url'
 
 import { z } from 'zod'
 
-import { splitDeployVars } from './deploy-config-lib'
+import { type DeployRoute, deploymentPreviewHost, splitDeployVars } from './deploy-config-lib'
 
 const worker = join(dirname(fileURLToPath(import.meta.url)), '..')
 const webDist = join(worker, '../web/dist')
@@ -31,6 +31,27 @@ const webDist = join(worker, '../web/dist')
 if (!existsSync(join(webDist, 'index.html'))) {
   console.error('apps/web/dist is missing. Build the web app first: bun run --cwd apps/web build')
   process.exit(1)
+}
+
+function previewHost(
+  current: string | undefined,
+  routes: readonly DeployRoute[],
+  mode: string | undefined,
+): string {
+  try {
+    const host = deploymentPreviewHost(current, routes, mode)
+
+    if (host !== current) {
+      console.log(
+        `SHUTTLE_PREVIEW_HOST is ${String(current)} in wrangler.jsonc; deploying previews under ${host}`,
+      )
+    }
+
+    return host
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exit(1)
+  }
 }
 
 const wranglerModule: unknown = await import(join(worker, 'wrangler.jsonc'))
@@ -46,9 +67,16 @@ const base = wranglerSchema.parse(wranglerModule).default
 const deployVars: unknown = JSON.parse(process.env.SHUTTLE_DEPLOY_VARS ?? '{}')
 const deployRoutes: unknown = JSON.parse(process.env.SHUTTLE_DEPLOY_ROUTES ?? '[]')
 const overrides = z.record(z.string(), z.string()).parse(deployVars)
-const routes = z.array(z.unknown()).parse(deployRoutes)
+const routes = z.array(z.looseObject({ pattern: z.string() })).parse(deployRoutes)
 const split = splitDeployVars(overrides)
 const vars = { ...base.vars, ...split.vars }
+
+vars.SHUTTLE_PREVIEW_HOST = previewHost(
+  vars.SHUTTLE_PREVIEW_HOST,
+  routes,
+  vars.SHUTTLE_WORKSPACE_MODE,
+)
+
 const usesContainers = ['container', 'cloudflare'].includes(vars.SHUTTLE_WORKSPACE_MODE ?? '')
 const { containers, ...rest } = base
 const withRoutes = { ...rest, routes, workers_dev: false, preview_urls: false }

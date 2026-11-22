@@ -42,8 +42,11 @@ Cloudflare Worker that hosts Shuttle sessions on Looms Durable Objects.
    with a named `images.base.dockerfile`). Code starts instances via
    `ctx.container.images.base`. Preview iframes use hostnames of the form
    `p<port>-<folderId>.<SHUTTLE_PREVIEW_HOST>` (default host `localhost`, so
-   local previews hit `http://p3000-<folderId>.localhost:8790`). Production
-   needs a wildcard DNS record and route for that host.
+   local previews hit `http://p3000-<folderId>.localhost:8790`). A deployment
+   serves previews under the domain of its wildcard route, which the deploy
+   config takes from `SHUTTLE_DEPLOY_ROUTES`; set `SHUTTLE_PREVIEW_HOST` in
+   `SHUTTLE_DEPLOY_VARS` when previews live elsewhere. Production needs a
+   wildcard DNS record and route for that host.
 
    The image bakes a coding baseline (`node`/`npm`, `python3`, `git`, `rg`,
    `curl`, `bash`). Agents may install extras via bash (`apk add`, project-local

@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 
-import { PUBLIC_DEPLOY_VARS, splitDeployVars } from './deploy-config-lib'
+import {
+  PUBLIC_DEPLOY_VARS,
+  deploymentPreviewHost,
+  previewHostFromRoutes,
+  splitDeployVars,
+} from './deploy-config-lib'
 
 describe('splitDeployVars', () => {
   test('keeps settings in vars and credentials in secrets', () => {
@@ -65,5 +70,51 @@ describe('PUBLIC_DEPLOY_VARS', () => {
     ]) {
       expect(PUBLIC_DEPLOY_VARS.has(name)).toBe(false)
     }
+  })
+})
+
+describe('previewHostFromRoutes', () => {
+  test('takes the domain of a wildcard route', () => {
+    expect(previewHostFromRoutes([{ pattern: '*.shuttle.codes/*' }])).toBe('shuttle.codes')
+    expect(previewHostFromRoutes([{ pattern: '*.shuttle.codes' }])).toBe('shuttle.codes')
+  })
+
+  test('ignores a custom domain route', () => {
+    expect(previewHostFromRoutes([{ pattern: 'app.shuttle.codes' }])).toBe(null)
+  })
+
+  test('is null when two wildcard domains compete', () => {
+    expect(
+      previewHostFromRoutes([{ pattern: '*.shuttle.codes/*' }, { pattern: '*.preview.example/*' }]),
+    ).toBe(null)
+  })
+})
+
+describe('deploymentPreviewHost', () => {
+  const routes = [{ pattern: 'app.shuttle.codes' }, { pattern: '*.shuttle.codes/*' }]
+
+  test('replaces the development default with the wildcard domain of a routed deployment', () => {
+    expect(deploymentPreviewHost('localhost', routes, 'daytona')).toBe('shuttle.codes')
+  })
+
+  test('keeps the host a deployment sets for itself', () => {
+    expect(deploymentPreviewHost('previews.example.com', routes, 'container')).toBe(
+      'previews.example.com',
+    )
+  })
+
+  test('leaves a local deployment alone', () => {
+    expect(deploymentPreviewHost('localhost', [], 'daytona')).toBe('localhost')
+  })
+
+  test('leaves a deployment with no sandbox machine alone', () => {
+    expect(deploymentPreviewHost('localhost', routes, 'memory')).toBe('localhost')
+    expect(deploymentPreviewHost('localhost', routes, undefined)).toBe('localhost')
+  })
+
+  test('refuses a loopback host when the deployment routes no wildcard host', () => {
+    expect(() =>
+      deploymentPreviewHost('localhost', [{ pattern: 'app.shuttle.codes' }], 'daytona'),
+    ).toThrow(/SHUTTLE_PREVIEW_HOST/)
   })
 })
