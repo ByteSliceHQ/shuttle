@@ -26,6 +26,13 @@ describe('resolveBrowserTarget', () => {
     )
   })
 
+  test('gives a port no address until the preview key is known', () => {
+    expect(resolveBrowserTarget('3000', undefined, 'shuttle.codes')).toBe('')
+    expect(resolveBrowserTarget('localhost:3000', undefined)).toBe('')
+    expect(resolveBrowserTarget('http://127.0.0.1:5173/', '')).toBe('')
+    expect(resolveBrowserTarget('https://example.com', undefined)).toBe('https://example.com')
+  })
+
   test('leaves non-loopback URLs unchanged', () => {
     expect(resolveBrowserTarget('https://example.com', folderId)).toBe('https://example.com')
     expect(resolveBrowserTarget('example.com', folderId)).toBe('http://example.com')
