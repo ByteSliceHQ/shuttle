@@ -22,7 +22,7 @@ export function BrowserViewer({
   const host = useShuttleHost()
 
   // Where this session's sandbox answers previews. It does not change, so it is asked once.
-  const { data: preview } = useQuery(
+  const { data: preview, isError: previewFailed } = useQuery(
     api.sandbox.preview.queryOptions({ input: { id: runId }, staleTime: Infinity }),
   )
 
@@ -129,7 +129,16 @@ export function BrowserViewer({
         ) : null}
       </div>
 
-      {src === '' ? (
+      {src === '' && target.trim() !== '' ? (
+        // A port waits for the sandbox's preview key; it has nothing to show until then.
+        previewFailed ? (
+          <EmptyState icon={<Globe />} title="Previews are unavailable">
+            This session's sandbox does not serve port previews.
+          </EmptyState>
+        ) : (
+          <div className="min-h-0 flex-1" />
+        )
+      ) : src === '' ? (
         <EmptyState icon={<Globe />} title="Open a preview">
           Enter a port (e.g. <code className="font-mono">3000</code> or{' '}
           <code className="font-mono">localhost:3000</code>). Both proxy through the sandbox

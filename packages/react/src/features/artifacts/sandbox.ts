@@ -181,8 +181,10 @@ export function resolveBrowserTarget(
 
   const loopbackPort = loopbackPreviewPort(trimmed)
 
-  if (loopbackPort !== null && hasText(folderId)) {
-    return previewUrl(loopbackPort, folderId, previewHost, backend)
+  // A port belongs to the sandbox, so it has no address until the sandbox's preview key is known.
+  // Read as an address it would be `http://3000` (the IP 0.0.11.184) or the viewer's own machine.
+  if (loopbackPort !== null) {
+    return hasText(folderId) ? previewUrl(loopbackPort, folderId, previewHost, backend) : ''
   }
 
   if (/^https?:\/\//i.test(trimmed)) {
