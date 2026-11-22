@@ -22,3 +22,9 @@ apps/worker/.prod.vars.json
 apps/desktop/release
 apps/desktop/build
 out
+
+# Claude Code, per machine and per session. Shared settings, commands and skills in .claude/
+# may still be committed.
+.claude/worktrees
+.claude/launch.json
+.claude/settings.local.json

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 import tailwindcss from '@tailwindcss/vite'
@@ -10,6 +11,28 @@ const root = fileURLToPath(new URL('.', import.meta.url))
 // Override both to run a second copy beside the default one, e.g. against another worker.
 const workerTarget = process.env.SHUTTLE_WORKER_URL ?? 'http://127.0.0.1:8790'
 const webPort = Number(process.env.SHUTTLE_WEB_PORT ?? 5180)
+
+/** The commit this build is made from, when it is made in a git checkout. */
+function gitCommit(): string {
+  try {
+    return execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { encoding: 'utf8' }).trim()
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * What this build calls itself. The deploy workflow sets `SHUTTLE_VERSION` to the release's
+ * number, the same one the desktop app it builds carries. Any other build has none, and is known
+ * by its commit.
+ */
+const version = given(process.env.SHUTTLE_VERSION) ?? ''
+const commit = (given(process.env.SHUTTLE_COMMIT) ?? gitCommit()).slice(0, 7)
+
+function given(value: string | undefined): string | undefined {
+  const trimmed = value?.trim()
+  return trimmed === undefined || trimmed === '' ? undefined : trimmed
+}
 
 /** `/sessions/:id` and `/playbook` are app routes too; page loads stay with the SPA. */
 const api: ProxyOptions = {
@@ -28,6 +51,10 @@ export default defineConfig({
   define: {
     // The embedded browser loads sandbox previews straight from the worker, so it needs its port.
     'import.meta.env.VITE_SHUTTLE_WORKER_PORT': JSON.stringify(new URL(workerTarget).port || '80'),
+    // Shown at the foot of the sidebar and copied into bug reports (`src/lib/version.ts`).
+    'import.meta.env.VITE_SHUTTLE_VERSION': JSON.stringify(version),
+    'import.meta.env.VITE_SHUTTLE_COMMIT': JSON.stringify(commit),
+    'import.meta.env.VITE_SHUTTLE_BUILT_AT': JSON.stringify(new Date().toISOString()),
   },
   resolve: {
     alias: {

@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# One release number for everything this run ships: the hosted web app shows it, and the desktop
+# app is built as it. A rerun keeps its run number, so it rebuilds the same release.
+env:
+  SHUTTLE_VERSION: 0.1.${{ github.run_number }}
+
 # Keep deployment and publication in order. Never interrupt an upload halfway through.
 concurrency:
   group: shuttle-production
@@ -36,6 +41,8 @@ jobs:
       SHUTTLE_WEB_URL: ${{ vars.SHUTTLE_WEB_URL }}
       SHUTTLE_DEPLOY_VARS: ${{ secrets.SHUTTLE_DEPLOY_VARS }}
       SHUTTLE_DEPLOY_ROUTES: ${{ vars.SHUTTLE_DEPLOY_ROUTES }}
+      # Stamped into the hosted web app beside SHUTTLE_VERSION (apps/web/vite.config.ts).
+      SHUTTLE_COMMIT: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -109,7 +116,7 @@ jobs:
           bun -e '
             const path = "apps/desktop/package.json";
             const pkg = await Bun.file(path).json();
-            pkg.version = `0.1.${process.env.GITHUB_RUN_NUMBER}`;
+            pkg.version = process.env.SHUTTLE_VERSION;
             await Bun.write(path, JSON.stringify(pkg, null, 2) + "\n");
           '
       - name: Build desktop (sign and notarize when enabled)

@@ -14,6 +14,8 @@ export interface PackagedConfig {
   readonly autoUpdate?: boolean
   readonly url?: string
   readonly image?: string
+  /** The commit the app was built from, seven characters. Shown in About Shuttle. */
+  readonly commit?: string
 }
 
 export const PACKAGED_CONFIG_FILE = 'desktop.config.json'
@@ -25,16 +27,22 @@ const packagedConfigSchema = z.object({
   autoUpdate: z.boolean().catch(false),
   url: textSchema,
   image: textSchema,
+  commit: textSchema,
 })
 
 /** Empty when the app is run from the repository, where no such file exists. */
 export function readPackagedConfig(resourcesPath: string): PackagedConfig {
   try {
-    const { autoUpdate, url, image } = packagedConfigSchema.parse(
+    const { autoUpdate, url, image, commit } = packagedConfigSchema.parse(
       JSON.parse(readFileSync(join(resourcesPath, PACKAGED_CONFIG_FILE), 'utf8')),
     )
 
-    return { autoUpdate, url: nonEmpty(url), image: nonEmpty(image) }
+    return {
+      autoUpdate,
+      url: nonEmpty(url),
+      image: nonEmpty(image),
+      commit: nonEmpty(commit.slice(0, 7)),
+    }
   } catch {
     return {}
   }

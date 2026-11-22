@@ -1,0 +1,9 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "env": ["SHUTTLE_VERSION", "SHUTTLE_COMMIT"]
+    }
+  }
+}
