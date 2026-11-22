@@ -53,12 +53,15 @@ export interface DesktopInfo {
   readonly deviceId: string
   readonly deviceName: string
   readonly platform: string
+  /** The app's own release, `app.getVersion()`. */
+  readonly version: string
 }
 
 export const desktopInfoSchema: z.ZodType<DesktopInfo> = z.object({
   deviceId: z.string(),
   deviceName: z.string(),
   platform: z.string(),
+  version: z.string(),
 })
 
 /** What the page sends with `notify`. A `path` that is not a string is dropped, not refused. */

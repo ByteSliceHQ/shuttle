@@ -3,7 +3,17 @@ import { existsSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, session, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  Notification,
+  session,
+  shell,
+  type AboutPanelOptionsOptions,
+} from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { z } from 'zod'
 
@@ -185,7 +195,20 @@ if (!app.requestSingleInstanceLock()) {
       deviceId: store.get('deviceId') ?? '',
       deviceName: hostname().replace(/\.local$/, ''),
       platform: process.platform,
+      version: app.getVersion(),
     }
+
+    // Shuttle > About Shuttle: "Version 0.1.142 (e4cb471)", the commit in place of a build number.
+    const about: AboutPanelOptionsOptions = {
+      applicationName: 'Shuttle',
+      applicationVersion: app.getVersion(),
+    }
+
+    if (PACKAGED.commit !== undefined) {
+      about.version = PACKAGED.commit
+    }
+
+    app.setAboutPanelOptions(about)
 
     const sandboxContext = REPO_ROOT === null ? null : join(REPO_ROOT, 'packages/sandbox')
 

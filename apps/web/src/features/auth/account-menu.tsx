@@ -1,6 +1,7 @@
 import { Check, ChevronsUpDown, Copy, LogOut, Plus, UserPlus } from 'lucide-react'
 import { useState, type SubmitEvent } from 'react'
 
+import { shuttleVersion, versionReport, webVersion, type ShuttleVersion } from '@/lib/version'
 import { forgetEventCache, useTenant } from '@shuttle/react'
 import {
   Button,
@@ -38,6 +39,7 @@ export function AccountMenu() {
   const current = organizations.data?.find((organization) => organization.id === tenant.org.id)
   const canInvite = tenant.org.role !== 'member'
   const accountName = tenant.user.name !== '' ? tenant.user.name : tenant.user.email
+  const version = shuttleVersion()
 
   async function switchTo(organizationId: string) {
     if (organizationId === tenant.org.id) {
@@ -109,6 +111,8 @@ export function AccountMenu() {
             <LogOut />
             Sign out
           </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <VersionDetails version={version} />
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -119,6 +123,50 @@ export function AccountMenu() {
         onClose={() => setDialog(null)}
       />
     </div>
+  )
+}
+
+/** The foot of the account menu: which Shuttle this is. A click copies it for a bug report. */
+function VersionDetails({ version }: { version: ShuttleVersion }) {
+  const [copied, setCopied] = useState<'copied' | 'failed' | null>(null)
+
+  function copy(event: Event) {
+    // Stay open, so the item can say whether it worked.
+    event.preventDefault()
+
+    void navigator.clipboard.writeText(versionReport(version, navigator.userAgent)).then(
+      () => setCopied('copied'),
+      () => setCopied('failed'),
+    )
+  }
+
+  return (
+    <DropdownMenuItem
+      onSelect={copy}
+      title="Copy version info"
+      aria-label={`Shuttle ${webVersion(version)}. Copy version info`}
+      className="group text-muted-foreground items-start text-[11px] leading-snug tabular-nums"
+    >
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">Shuttle {webVersion(version)}</span>
+        {version.desktop !== null ? (
+          <span className="truncate">Desktop app {version.desktop}</span>
+        ) : null}
+      </span>
+      <span role="status" aria-live="polite" className="shrink-0">
+        {copied === 'copied' ? (
+          <span className="flex items-center gap-1">
+            <Check />
+            Copied
+          </span>
+        ) : copied === 'failed' ? (
+          'Could not copy'
+        ) : (
+          // Shown on hover and focus, so the line reads as a version until it is pointed at.
+          <Copy className="opacity-0 transition-opacity group-focus:opacity-100" />
+        )}
+      </span>
+    </DropdownMenuItem>
   )
 }
 

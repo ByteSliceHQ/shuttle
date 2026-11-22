@@ -54,6 +54,20 @@ async function run(
   }
 }
 
+/** The commit being packaged, for About Shuttle. Actions names it; a checkout can say. */
+function commit(): string | undefined {
+  const fromCi = process.env.GITHUB_SHA?.trim()
+
+  if (fromCi !== undefined && fromCi !== '') {
+    return fromCi.slice(0, 7)
+  }
+
+  const git = Bun.spawnSync(['git', 'rev-parse', '--short=7', 'HEAD'], { cwd: root })
+  const head = git.stdout.toString().trim()
+
+  return git.exitCode === 0 && head !== '' ? head : undefined
+}
+
 /** Updates are only offered by a build that was signed with a real identity. */
 const hasIdentity = identity !== undefined && identity !== ''
 const signed = hasIdentity && identity !== '-'
@@ -62,7 +76,11 @@ mkdirSync(staging, { recursive: true })
 
 writeFileSync(
   join(staging, 'desktop.config.json'),
-  `${JSON.stringify({ url, autoUpdate: signed, image: image === '' ? undefined : image }, null, 2)}\n`,
+  `${JSON.stringify(
+    { url, autoUpdate: signed, image: image === '' ? undefined : image, commit: commit() },
+    null,
+    2,
+  )}\n`,
 )
 
 // The agent bridge, which the built-in sandbox copies into itself. Tests stay behind.

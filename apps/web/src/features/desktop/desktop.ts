@@ -36,7 +36,12 @@ export interface DesktopUpdater {
   onUpdateStatus?(listener: (status: DesktopUpdateStatus) => void): () => void
 }
 
-export type ShuttleDesktop = ShuttleDevice & DesktopUpdater
+/** The app's own release, such as `0.1.142`. An app older than this field does not say. */
+export interface DesktopVersion {
+  readonly version?: string
+}
+
+export type ShuttleDesktop = ShuttleDevice & DesktopUpdater & DesktopVersion
 
 declare global {
   interface Window {
