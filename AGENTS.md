@@ -1,19 +1,26 @@
 # Agent instructions
 
-## Commits
+## Commits and pull request titles
 
-Every commit must follow the [Conventional Commits](https://www.conventionalcommits.org/)
-specification:
+Pull requests are squash-merged, so a pull request's title becomes its commit on `main`
+(GitHub adds the PR number and drops the body). Commit messages and pull request titles follow
+[Conventional Commits](https://www.conventionalcommits.org/), checked in CI by commitlint
+(`commitlint.config.js`):
 
 ```text
-<type>(optional-scope): <imperative summary>
+<type>(optional-scope)!: <summary>
 ```
 
-Use one of these types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`,
-`refactor`, `revert`, `style`, or `test`.
-
-- Keep the summary concise, lowercase, and free of a trailing period.
+- Use one of these types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`,
+  `revert`, `style`, or `test`.
+- Start the summary with a lowercase word, ideally an imperative verb. Names, acronyms and code
+  identifiers keep their own case after that (`HTTP`, `API`, `GitHub`, `basePath`), and a
+  camelCase identifier may come first. No trailing period.
+- Mark a breaking change with `!` (`feat(engine)!: …`).
+- Keep the summary concise. No length is enforced.
 - Use `feat` for new user-facing behavior and `fix` for user-facing bug fixes.
+- Check a pull request title before opening the PR, and again after renaming it, since CI does
+  not re-run on an edit: `printf '%s\n' "<title>" | bun x commitlint`.
 - Run `bun run verify` before committing.
 
 ## Architecture
