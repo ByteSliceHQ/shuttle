@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
+import { typeIds } from '@swirls/looms/core'
+
 import { DEFAULT_TEAM } from '../team'
 import { fakeEnv } from '../testing/fake-env'
 import { createConductorAgent, delegateTools } from './conductor'
@@ -8,7 +10,9 @@ import { createWorkerAgent } from './worker'
 const conductor = createConductorAgent(fakeEnv(), 'run_1')
 
 async function toolNames(input: { text: string; repos?: string[] }): Promise<string[]> {
-  const resolved = (await conductor.resolveTools?.({ threadId: 'thr_c', turn: 1, input })) ?? []
+  const resolved =
+    (await conductor.resolveTools?.({ threadId: 'thr_c', turn: 1, input, ids: typeIds })) ?? []
+
   return [...(conductor.tools ?? []), ...resolved].map((tool) => tool.name)
 }
 

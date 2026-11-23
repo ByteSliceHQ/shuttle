@@ -1,4 +1,4 @@
-import { cancel, deterministicThreadId, emit, spawn, type RuntimeEffect } from '@swirls/looms/core'
+import { cancel, emit, spawn, type LoomsIds, type RuntimeEffect } from '@swirls/looms/core'
 
 import { attributedWithFiles } from './attribution'
 import { liveConductorThreadId } from './conductor'
@@ -67,6 +67,7 @@ export function routeForEffects(
   state: SessionState,
   route: PendingRoute,
   effects: RuntimeEffect[],
+  ids: LoomsIds,
   sessionThreadId: string,
   runId: string,
 ): RouteResult {
@@ -82,7 +83,7 @@ export function routeForEffects(
 
   switch (route.kind) {
     case 'question': {
-      const childThreadId = deterministicThreadId(sessionThreadId, 'narrator', route.messageId)
+      const childThreadId = ids.derive('thread', [sessionThreadId, 'narrator', route.messageId])
 
       const narratorInput: JsonObjectBuilder = {
         text,

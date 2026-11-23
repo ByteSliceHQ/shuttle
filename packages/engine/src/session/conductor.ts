@@ -1,5 +1,5 @@
 import { worktreeRepoPath } from '@shuttle/sandbox/workspace'
-import { deterministicThreadId } from '@swirls/looms/core'
+import type { LoomsIds } from '@swirls/looms/core'
 
 import { attributedWithFiles } from './attribution'
 import type { AttachmentRef } from './scope'
@@ -50,10 +50,14 @@ export function shouldSpawnConductor(conductor: ConductorState): boolean {
   }
 }
 
-export function conductorChildThreadId(sessionThreadId: string, generation: number): string {
+export function conductorChildThreadId(
+  ids: LoomsIds,
+  sessionThreadId: string,
+  generation: number,
+): string {
   return generation === 0
-    ? deterministicThreadId(sessionThreadId, 'conductor')
-    : deterministicThreadId(sessionThreadId, 'conductor', String(generation))
+    ? ids.derive('thread', [sessionThreadId, 'conductor'])
+    : ids.derive('thread', [sessionThreadId, 'conductor', String(generation)])
 }
 
 export function markConductorLive(conductor: ConductorState, threadId: string): ConductorState {
