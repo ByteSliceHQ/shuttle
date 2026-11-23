@@ -3,7 +3,6 @@ import { Predicate } from 'effect'
 import { reflectionRunId } from '@shuttle/api'
 import {
   createWaitId,
-  deterministicThreadId,
   emit,
   invoke,
   launch,
@@ -935,7 +934,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             'shuttle.submitReview',
             {
               approvalId: pending.approvalId,
-              threadId: deterministicThreadId(ctx.threadId, 'reviewer', 'main'),
+              threadId: ctx.ids.derive('thread', [ctx.threadId, 'reviewer', 'main']),
               fullName: pending.fullName,
               number: pending.number,
               commitId: pending.commitId,
@@ -949,7 +948,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
       }
 
       if (state.pull !== null && state.sandboxBound && !state.reviewerSpawned) {
-        const childThreadId = deterministicThreadId(ctx.threadId, 'reviewer', 'main')
+        const childThreadId = ctx.ids.derive('thread', [ctx.threadId, 'reviewer', 'main'])
 
         effects.push(
           spawn({
@@ -980,7 +979,15 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
       // wake includes those messages in the conductor's spawn input.
       if (state.pendingRoute !== null) {
         const route = state.pendingRoute
-        const { summary, queued } = routeForEffects(state, route, effects, ctx.threadId, ctx.runId)
+
+        const { summary, queued } = routeForEffects(
+          state,
+          route,
+          effects,
+          ctx.ids,
+          ctx.threadId,
+          ctx.runId,
+        )
 
         effects.push(
           emit(
@@ -1001,7 +1008,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
 
       if (!state.pull && shouldSpawnConductor(state.conductor)) {
         const { generation } = state.conductor
-        const childThreadId = conductorChildThreadId(ctx.threadId, generation)
+        const childThreadId = conductorChildThreadId(ctx.ids, ctx.threadId, generation)
 
         const startingFiles = [
           ...(state.initialAttachments ?? []),
@@ -1111,7 +1118,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
           return effects
         }
 
-        const childThreadId = deterministicThreadId(ctx.threadId, 'intake', next.messageId)
+        const childThreadId = ctx.ids.derive('thread', [ctx.threadId, 'intake', next.messageId])
 
         effects.push(
           emit(
