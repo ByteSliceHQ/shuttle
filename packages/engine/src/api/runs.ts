@@ -27,6 +27,7 @@ export const runsApi: ApiModule = {
     return routeToDurableObject(env.LOOMS_RUN, request, {
       // Listing definitions does not need a session's own sandbox.
       modules: () => shuttleModules(host, 'definitions'),
+      ids: host.ids,
       authorize: (_request, route) => authorizeLoomsRoute(env, actor, route),
     })
   },
@@ -35,6 +36,7 @@ export const runsApi: ApiModule = {
   handleGranted: async (request, host, secret) =>
     routeToDurableObject(host.env.LOOMS_RUN, request, {
       modules: () => shuttleModules(host, 'definitions'),
+      ids: host.ids,
       authorize: (granted, route) =>
         Effect.runPromise(
           verifyRunGrant(secret, runGrantToken(granted) ?? '', Date.now()).pipe(

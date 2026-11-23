@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { fixedGitAccess } from '@shuttle/git/access'
+import type { LoomsIds } from '@swirls/looms/core'
 import type { Projector } from '@swirls/looms/projectors'
 
 import { fakeEnv } from '../testing/fake-env'
@@ -10,6 +11,18 @@ import { projectorsFor, resolveHost } from './host'
 import { noIdentity } from './identity'
 import { noPeople } from './people'
 import { openSessionStart } from './session-start'
+
+describe('a host with its own id format', () => {
+  test('keeps it, and a host with none has none', () => {
+    const ids: LoomsIds = {
+      create: (kind) => `mine_${kind}_${crypto.randomUUID()}`,
+      derive: (kind, parts) => `mine_${kind}_${parts.join('_')}`,
+    }
+
+    expect(resolveHost({ env: fakeEnv(), ids }).ids).toBe(ids)
+    expect(resolveHost({ env: fakeEnv() }).ids).toBeUndefined()
+  })
+})
 
 describe('a host that replaces nothing', () => {
   test('gets what a standalone Shuttle does for every port', async () => {

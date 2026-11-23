@@ -104,6 +104,7 @@ export abstract class ShuttleRun<Env extends EngineEnv = EngineEnv>
       modules: shuttleModules(host, runId, { storage: this.ctx.storage }),
       launcher: durableObjectLauncher(env.LOOMS_RUN),
       attributes: shuttleAttributes,
+      ids: host.ids,
       projectors: projectorsFor(
         host,
         runId,

@@ -74,6 +74,25 @@ Looms ships. A run's attributes are Shuttle's (`sessionId`, `folderId`, `repo`, 
 projector that files events by organization reads it from the run's id (`orgOfRun` in
 `@swirls/shuttle/api`).
 
+### Writing a run's ids your own way
+
+Looms draws an id for each thread, event and wait in a run, and a session derives one for each
+child thread it starts, so a replay names the same child. By default they are Looms's TypeIDs
+(`thr_`, `evt_`, `wait_` and 26 characters). A host that keeps run data in tables of its own, and
+wants the ids to match them, returns a format from `host`:
+
+```ts
+protected override host(env: HostEnv): ShuttleHost {
+  return { env, ports: {}, ids: myIds }
+}
+```
+
+`ids` is Looms's `LoomsIds` (`@swirls/looms/core`): `create(kind)` draws an id and
+`derive(kind, parts)` names a child, and must give the same id for the same parts. An id is a
+non-empty string with no `:`. Give the same format wherever the host is built, so the routes that
+reach a run use it too, and in a browser pass it through `runStore` on the React host. Changing
+the format renames every derived child, so a session in flight across the change will not replay.
+
 ## From npm
 
 A host outside this repository installs `@swirls/shuttle`, which carries the same packages built to

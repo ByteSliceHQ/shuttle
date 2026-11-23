@@ -1,4 +1,5 @@
 import type { GitAccess } from '@shuttle/git/access'
+import type { LoomsIds } from '@swirls/looms/core'
 import type { Projector } from '@swirls/looms/projectors'
 
 import type { EngineEnv } from '../env'
@@ -46,6 +47,13 @@ export interface ShuttleHost {
    * with the run's id. Standalone: nothing more.
    */
   readonly projectors?: (run: { readonly runId: string }) => readonly Projector[]
+  /**
+   * How a run's ids are written: its threads, events and waits, and the child threads a session
+   * names. Looms's interface, given to every run's object and to the routes that reach one, so a
+   * host that keeps run data in its own tables gets ids in its own format. Standalone: Looms's
+   * TypeIDs. In a browser, pass the same format through `runStore` on the React host.
+   */
+  readonly ids?: LoomsIds
 }
 
 /** The projectors a run gets: Shuttle's own first, then the host's, in the order it gave them. */
@@ -61,6 +69,8 @@ export interface ResolvedHost {
   /** `host.env`, with the host's Git access in place when it supplied one. */
   readonly env: EngineEnv
   readonly ports: HostPorts
+  /** The host's id format, when it gave one. */
+  readonly ids?: LoomsIds
 }
 
 /** Fills in Shuttle's own behaviour for every port the host left out. */
@@ -79,5 +89,6 @@ export function resolveHost(host: ShuttleHost): ResolvedHost {
       people: supplied.people ?? noPeople,
       previews: supplied.previews ?? null,
     },
+    ids: host.ids,
   }
 }
