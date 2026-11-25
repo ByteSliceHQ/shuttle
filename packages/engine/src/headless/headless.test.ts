@@ -5,13 +5,14 @@ import { z } from 'zod'
 
 import { agent, asEffectsTool, defineAgent, type AgentDefinition } from '@swirls/looms/agent'
 import { approval, gate } from '@swirls/looms/approval'
-import type { EventInput, JsonValue } from '@swirls/looms/core'
+import { invoke, type EventInput, type JsonValue } from '@swirls/looms/core'
 import { evaluator } from '@swirls/looms/evaluator'
 import { createLooms, type Looms } from '@swirls/looms/runtime'
 
 import { intake } from '../agents/intake'
+import { createProposePullRequestTool } from '../agents/tools/pulls'
 import type { EngineEnv } from '../env'
-import type { ApprovalPolicy } from '../ports/approvals'
+import type { ApprovalDecisionRequest, ApprovalPolicy, ApprovalVerdict } from '../ports/approvals'
 import type { ShuttleHost } from '../ports/host'
 import type { ActingFor } from '../ports/identity'
 import { codingSession, shuttleSession } from '../session/module'
@@ -20,7 +21,14 @@ import type { SessionAccess } from '../tenancy/access'
 import { fakeEnv } from '../testing/fake-env'
 import { workspace } from '../workspace/module'
 import type { SessionOutcome } from './outcome'
-import { answerHeadlessQuestion, headlessOutcome, startHeadlessSession } from './start'
+import {
+  answerHeadlessQuestion,
+  headlessOutcome,
+  headlessSessions,
+  sendHeadlessMessage,
+  startHeadlessSession,
+  stopHeadlessSession,
+} from './start'
 
 const TextInput = z.object({ text: z.string().optional() })
 const Discarded = z.object({ approvalId: z.string(), message: z.string() })
@@ -85,6 +93,66 @@ function askingConductor(): AgentDefinition {
     },
   })
 }
+
+/** A conductor that calls `tool` once, and is done when the call settles. */
+function callingConductor(
+  tool: ReturnType<typeof asEffectsTool>,
+  name: string,
+  args: { readonly [key: string]: JsonValue } = {},
+): AgentDefinition {
+  let turns = 0
+  const call = { id: 'tc_1', name, arguments: args }
+
+  return defineAgent({
+    name: 'conductor',
+    input: TextInput,
+    instructions: 'Conduct.',
+    conversational: true,
+    tools: [tool],
+    runTurn: () => {
+      turns += 1
+
+      return turns === 1
+        ? { message: { role: 'assistant', content: '', toolCalls: [call] }, toolCalls: [call] }
+        : { message: { role: 'assistant', content: 'Done' }, done: true }
+    },
+  })
+}
+
+const REVIEW = {
+  approvalId: 'pr_review_1',
+  // Not a repository of the session, so an approved review stops before it reaches GitHub.
+  fullName: 'acme/elsewhere',
+  number: 7,
+  commitId: 'abc123',
+  summary: 'Two small things',
+  verdict: 'comment',
+  comments: [{ path: 'a.ts', line: 3, side: 'RIGHT', body: 'Rename this' }],
+} as const
+
+/** A tool that asks to submit a review the way the reviewer's `submit_review` does. */
+const submitReview = asEffectsTool({
+  name: 'submit_review',
+  description: 'Propose submitting the drafted review',
+  input: z.object({}),
+  effects: () => [
+    ...gate({
+      approvalId: REVIEW.approvalId,
+      title: 'Submit pull request review?',
+      description: REVIEW.summary,
+      actions: [
+        { id: 'submit', label: 'Submit review', outcome: 'approve' },
+        { id: 'discard', label: 'Discard', outcome: 'reject' },
+      ],
+    }),
+    invoke(
+      'shuttle.decideReviewGate',
+      { ...REVIEW, comments: REVIEW.comments.map((comment) => ({ ...comment })) },
+      'decide_review_1',
+    ),
+  ],
+  waitOn: { type: 'approval.decided' },
+})
 
 interface MemoryHostOptions {
   readonly approvals?: ApprovalPolicy
@@ -177,6 +245,48 @@ async function outcomeWhen(
 
   throw new Error(`the session never reached ${state}; last seen ${JSON.stringify(last)}`)
 }
+
+/** The run's events, once one of `type` is among them. */
+async function eventsWhen(looms: Looms, runId: string, type: string) {
+  const deadline = Date.now() + 5_000
+
+  while (Date.now() < deadline) {
+    const events = await looms.getEvents(runId)
+
+    if (events.some((event) => event.type === type)) {
+      return events
+    }
+
+    await sleep(20)
+  }
+
+  throw new Error(`the session never recorded ${type}`)
+}
+
+/** An approvals port that answers every gate with `verdict`, and keeps what it was asked. */
+function decidingPolicy(verdict: () => ApprovalVerdict) {
+  const asked: ApprovalDecisionRequest[] = []
+
+  const approvals: ApprovalPolicy = {
+    expiresAfterMs: () => null,
+    decide: async (opened) => {
+      asked.push(opened)
+
+      return verdict()
+    },
+  }
+
+  return { approvals, asked }
+}
+
+const proposePullRequest = requestPullRequest({
+  requestId: 'r1',
+  title: 'Fix the test',
+  body: '',
+  draft: true,
+})
+
+const otherOrganization: ActingFor = { kind: 'organization', orgId: 'org2', service: 'build-host' }
 
 const organization: ActingFor = { kind: 'organization', orgId: 'org1', service: 'build-host' }
 
@@ -481,6 +591,489 @@ describe('a headless session, from start to finished', () => {
           service: 'build-host',
         }),
       ).rejects.toThrow('another organization')
+    } finally {
+      await looms.stop()
+    }
+  })
+})
+
+describe("a gate the host's approvals port decides", () => {
+  test('an approved proposal goes on to publish with no answer from the host', async () => {
+    const { approvals, asked } = decidingPolicy(() => 'approve')
+    const { host, looms } = memoryHost({ approvals })
+
+    try {
+      const { runId } = await startHeadlessSession(host, request)
+
+      await outcomeWhen(host, runId, 'completed')
+      await looms.signal(runId, [proposePullRequest])
+
+      // The sandbox here has no commits and no GitHub behind it, so the publish that the approval
+      // starts ends in `publish_failed`. That it ran at all is what the approval decides.
+      const events = await eventsWhen(looms, runId, 'shuttle.pr.publish_failed')
+
+      expect(asked).toHaveLength(1)
+
+      expect(asked[0]).toMatchObject({
+        kind: 'publish-pull-request',
+        approvalId: 'pr_publish_r1',
+        orgId: 'org1',
+        ownerId: null,
+        hostMetadata: { threadId: 'thr_1', workItemId: 'WI-7' },
+        proposal: {
+          title: 'Fix the test',
+          draft: true,
+          repositories: ['acme/shop'],
+          baseBranch: 'main',
+          stack: { id: 1, layer: 1, parentPullRequest: null, restacks: [] },
+          existingPullRequest: null,
+        },
+      })
+
+      const decisions = events.filter((event) => event.type === 'approval.decided')
+
+      expect(decisions).toHaveLength(1)
+
+      expect(decisions[0]).toMatchObject({
+        origin: { type: 'external', actorId: 'host-policy' },
+        payload: { approvalId: 'pr_publish_r1', actionId: 'approve', outcome: 'approve' },
+      })
+
+      expect(events.some((event) => event.type === 'approval.requested')).toBe(true)
+      expect(events.some((event) => event.type === 'shuttle.pr.discarded')).toBe(false)
+      expect((await headlessOutcome(host, runId)).state).not.toBe('blocked')
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('a rejected proposal publishes nothing, and the session says so', async () => {
+    const { approvals } = decidingPolicy(() => 'reject')
+    const { host, looms } = memoryHost({ approvals })
+
+    try {
+      const { runId } = await startHeadlessSession(host, request)
+
+      await outcomeWhen(host, runId, 'completed')
+      await looms.signal(runId, [proposePullRequest])
+
+      const events = await eventsWhen(looms, runId, 'shuttle.pr.discarded')
+
+      expect(events.find((event) => event.type === 'approval.decided')).toMatchObject({
+        origin: { type: 'external', actorId: 'host-policy' },
+        payload: { approvalId: 'pr_publish_r1', actionId: 'discard', outcome: 'reject' },
+      })
+
+      const discarded = Discarded.parse(
+        events.find((event) => event.type === 'shuttle.pr.discarded')?.payload,
+      )
+
+      expect(discarded.approvalId).toBe('pr_publish_r1')
+      expect(discarded.message).toContain("host's approval policy rejected")
+
+      expect(events.some((event) => event.type.startsWith('shuttle.pr.publish'))).toBe(false)
+
+      expect(await outcomeWhen(host, runId, 'completed')).toEqual({
+        state: 'completed',
+        pullRequests: [],
+      })
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('an undecided proposal waits for the host, as one with no policy does', async () => {
+    const { approvals, asked } = decidingPolicy(() => 'undecided')
+    const { host, looms } = memoryHost({ approvals })
+
+    try {
+      const { runId } = await startHeadlessSession(host, request)
+
+      await outcomeWhen(host, runId, 'completed')
+      await looms.signal(runId, [proposePullRequest])
+
+      expect(await outcomeWhen(host, runId, 'blocked')).toMatchObject({
+        state: 'blocked',
+        question: { approvalId: 'pr_publish_r1', kind: 'publish-pull-request', expiresAt: null },
+      })
+
+      expect(asked).toHaveLength(1)
+
+      const events = await looms.getEvents(runId)
+
+      expect(events.some((event) => event.type === 'approval.decided')).toBe(false)
+
+      await answerHeadlessQuestion(
+        host,
+        runId,
+        'pr_publish_r1',
+        { decision: 'reject' },
+        organization,
+      )
+
+      expect((await outcomeWhen(host, runId, 'completed')).state).toBe('completed')
+      // Asked when the gate opened, and not again when someone answered it.
+      expect(asked).toHaveLength(1)
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('a policy that throws leaves the proposal waiting, with its expiry', async () => {
+    const { host, looms } = memoryHost({
+      approvals: {
+        expiresAfterMs: () => 60_000,
+        decide: async () => {
+          throw new Error('the policy service is down')
+        },
+      },
+    })
+
+    try {
+      const { runId } = await startHeadlessSession(host, request)
+
+      await outcomeWhen(host, runId, 'completed')
+      await looms.signal(runId, [proposePullRequest])
+
+      const blocked = await outcomeWhen(host, runId, 'blocked')
+
+      expect(blocked).toMatchObject({
+        state: 'blocked',
+        question: { approvalId: 'pr_publish_r1', kind: 'publish-pull-request' },
+      })
+
+      expect(blocked.state === 'blocked' && blocked.question.expiresAt).toBeNumber()
+
+      const events = await looms.getEvents(runId)
+
+      expect(events.some((event) => event.type === 'approval.decided')).toBe(false)
+    } finally {
+      await looms.stop()
+    }
+  })
+})
+
+describe("a gate an agent opens, decided by the host's approvals port", () => {
+  test("an agent's rejected proposal is discarded, and the agent goes on", async () => {
+    const { approvals, asked } = decidingPolicy(() => 'reject')
+
+    const { host, looms } = memoryHost({
+      approvals,
+      conductor: callingConductor(createProposePullRequestTool(), 'propose_pull_request', {
+        title: 'Fix the test',
+        body: '',
+      }),
+    })
+
+    try {
+      const { runId } = await startHeadlessSession(host, request)
+      const events = await eventsWhen(looms, runId, 'shuttle.pr.discarded')
+
+      expect(asked).toHaveLength(1)
+      expect(asked[0]).toMatchObject({ kind: 'publish-pull-request', orgId: 'org1' })
+
+      expect(events.find((event) => event.type === 'approval.decided')).toMatchObject({
+        origin: { type: 'external', actorId: 'host-policy' },
+        payload: { outcome: 'reject' },
+      })
+
+      // The proposal comes round again in the session's mailbox after it was decided, and is not
+      // taken for a new one: the session ends up with nothing open.
+      expect(await outcomeWhen(host, runId, 'completed')).toEqual({
+        state: 'completed',
+        pullRequests: [],
+      })
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test("an agent's approved proposal goes on to publish", async () => {
+    const { approvals } = decidingPolicy(() => 'approve')
+
+    const { host, looms } = memoryHost({
+      approvals,
+      conductor: callingConductor(createProposePullRequestTool(), 'propose_pull_request', {
+        title: 'Fix the test',
+        body: '',
+      }),
+    })
+
+    try {
+      const { runId } = await startHeadlessSession(host, request)
+      const events = await eventsWhen(looms, runId, 'shuttle.pr.publish_failed')
+
+      expect(events.some((event) => event.type === 'shuttle.pr.discarded')).toBe(false)
+      expect((await outcomeWhen(host, runId, 'completed')).state).toBe('completed')
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('an approved review is submitted as the agent drafted it', async () => {
+    const { approvals, asked } = decidingPolicy(() => 'approve')
+
+    const { host, looms } = memoryHost({
+      approvals,
+      conductor: callingConductor(submitReview, 'submit_review'),
+    })
+
+    try {
+      const { runId } = await startHeadlessSession(host, request)
+
+      // The session takes the approval as the go-ahead and tries to send the review, which stops
+      // at a repository this session does not have.
+      const events = await eventsWhen(looms, runId, 'shuttle.review.submit_failed')
+
+      expect(asked).toEqual([
+        {
+          kind: 'submit-review',
+          approvalId: 'pr_review_1',
+          orgId: 'org1',
+          ownerId: null,
+          hostMetadata: { threadId: 'thr_1', workItemId: 'WI-7' },
+          proposal: {
+            repository: 'acme/elsewhere',
+            number: 7,
+            verdict: 'comment',
+            summary: 'Two small things',
+            commentCount: 1,
+          },
+        },
+      ])
+
+      expect(events.find((event) => event.type === 'approval.decided')).toMatchObject({
+        origin: { type: 'external', actorId: 'host-policy' },
+        payload: {
+          approvalId: 'pr_review_1',
+          actionId: 'submit',
+          outcome: 'approve',
+          payload: { summary: 'Two small things', verdict: 'comment', number: 7 },
+        },
+      })
+
+      expect((await outcomeWhen(host, runId, 'completed')).state).toBe('completed')
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('a rejected review is not submitted', async () => {
+    const { approvals } = decidingPolicy(() => 'reject')
+
+    const { host, looms } = memoryHost({
+      approvals,
+      conductor: callingConductor(submitReview, 'submit_review'),
+    })
+
+    try {
+      const { runId } = await startHeadlessSession(host, request)
+      const events = await eventsWhen(looms, runId, 'approval.decided')
+
+      expect(events.find((event) => event.type === 'approval.decided')).toMatchObject({
+        origin: { type: 'external', actorId: 'host-policy' },
+        payload: { approvalId: 'pr_review_1', actionId: 'discard', outcome: 'reject' },
+      })
+
+      expect((await outcomeWhen(host, runId, 'completed')).state).toBe('completed')
+
+      const after = await looms.getEvents(runId)
+
+      expect(after.some((event) => event.type.startsWith('shuttle.review.'))).toBe(false)
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('an undecided review waits for the host', async () => {
+    const { approvals } = decidingPolicy(() => 'undecided')
+
+    const { host, looms } = memoryHost({
+      approvals,
+      conductor: callingConductor(submitReview, 'submit_review'),
+    })
+
+    try {
+      const { runId } = await startHeadlessSession(host, request)
+
+      expect(await outcomeWhen(host, runId, 'blocked')).toMatchObject({
+        state: 'blocked',
+        question: { approvalId: 'pr_review_1', kind: 'submit-review' },
+      })
+    } finally {
+      await looms.stop()
+    }
+  })
+})
+
+describe('a message to a headless session', () => {
+  test('is recorded as from whoever the host acts for, and the session takes it up', async () => {
+    const { host, looms } = memoryHost()
+
+    try {
+      const { runId } = await startHeadlessSession(host, request)
+
+      await outcomeWhen(host, runId, 'completed')
+
+      const sent = await headlessSessions(host).message(
+        runId,
+        { text: 'Also fix the cart test', messageId: 'm1', kind: 'task' },
+        organization,
+      )
+
+      expect(sent).toEqual({ messageId: 'm1' })
+
+      const events = await eventsWhen(looms, runId, 'shuttle.routed')
+
+      expect(events.find((event) => event.type === 'shuttle.user.said')).toMatchObject({
+        origin: { type: 'external', actorId: 'service_build-host' },
+        payload: {
+          messageId: 'm1',
+          text: 'Also fix the cart test',
+          forceKind: 'task',
+          author: { id: 'service_build-host', name: 'build-host' },
+        },
+      })
+
+      // The same message again adds nothing.
+      await sendHeadlessMessage(
+        host,
+        runId,
+        { text: 'Also fix the cart test', messageId: 'm1' },
+        organization,
+      )
+
+      const said = (await looms.getEvents(runId)).filter(
+        (event) => event.type === 'shuttle.user.said',
+      )
+
+      expect(said).toHaveLength(1)
+      expect((await outcomeWhen(host, runId, 'completed')).state).toBe('completed')
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('is given a message id when the host names none', async () => {
+    const { host, looms } = memoryHost()
+
+    try {
+      const { runId } = await startHeadlessSession(host, request)
+
+      await outcomeWhen(host, runId, 'completed')
+
+      const { messageId } = await sendHeadlessMessage(host, runId, { text: 'Thanks' }, organization)
+
+      expect(messageId).not.toBe('')
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('is refused with no text, from another organization, or for a session not shared', async () => {
+    const { host, looms } = memoryHost()
+
+    const actor = { orgId: 'org1', role: 'member', email: '' } as const
+    const ada: ActingFor = { kind: 'person', actor: { ...actor, userId: 'u1', name: 'Ada' } }
+
+    try {
+      const { runId } = await startHeadlessSession(host, { ...request, acting: ada })
+
+      await outcomeWhen(host, runId, 'completed')
+
+      const send = async (text: string, acting: ActingFor) => {
+        await sendHeadlessMessage(host, runId, { text }, acting)
+      }
+
+      expect(await refusal(send('  ', ada))).toContain('needs text')
+      expect(await refusal(send('Hello', otherOrganization))).toContain('another organization')
+      expect(await refusal(send('Hello', organization))).toContain('private to someone else')
+
+      const events = await looms.getEvents(runId)
+
+      expect(events.some((event) => event.type === 'shuttle.user.said')).toBe(false)
+    } finally {
+      await looms.stop()
+    }
+  })
+})
+
+describe('stopping a headless session', () => {
+  test("stops the turn its agent is in, recorded as the host's doing", async () => {
+    const { host, looms } = memoryHost({ conductor: askingConductor() })
+
+    try {
+      const { runId } = await startHeadlessSession(host, request)
+
+      await outcomeWhen(host, runId, 'blocked')
+
+      const { stopped } = await headlessSessions(host).stop(runId, organization)
+
+      expect(stopped).toHaveLength(1)
+
+      const stops = (await looms.getEvents(runId)).filter(
+        (event) => event.type === 'agent.turn.stopped',
+      )
+
+      expect(stops).toHaveLength(1)
+
+      expect(stops[0]).toMatchObject({
+        threadId: stopped[0],
+        origin: { type: 'external', actorId: 'service_build-host' },
+      })
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('stops nothing in a session whose agents have finished', async () => {
+    const { host, looms } = memoryHost()
+
+    try {
+      const { runId } = await startHeadlessSession(host, request)
+
+      await outcomeWhen(host, runId, 'completed')
+
+      const run = await looms.getRun(runId)
+
+      const working = Object.values(run.threads).filter(
+        (thread) => thread.kind === 'agent' && thread.status !== 'completed',
+      )
+
+      const { stopped } = await stopHeadlessSession(host, runId, organization)
+
+      expect(stopped).toEqual(working.map((thread) => thread.threadId))
+
+      expect(
+        await refusal(stopHeadlessSession(host, runId, organization, 'thr_missing').then(() => {})),
+      ).toContain('no agent at work')
+    } finally {
+      await looms.stop()
+    }
+  })
+
+  test('is refused from another organization, or for a session not shared', async () => {
+    const { host, looms } = memoryHost({ conductor: askingConductor() })
+
+    const actor = { orgId: 'org1', role: 'member', email: '' } as const
+    const ada: ActingFor = { kind: 'person', actor: { ...actor, userId: 'u1', name: 'Ada' } }
+
+    try {
+      const { runId } = await startHeadlessSession(host, { ...request, acting: ada })
+
+      await outcomeWhen(host, runId, 'blocked')
+
+      const stop = async (acting: ActingFor) => {
+        await stopHeadlessSession(host, runId, acting)
+      }
+
+      expect(await refusal(stop(otherOrganization))).toContain('another organization')
+      expect(await refusal(stop(organization))).toContain('private to someone else')
+
+      const events = await looms.getEvents(runId)
+
+      expect(events.some((event) => event.type === 'agent.turn.stopped')).toBe(false)
+      expect((await headlessOutcome(host, runId)).state).toBe('blocked')
     } finally {
       await looms.stop()
     }

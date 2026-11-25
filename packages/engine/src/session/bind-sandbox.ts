@@ -45,6 +45,15 @@ export interface SandboxBinding {
     readonly headSha: string
     readonly baseSha: string
   }
+  /**
+   * What an effect needs of the session itself and cannot read from its thread: the thread's id,
+   * to send it an event, and what the host attached to the session. Absent in a binding made
+   * before this was recorded.
+   */
+  readonly session?: {
+    readonly threadId: string
+    readonly hostMetadata: Readonly<Record<string, string>>
+  }
 }
 
 const memoryBindings = new Map<string, SandboxBinding>()
@@ -57,12 +66,18 @@ export function createBindSandboxEffect(storage?: DurableObjectStorage) {
       sandboxName: Schema.String,
       repos: Schema.Array(LinkedRepoSchema),
       pull: Schema.optional(PullRefSchema),
+      hostMetadata: Schema.optional(Schema.Record(Schema.String, Schema.String)),
     }),
     execute: async (input, ctx) => {
+      const bound = {
+        sandboxName: input.sandboxName,
+        repos: input.repos,
+        // The session's own thread binds its sandbox, so this effect's thread is the session's.
+        session: { threadId: ctx.threadId, hostMetadata: input.hostMetadata ?? {} },
+      }
+
       const binding: SandboxBinding =
-        input.pull === undefined
-          ? { sandboxName: input.sandboxName, repos: input.repos }
-          : { sandboxName: input.sandboxName, repos: input.repos, pull: input.pull }
+        input.pull === undefined ? bound : { ...bound, pull: input.pull }
 
       if (storage) {
         await storage.put(SANDBOX_BINDING_KEY, binding)

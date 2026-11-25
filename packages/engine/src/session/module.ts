@@ -3,6 +3,7 @@ import { defineModule, type DefinitionRef } from '@swirls/looms/core'
 import type { EngineEnv } from '../env'
 import { neverExpire, type ApprovalPolicy } from '../ports/approvals'
 import { createBindSandboxEffect } from './bind-sandbox'
+import { createDecideReviewGateEffect } from './decide-review-gate'
 import { codingSession, reviewSession } from './definitions'
 import { createPreparePrPublishGateEffect } from './prepare-pr-publish-gate'
 import { brief, routing, transcript, work } from './projections'
@@ -17,7 +18,7 @@ export interface ShuttleSessionOptions {
   readonly definitions?: readonly DefinitionRef[]
   readonly storage?: DurableObjectStorage
   readonly env: EngineEnv
-  /** How long a publish approval waits. Defaults to forever. */
+  /** How long an approval waits, and whether the host decides it. Defaults to a person, forever. */
   readonly approvals?: ApprovalPolicy
 }
 
@@ -43,6 +44,7 @@ export function shuttleSession(options: ShuttleSessionOptions) {
     },
     effects: {
       bindSandbox: createBindSandboxEffect(storage),
+      decideReviewGate: createDecideReviewGateEffect(storage, approvals),
       preparePrPublishGate: createPreparePrPublishGateEffect(env, storage, approvals),
       publishPullRequest: createPublishPullRequestEffect(env, storage),
       submitReview: createSubmitReviewEffect(env, storage),

@@ -52,9 +52,14 @@ export {
   expiryOf,
   hasExpired,
   neverExpire,
+  POLICY_DECIDER,
+  type ApprovalDecisionRequest,
   type ApprovalKind,
   type ApprovalPolicy,
   type ApprovalRequestInfo,
+  type ApprovalVerdict,
+  type PullRequestProposal,
+  type ReviewProposal,
 } from './ports/approvals'
 
 export {
@@ -62,8 +67,11 @@ export {
   headlessOutcome,
   HeadlessRequestError,
   headlessSessions,
+  sendHeadlessMessage,
   startHeadlessSession,
+  stopHeadlessSession,
   type HeadlessAnswer,
+  type HeadlessMessage,
   type HeadlessRepository,
   type HeadlessSession,
   type HeadlessSessionRequest,

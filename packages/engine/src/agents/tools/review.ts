@@ -3,7 +3,14 @@ import { z } from 'zod'
 import { getPullRequest, listPullFiles, listReviewThreads } from '@shuttle/git/github/pulls'
 import { asEffectsTool, defineTool } from '@swirls/looms/agent'
 import { gate } from '@swirls/looms/approval'
-import { emit, isJsonNumber, isJsonObject, isJsonString, type JsonValue } from '@swirls/looms/core'
+import {
+  emit,
+  invoke,
+  isJsonNumber,
+  isJsonObject,
+  isJsonString,
+  type JsonValue,
+} from '@swirls/looms/core'
 
 import type { EngineEnv } from '../../env'
 import { readSandboxBinding } from '../../session/bind-sandbox'
@@ -309,7 +316,10 @@ export function createReviewTools(env: EngineEnv, runId: string, storage?: Durab
     effects: (input) => {
       const obj = isJsonObject(input) ? input : {}
       const summary = isJsonString(obj.summary) ? obj.summary : 'Shuttle review'
-      const verdict = isJsonString(obj.verdict) ? obj.verdict : 'comment'
+
+      const verdict =
+        obj.verdict === 'approve' || obj.verdict === 'request_changes' ? obj.verdict : 'comment'
+
       const approvalId = `pr_review_${crypto.randomUUID()}`
 
       const comments =
@@ -326,7 +336,7 @@ export function createReviewTools(env: EngineEnv, runId: string, storage?: Durab
       const number = activePull?.number ?? 0
       const commitId = activePull?.headSha ?? ''
 
-      return gate({
+      const opened = gate({
         approvalId,
         title: 'Submit pull request review?',
         description: summary,
@@ -350,6 +360,16 @@ export function createReviewTools(env: EngineEnv, runId: string, storage?: Durab
           { id: 'discard', label: 'Discard', outcome: 'reject' },
         ],
       })
+
+      // After the gate, so the host's policy decides one that is already open.
+      return [
+        ...opened,
+        invoke(
+          'shuttle.decideReviewGate',
+          { approvalId, fullName, number, commitId, summary, verdict, comments },
+          `decide_review_${approvalId}`,
+        ),
+      ]
     },
     waitOn: { type: 'approval.decided' },
   })

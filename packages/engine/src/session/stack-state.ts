@@ -60,6 +60,12 @@ export interface StackSessionSlice {
   readonly pendingPrPublish: PendingPrPublish | null
   readonly stacks: SessionStacks
   readonly discardedPrApprovalId: string | null
+  /**
+   * The latest proposal taken up. A proposal reaches the session twice, as its own event and
+   * again in its mailbox wake, and the second may come after the first was decided: it is the
+   * same proposal, not a new one. Absent in sessions from before this was kept.
+   */
+  readonly proposedPrApprovalId?: string | null
 }
 
 /** Stack 1 keeps the bare repo name so sessions from before multi-stack still resolve. */
@@ -120,7 +126,11 @@ export function withPrProposal<S extends StackSessionSlice>(
 ): S {
   const approvalId = Predicate.isString(proposal.approvalId) ? proposal.approvalId : null
 
-  if (!isPresent(approvalId) || state.pendingPrPublish?.approvalId === approvalId) {
+  if (
+    !isPresent(approvalId) ||
+    state.pendingPrPublish?.approvalId === approvalId ||
+    state.proposedPrApprovalId === approvalId
+  ) {
     return state
   }
 
@@ -156,6 +166,7 @@ export function withPrProposal<S extends StackSessionSlice>(
 
   return {
     ...state,
+    proposedPrApprovalId: approvalId,
     pendingPrPublish: {
       approvalId,
       threadId,

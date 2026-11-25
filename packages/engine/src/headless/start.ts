@@ -4,12 +4,14 @@ import type { RunState } from '@swirls/looms/core'
 import { ensureNamedWorkspace, ensureWorkspaceQuietly } from '../bootstrap'
 import { personalWorkspaceRunId, workspaceRunId } from '../config'
 import { parseHarness, type HarnessId } from '../harness'
-import { loomsStub } from '../looms-stub'
+import { loomsStub, type LoomsRunStub } from '../looms-stub'
 import { resolveHost, type ShuttleHost } from '../ports/host'
 import { actorOfActing, orgOfActing, ownerOfActing, type ActingFor } from '../ports/identity'
 import { admitSessionStart } from '../ports/session-start'
 import type { JsonObjectBuilder } from '../session/json-object'
-import { canOpenSession, type SessionAccess } from '../tenancy/access'
+import { say } from '../session/signals'
+import type { InterjectionKind } from '../session/thread'
+import { canOpenSession, type Actor, type SessionAccess } from '../tenancy/access'
 import { NO_FOLDER } from '../workspace/scope'
 import { requestSession } from '../workspace/signals'
 import {
@@ -237,7 +239,7 @@ export async function headlessOutcome(host: ShuttleHost, runId: string): Promise
 
 /**
  * An answer to a blocked session's question: words for a `question`, a decision for a
- * `publish-pull-request`, or null to leave it to the agent's judgment.
+ * `publish-pull-request` or a `submit-review`, or null to leave it to the agent's judgment.
  */
 export type HeadlessAnswer =
   | { readonly text: string }
@@ -305,18 +307,7 @@ export async function answerHeadlessQuestion(
   answer: HeadlessAnswer,
   acting: ActingFor,
 ): Promise<void> {
-  const { env } = resolveHost(host)
-
-  if (orgOfActing(acting) !== orgOfRun(runId)) {
-    throw new HeadlessRequestError('that session belongs to another organization')
-  }
-
-  const actor = actorOfActing(acting)
-  const session = loomsStub(env.LOOMS_RUN, runId)
-
-  if (!canOpenSession(await session.getAccess(), actor)) {
-    throw new HeadlessRequestError('that session is private to someone else')
-  }
+  const { session, actor } = await openSession(host, runId, acting)
 
   const decided: JsonObjectBuilder = {
     approvalId,
@@ -333,6 +324,126 @@ export async function answerHeadlessQuestion(
   ])
 }
 
+/**
+ * The session `runId` names, for `acting` to act on. Refused with `HeadlessRequestError` when it
+ * is another organization's, or a person's that `acting` cannot open.
+ */
+async function openSession(
+  host: ShuttleHost,
+  runId: string,
+  acting: ActingFor,
+): Promise<{ readonly session: LoomsRunStub; readonly actor: Actor }> {
+  const { env } = resolveHost(host)
+
+  if (orgOfActing(acting) !== orgOfRun(runId)) {
+    throw new HeadlessRequestError('that session belongs to another organization')
+  }
+
+  const actor = actorOfActing(acting)
+  const session = loomsStub(env.LOOMS_RUN, runId)
+
+  if (!canOpenSession(await session.getAccess(), actor)) {
+    throw new HeadlessRequestError('that session is private to someone else')
+  }
+
+  return { session, actor }
+}
+
+/** A message to a session, as a person types one into it. */
+export interface HeadlessMessage {
+  readonly text: string
+  /** Names the message, so sending it again with the same id adds nothing. Left out, one is made. */
+  readonly messageId?: string
+  /**
+   * What the message is, when the host already knows: a `task` is more work, a `correction`
+   * redirects what is under way, a `stop` ends it. Left out, the session works it out.
+   */
+  readonly kind?: InterjectionKind
+}
+
+/**
+ * Sends a session a message, as a person typing into it does: more work for a completed session,
+ * or a correction to one that is working. It answers once the message is recorded, not when the
+ * session has acted on it; read where it stands with {@link headlessOutcome}. A question the
+ * session is blocked on is answered with {@link answerHeadlessQuestion}, not with a message.
+ *
+ * The message is recorded as from whoever the host acts for, and `acting` has to be able to open
+ * the session, as for an answer.
+ */
+export async function sendHeadlessMessage(
+  host: ShuttleHost,
+  runId: string,
+  message: HeadlessMessage,
+  acting: ActingFor,
+): Promise<{ readonly messageId: string }> {
+  const { session, actor } = await openSession(host, runId, acting)
+
+  if (message.text.trim() === '') {
+    throw new HeadlessRequestError('a message needs text')
+  }
+
+  const messageId = message.messageId ?? crypto.randomUUID()
+
+  const said = say({
+    messageId,
+    text: message.text,
+    forceKind: message.kind,
+    author: { id: actor.userId, name: actor.name === '' ? actor.email : actor.name },
+  })
+
+  await session.signal([{ ...said, origin: { type: 'external', actorId: actor.userId } }], {
+    wake: 'schedule',
+  })
+
+  return { messageId }
+}
+
+const ENDED = new Set(['completed', 'failed', 'cancelled'])
+
+/**
+ * Stops the turn each of a session's agents is in, as the stop button does: what they were doing
+ * is abandoned, and the session stays open for the next message. With `threadId`, only that
+ * agent's turn is stopped. It answers with the agent threads it stopped, which is none for a
+ * session whose agents had all finished.
+ *
+ * `acting` has to be able to open the session, as for an answer.
+ */
+export async function stopHeadlessSession(
+  host: ShuttleHost,
+  runId: string,
+  acting: ActingFor,
+  threadId?: string,
+): Promise<{ readonly stopped: readonly string[] }> {
+  const { session, actor } = await openSession(host, runId, acting)
+  const run = await session.getRun()
+
+  const agents = Object.values(run.threads)
+    .filter((thread) => thread.kind === 'agent' && !ENDED.has(thread.status))
+    .map((thread) => thread.threadId)
+
+  if (threadId !== undefined && !agents.includes(threadId)) {
+    throw new HeadlessRequestError('that session has no agent at work with that thread id')
+  }
+
+  const stopped = threadId === undefined ? agents : [threadId]
+
+  if (stopped.length > 0) {
+    const at = Date.now()
+
+    await session.signal(
+      stopped.map((id) => ({
+        type: 'agent.turn.stopped',
+        threadId: id,
+        payload: {},
+        idempotencyKey: `headless-stop:${id}:${at}`,
+        origin: { type: 'external' as const, actorId: actor.userId },
+      })),
+    )
+  }
+
+  return { stopped }
+}
+
 /** The headless API of one host, for whatever launches its sessions. */
 export interface HeadlessSessions {
   start(request: HeadlessSessionRequest): Promise<HeadlessSession>
@@ -343,6 +454,16 @@ export interface HeadlessSessions {
     answer: HeadlessAnswer,
     acting: ActingFor,
   ): Promise<void>
+  message(
+    runId: string,
+    message: HeadlessMessage,
+    acting: ActingFor,
+  ): Promise<{ readonly messageId: string }>
+  stop(
+    runId: string,
+    acting: ActingFor,
+    threadId?: string,
+  ): Promise<{ readonly stopped: readonly string[] }>
 }
 
 export function headlessSessions(host: ShuttleHost): HeadlessSessions {
@@ -351,5 +472,7 @@ export function headlessSessions(host: ShuttleHost): HeadlessSessions {
     outcome: (runId) => headlessOutcome(host, runId),
     answer: (runId, approvalId, answer, acting) =>
       answerHeadlessQuestion(host, runId, approvalId, answer, acting),
+    message: (runId, message, acting) => sendHeadlessMessage(host, runId, message, acting),
+    stop: (runId, acting, threadId) => stopHeadlessSession(host, runId, acting, threadId),
   }
 }

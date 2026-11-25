@@ -2,7 +2,7 @@ import { Predicate } from 'effect'
 
 import { emit, invoke, isJsonObject, type JsonValue, type RuntimeEffect } from '@swirls/looms/core'
 
-import { hasExpired } from '../ports/approvals'
+import { hasExpired, POLICY_DECIDER } from '../ports/approvals'
 import { shuttleModule } from './scope'
 import { stacksAsJson, type PendingPrPublish } from './stack-state'
 
@@ -23,22 +23,46 @@ export interface EventOriginLike {
   readonly origin?: { readonly type: string; readonly actorId?: string | undefined } | undefined
 }
 
+/** Whether an event is a decision the host's approval policy made, not a person. */
+export function decidedByPolicy(event: EventOriginLike): boolean {
+  return event.origin?.type === 'external' && event.origin.actorId === POLICY_DECIDER
+}
+
 /** The Shuttle user an event was sent by, or null when it did not come from a person. */
 export function actorOfEvent(event: EventOriginLike): string | null {
   const origin = event.origin
 
-  if (origin?.type !== 'external' || origin.actorId === undefined || origin.actorId === '') {
+  if (
+    origin?.type !== 'external' ||
+    origin.actorId === undefined ||
+    origin.actorId === '' ||
+    origin.actorId === POLICY_DECIDER
+  ) {
     return null
   }
 
   return origin.actorId
 }
 
+/**
+ * The `approval.decided` event for a gate the host's approval policy settled, as an effect
+ * returns it: addressed to the session's own thread, where a person's decision arrives, and
+ * recorded as decided by the policy.
+ */
+export function policyDecided(sessionThreadId: string, decision: ApprovalDecision) {
+  return {
+    type: 'approval.decided' as const,
+    payload: decision,
+    threadId: sessionThreadId,
+    origin: { type: 'external' as const, actorId: POLICY_DECIDER },
+  }
+}
+
 export interface PublishSessionSlice {
   readonly pendingPrPublish: PendingPrPublish | null
   readonly discardedPrApprovalId: string | null
   /** Why the gate was closed without publishing, for the message the agent is told. */
-  readonly discardedPrReason?: 'rejected' | 'expired' | null
+  readonly discardedPrReason?: 'rejected' | 'policy' | 'expired' | null
   readonly stacks: Parameters<typeof stacksAsJson>[0]
 }
 
@@ -46,6 +70,8 @@ export interface PublishSessionSlice {
 export interface ApprovalContext {
   readonly at?: number
   readonly approvedBy?: string | null
+  /** True when the host's approval policy made the decision, so a rejection is said to be its. */
+  readonly byPolicy?: boolean
 }
 
 /** Apply an approval decision to a pending PR publish, or return null if unrelated. */
@@ -56,7 +82,7 @@ export function withPrApprovalDecision<S extends PublishSessionSlice>(
    * When the decision was recorded, to hold it against the approval's expiry, and the Shuttle user
    * who made it, whose GitHub account then authors the commits.
    */
-  { at = Date.now(), approvedBy = null }: ApprovalContext = {},
+  { at = Date.now(), approvedBy = null, byPolicy = false }: ApprovalContext = {},
 ): S | null {
   const approvalId = payload.approvalId
   const pending = state.pendingPrPublish
@@ -79,7 +105,7 @@ export function withPrApprovalDecision<S extends PublishSessionSlice>(
       ...state,
       pendingPrPublish: null,
       discardedPrApprovalId: approvalId,
-      discardedPrReason: 'rejected',
+      discardedPrReason: byPolicy ? 'policy' : 'rejected',
     }
   }
 
@@ -120,6 +146,15 @@ export function withPrApprovalDecision<S extends PublishSessionSlice>(
   }
 }
 
+/** What the proposing agent is told when its proposal is closed without publishing. */
+const DISCARD_MESSAGES = {
+  rejected: 'The user discarded this pull request proposal; nothing was published.',
+  policy:
+    "The host's approval policy rejected this pull request proposal; nothing was published. Do not propose it again unless something has changed.",
+  expired:
+    'This pull request proposal was not approved in time and has expired; nothing was published.',
+} as const
+
 export function appendPrPublishEffects(state: PublishSessionSlice, effects: RuntimeEffect[]): void {
   if (state.pendingPrPublish?.status === 'publishing') {
     const pending = state.pendingPrPublish
@@ -150,10 +185,7 @@ export function appendPrPublishEffects(state: PublishSessionSlice, effects: Runt
       emit(
         shuttleModule.input('pr.discarded', {
           approvalId: state.discardedPrApprovalId,
-          message:
-            state.discardedPrReason === 'expired'
-              ? 'This pull request proposal was not approved in time and has expired; nothing was published.'
-              : 'The user discarded this pull request proposal; nothing was published.',
+          message: DISCARD_MESSAGES[state.discardedPrReason ?? 'rejected'],
         }),
         `pr_discarded_${state.discardedPrApprovalId}`,
       ),

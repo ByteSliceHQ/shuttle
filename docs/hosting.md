@@ -235,13 +235,13 @@ const host = createShuttleHost({
 
 A port is a small interface. Leave it out and Shuttle does what it does standalone.
 
-| Port           | Decides                                                                              | Standalone                                     |
-| -------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------- |
-| `identity`     | Who a request acts for: a named person, or an organization acting through a service. | The signed-in person.                          |
-| `sessionStart` | Whether a session may start, for a person's start, an automatic review, or a host's. | Every start is allowed.                        |
-| `credentials`  | Whose credential a vendor agent turn runs on, and the API keys the host holds.       | The person it works for, on their own sign-in. |
-| `approvals`    | How long an approval waits before a decision is refused.                             | Forever.                                       |
-| `git`          | Installation tokens and the user token for GitHub.                                   | Shuttle's own GitHub App, from `env`.          |
+| Port           | Decides                                                                                   | Standalone                                     |
+| -------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `identity`     | Who a request acts for: a named person, or an organization acting through a service.      | The signed-in person.                          |
+| `sessionStart` | Whether a session may start, for a person's start, an automatic review, or a host's.      | Every start is allowed.                        |
+| `credentials`  | Whose credential a vendor agent turn runs on, and the API keys the host holds.            | The person it works for, on their own sign-in. |
+| `approvals`    | How long an approval waits before a decision is refused, and whether the host decides it. | A person decides, whenever they do.            |
+| `git`          | Installation tokens and the user token for GitHub.                                        | Shuttle's own GitHub App, from `env`.          |
 
 `serviceIdentity({ token, service })` is a ready identity for a host calling over HTTP: it presents
 a shared secret and names who it acts for in `x-shuttle-org` (and `x-shuttle-user` for a person).
@@ -262,13 +262,57 @@ use, so the organization it works for pays; without one the run uses the deploym
 
 Approval expiry covers the pull request publish gate. A decision after the expiry is refused and the
 agent is told the proposal expired. Nothing wakes the session when the time passes; the gate is
-settled by the late decision, or by the session moving on. A host that wants a decision made by a
-rule reads the question from `headlessOutcome` and answers it with `answerHeadlessQuestion`.
+settled by the late decision, or by the session moving on.
+
+A host that decides by rule gives the port a `decide`. It is asked once when a gate opens: a pull
+request proposal (`publish-pull-request`) or a review an agent asks to submit (`submit-review`).
+
+```ts
+const approvals: ApprovalPolicy = {
+  expiresAfterMs: () => 60 * 60 * 1000,
+  decide: async (gate) => {
+    // gate.orgId, gate.ownerId, gate.hostMetadata, gate.approvalId
+    if (gate.kind !== 'publish-pull-request') {
+      return 'undecided'
+    }
+
+    // gate.proposal: title, body, draft, repositories, branch, baseBranch, stack, existingPullRequest
+    return gate.hostMetadata.autonomy === 'full' ? 'approve' : 'undecided'
+  },
+}
+```
+
+`approve` and `reject` settle the gate at once, as a person's answer would: an approved proposal is
+published as it was proposed and an approved review is submitted as it was drafted, and the agent
+behind a rejected one is told the host's policy rejected it. The session is never `blocked` on a
+gate decided this way. The run records the decision as an `approval.decided` event from
+`{ type: 'external', actorId: 'host-policy' }` (`POLICY_DECIDER`), which no person has, and a pull
+request published on it is authored by the GitHub App, not by a person. `undecided`, a port with no
+`decide`, or a `decide` that throws leaves the gate open, with its expiry: the session is `blocked`
+until `answerHeadlessQuestion` or a person in the app decides it.
+
+`gate.ownerId` is the person the session belongs to, or null for an organization's.
+`gate.hostMetadata` is the `metadata` given to `startHeadlessSession`, and empty for a session the
+host did not start. For a proposal, `repositories` is every repository publishing would push to;
+`branch`, `baseBranch` and `stack` say which layer of the session's stack it is, and
+`existingPullRequest` is set when publishing would update a pull request instead of opening one.
+For a review, the proposal has the pull request's `repository` and `number`, the `verdict`, the
+`summary` and the `commentCount`.
+
+`decide` runs inside the effect that opens the gate, and its answer is recorded with the gate, so a
+replayed run does not ask again. It is asked only in a session whose sandbox was bound by a version
+that has this port; a gate in an older session waits for a person, as before.
 
 ## Headless sessions
 
 ```ts
-import { answerHeadlessQuestion, headlessOutcome, startHeadlessSession } from '@shuttle/engine'
+import {
+  answerHeadlessQuestion,
+  headlessOutcome,
+  sendHeadlessMessage,
+  startHeadlessSession,
+  stopHeadlessSession,
+} from '@shuttle/engine'
 
 const { runId } = await startHeadlessSession(host, {
   acting: { kind: 'organization', orgId, service: 'build-host' },
@@ -291,6 +335,12 @@ await answerHeadlessQuestion(
   { text: 'Use Postgres' },
   acting,
 )
+
+await sendHeadlessMessage(host, runId, { text: 'Also fix the cart test' }, acting)
+// { messageId }
+
+await stopHeadlessSession(host, runId, acting)
+// { stopped: ['thr_…'] }
 ```
 
 A headless session has no folder (`NO_FOLDER`) and a sandbox of its own, `session:<runId>`.
@@ -309,13 +359,26 @@ for one the session does not have open, is refused with `HeadlessRequestError` a
 The decision is recorded as made by whoever `acting` is. `question.approvalId` is null in the rare
 case that the run is waiting on a person and does not say for which approval.
 
-`answerHeadlessQuestion` refuses an `acting` that could not open the session: another
-organization, or anyone but the owner and the people it is shared with for a person's private
-session. `headlessOutcome` takes no `acting` and answers for any run id, so a host that serves it
+`sendHeadlessMessage` sends a session a message, as a person typing into it does: more work for a
+`completed` session, or a correction to one that is working. It is recorded as from whoever `acting`
+is and answers once it is recorded, not when the session has acted on it. `messageId` names the
+message, so sending it again adds nothing; left out, one is made and returned. `kind` says what the
+message is when the host already knows (`task`, `correction`, `stop`, …); left out, the session
+works it out. A question the session is blocked on is answered with `answerHeadlessQuestion`, not
+with a message.
+
+`stopHeadlessSession` stops the turn each of the session's agents is in, as the stop button does:
+what they were doing is abandoned and the session stays open for the next message. It answers with
+the agent threads it stopped, which is none when they had all finished. A fourth argument names one
+agent thread to stop only that one.
+
+`answerHeadlessQuestion`, `sendHeadlessMessage` and `stopHeadlessSession` refuse an `acting` that
+could not open the session: another organization, or anyone but the owner and the people it is
+shared with for a person's private session. `headlessOutcome` takes no `acting` and answers for any run id, so a host that serves it
 to callers checks first that the session is the caller's to read.
 
-`headlessSessions(host)` gives the same three calls bound to a host (`start`, `outcome`, `answer`),
-for whatever launches its sessions.
+`headlessSessions(host)` gives the same calls bound to a host (`start`, `outcome`, `answer`,
+`message`, `stop`), for whatever launches its sessions.
 
 The headless API calls `env.LOOMS_RUN`, so it runs in the host's Worker or anywhere that holds that
 binding. `serviceIdentity` is there for a host that puts these calls behind HTTP for a caller
