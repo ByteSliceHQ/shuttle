@@ -157,6 +157,11 @@ export const shuttleCatalog = defineEventCatalog('shuttle', {
     restacks: Schema.optional(Schema.Array(Schema.Finite)),
     /** When the host's approval policy stops accepting a decision. Absent or null: never. */
     expiresAt: Schema.optional(Schema.NullOr(Schema.Finite)),
+    /**
+     * The thread that proposed it, on a proposal addressed to the session's own thread. Absent on
+     * one that reaches the session from the proposing thread, which is then the event's thread.
+     */
+    proposedBy: Schema.optional(Schema.String),
   }),
   'pr.published': Schema.Struct({
     approvalId: Schema.String,

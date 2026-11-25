@@ -5,6 +5,8 @@ import type { RuntimeEffect } from '@swirls/looms/core'
 import {
   actorOfEvent,
   appendPrPublishEffects,
+  decidedByPolicy,
+  policyDecided,
   withPrApprovalDecision,
   type PublishSessionSlice,
 } from './publish-effects'
@@ -64,6 +66,22 @@ describe('withPrApprovalDecision', () => {
     expect(next?.discardedPrReason).toBe('rejected')
   })
 
+  test("a rejection by the host's policy is told to the agent as the policy's", () => {
+    const next = withPrApprovalDecision(
+      awaiting(),
+      { ...approve, actionId: 'discard', outcome: 'reject' },
+      { at: 5, byPolicy: true },
+    )
+
+    const effects: RuntimeEffect[] = []
+
+    expect(next?.discardedPrReason).toBe('policy')
+
+    appendPrPublishEffects(next ?? awaiting(), effects)
+
+    expect(JSON.stringify(effects)).toContain("host's approval policy rejected")
+  })
+
   test('a decision for another approval is not its business', () => {
     expect(
       withPrApprovalDecision(awaiting(), { ...approve, approvalId: 'other' }, { at: 5 }),
@@ -80,6 +98,26 @@ describe('actorOfEvent', () => {
     expect(actorOfEvent({ origin: { type: 'system' } })).toBeNull()
     expect(actorOfEvent({ origin: { type: 'external' } })).toBeNull()
     expect(actorOfEvent({})).toBeNull()
+  })
+})
+
+describe("a decision by the host's approval policy", () => {
+  const decided = policyDecided('thr_session', approve)
+
+  test('is addressed to the session and recorded as the policy', () => {
+    expect(decided).toEqual({
+      type: 'approval.decided',
+      payload: approve,
+      threadId: 'thr_session',
+      origin: { type: 'external', actorId: 'host-policy' },
+    })
+
+    expect(decidedByPolicy(decided)).toBe(true)
+    expect(decidedByPolicy({ origin: { type: 'external', actorId: 'user_1' } })).toBe(false)
+  })
+
+  test('has no person behind it to author the commits', () => {
+    expect(actorOfEvent(decided)).toBeNull()
   })
 })
 

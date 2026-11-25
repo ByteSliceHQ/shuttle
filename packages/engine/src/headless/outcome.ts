@@ -14,7 +14,7 @@ export interface SessionPullRequest {
   readonly draft: boolean
 }
 
-export type QuestionKind = 'question' | 'submit-review' | ApprovalKind
+export type QuestionKind = 'question' | ApprovalKind
 
 /** The prefix of the approval id an agent gives a review it asks to submit. */
 const REVIEW_APPROVAL = 'pr_review_'

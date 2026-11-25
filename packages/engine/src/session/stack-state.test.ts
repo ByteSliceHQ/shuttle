@@ -58,6 +58,28 @@ describe('withPrProposal', () => {
     expect(next.pendingPrPublish?.restacks).toEqual([11])
   })
 
+  test('a proposal that comes round again after it was decided is not a new one', () => {
+    const proposal = {
+      approvalId: 'pr_publish_1',
+      title: 'Fix layer 1',
+      body: 'body',
+      draft: true,
+      repos: ['glue'],
+      repo: 'glue',
+      layer: 1,
+    }
+
+    const proposed = withPrProposal(baseState, proposal, 'thr_conductor')
+    const decided: typeof proposed = { ...proposed, pendingPrPublish: null }
+
+    expect(withPrProposal(decided, proposal, 'thr_conductor')).toBe(decided)
+
+    expect(
+      withPrProposal(decided, { ...proposal, approvalId: 'pr_publish_2' }, 'thr_conductor')
+        .pendingPrPublish?.approvalId,
+    ).toBe('pr_publish_2')
+  })
+
   test('does not guess layer from stack length when layer is missing', () => {
     const next = withPrProposal(
       baseState,

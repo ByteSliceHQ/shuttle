@@ -6,9 +6,11 @@ import { worktreeRepoPath } from '@shuttle/sandbox/workspace'
 
 import type { EngineEnv } from '../env'
 import { sandboxStub } from '../env'
-import { expiryOf, neverExpire, type ApprovalPolicy } from '../ports/approvals'
+import { expiryOf, neverExpire, policyDecision, type ApprovalPolicy } from '../ports/approvals'
+import { readSessionAccess } from '../tenancy/access'
 import { readSandboxBinding, sandboxNameForSession } from './bind-sandbox'
 import { prepareSessionSandbox } from './handoff'
+import { policyDecided } from './publish-effects'
 import { shuttleModule } from './scope'
 import { readSessionStacks } from './session-stacks'
 import { stackContextForLayer, stackKey } from './stack-state'
@@ -83,6 +85,8 @@ export function createPreparePrPublishGateEffect(
 
       let stackId: number | null = null
       let layer: number | null = null
+      let branch: string | null = null
+      let baseBranch: string | null = null
       let title = input.title.trim()
       let body = input.body
 
@@ -106,10 +110,16 @@ export function createPreparePrPublishGateEffect(
         layer = status.currentLayer
         repoName = linked.name
 
+        const current = status.layers.find((entry) => entry.layer === status.currentLayer)
+
+        branch = current?.branch ?? null
+
+        // Layer 1 is opened against the default branch; a higher one against the layer below.
+        baseBranch =
+          status.currentLayer === 1 ? linked.defaultBranch : (current?.parentBranch ?? null)
+
         // Asked for from the PR button, with nothing written: the layer's commits say it best.
         if (title === '') {
-          const current = status.layers.find((entry) => entry.layer === status.currentLayer)
-
           // Layer 1 sits on the commit the session started from; a higher one on the layer below.
           const base =
             status.currentLayer === 1
@@ -160,26 +170,86 @@ export function createPreparePrPublishGateEffect(
 
       const shownTitle = title === '' ? 'Shuttle changes' : title
 
-      const expiresAt = expiryOf(
-        approvals,
-        { kind: 'publish-pull-request', approvalId: input.approvalId, orgId: orgOfRun(ctx.runId) },
-        Date.now(),
-      )
+      const request = {
+        kind: 'publish-pull-request' as const,
+        approvalId: input.approvalId,
+        orgId: orgOfRun(ctx.runId),
+      }
+
+      const expiresAt = expiryOf(approvals, request, Date.now())
+
+      // The host's policy is asked here, in the effect that opens the gate, so its answer is
+      // recorded with the gate and never asked for again. A decision goes to the session's own
+      // thread, which a binding from before that thread was recorded cannot name: such a gate
+      // waits for a person, as it always has.
+      const session = binding?.session
+
+      const decision =
+        session === undefined
+          ? null
+          : await policyDecision(approvals, {
+              ...request,
+              ownerId: storage ? ((await readSessionAccess(storage))?.ownerId ?? null) : null,
+              hostMetadata: session.hostMetadata,
+              proposal: {
+                title: shownTitle,
+                body,
+                draft: input.draft,
+                repositories: publishedRepositories(binding?.repos ?? [], repoName, input.repos),
+                branch,
+                baseBranch,
+                stack:
+                  stackId === null || layer === null
+                    ? null
+                    : {
+                        id: stackId,
+                        layer,
+                        parentPullRequest: parentPull
+                          ? { repository: parentPull.fullName, number: parentPull.number }
+                          : null,
+                        restacks: [...restacks],
+                      },
+                existingPullRequest: existingPull
+                  ? { number: existingPull.number, url: existingPull.url }
+                  : null,
+              },
+            })
+
+      const decided =
+        session === undefined || decision === null
+          ? []
+          : [
+              policyDecided(session.threadId, {
+                approvalId: input.approvalId,
+                actionId: decision === 'approve' ? 'approve' : 'discard',
+                outcome: decision,
+              }),
+            ]
+
+      const proposal = {
+        approvalId: input.approvalId,
+        title: shownTitle,
+        body,
+        draft: input.draft,
+        repos: [...input.repos],
+        repo: isPresent(repoName) ? repoName : undefined,
+        stackId: stackId ?? undefined,
+        layer: layer ?? undefined,
+        parentPull,
+        restacks: [...restacks],
+        expiresAt,
+      }
 
       return [
-        shuttleModule.input('pr.proposed', {
-          approvalId: input.approvalId,
-          title: shownTitle,
-          body,
-          draft: input.draft,
-          repos: [...input.repos],
-          repo: isPresent(repoName) ? repoName : undefined,
-          stackId: stackId ?? undefined,
-          layer: layer ?? undefined,
-          parentPull,
-          restacks: [...restacks],
-          expiresAt,
-        }),
+        // Addressed to the session's thread when it is known, so the session has taken up the
+        // proposal before a decision that follows it in this batch arrives. Otherwise it reaches
+        // the session through its mailbox, from the thread that proposed it.
+        session === undefined
+          ? shuttleModule.input('pr.proposed', proposal)
+          : {
+              ...shuttleModule.input('pr.proposed', { ...proposal, proposedBy: ctx.threadId }),
+              threadId: session.threadId,
+            },
         {
           type: 'approval.requested' as const,
           payload: {
@@ -207,9 +277,30 @@ export function createPreparePrPublishGateEffect(
           },
           threadId: input.threadId ?? ctx.threadId,
         },
+        ...decided,
       ]
     },
   })
+}
+
+/**
+ * The repositories a publish would push to, as `owner/name`: the proposing layer's, else the ones
+ * the proposal names, else every repository linked to the session. A name the session has no
+ * repository for is kept as it was given.
+ */
+export function publishedRepositories(
+  linked: readonly { readonly name: string; readonly fullName: string }[],
+  repo: string | null,
+  repos: readonly string[],
+): string[] {
+  const fullNameOf = (name: string) =>
+    linked.find((entry) => entry.name === name || entry.fullName === name)?.fullName ?? name
+
+  if (isPresent(repo)) {
+    return [fullNameOf(repo)]
+  }
+
+  return repos.length > 0 ? repos.map(fullNameOf) : linked.map((entry) => entry.fullName)
 }
 
 /**

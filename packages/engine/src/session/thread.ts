@@ -34,7 +34,12 @@ import {
   queuedAttachments,
 } from './conductor'
 import type { JsonObjectBuilder } from './json-object'
-import { actorOfEvent, appendPrPublishEffects, withPrApprovalDecision } from './publish-effects'
+import {
+  actorOfEvent,
+  appendPrPublishEffects,
+  decidedByPolicy,
+  withPrApprovalDecision,
+} from './publish-effects'
 import { routeForEffects } from './route-effects'
 import {
   shuttleModule,
@@ -141,6 +146,8 @@ export interface SessionState {
   readonly stacks: Readonly<Record<string, SessionRepoStack>>
   /** Rejected publish gate whose `pr.discarded` settles the proposing tool call. */
   readonly discardedPrApprovalId: string | null
+  /** The latest proposal taken up, so its copy in the mailbox wake is not taken for a new one. */
+  readonly proposedPrApprovalId?: string | null
   /**
    * A pull request asked for from the session's PR button, until its publish gate opens. Absent
    * in sessions from before the button.
@@ -441,7 +448,11 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
 
         case 'shuttle.pr.proposed': {
           return settlePrRequest(
-            withPrProposal(state, asObject(asJson(event.payload)), event.threadId ?? null),
+            withPrProposal(
+              state,
+              asObject(asJson(event.payload)),
+              event.payload.proposedBy ?? event.threadId ?? null,
+            ),
             event.payload.approvalId,
           )
         }
@@ -472,6 +483,7 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
           const prNext = withPrApprovalDecision(state, event.payload, {
             at: event.ts,
             approvedBy: actorOfEvent(event),
+            byPolicy: decidedByPolicy(event),
           })
 
           if (prNext) {
@@ -888,6 +900,10 @@ export function createSessionThread(): ThreadDefinition<SessionState> {
             headSha: state.pull.headSha,
             baseSha: state.pull.baseSha,
           }
+        }
+
+        if (state.hostMetadata !== undefined) {
+          bindInput.hostMetadata = { ...state.hostMetadata }
         }
 
         effects.push(invoke('shuttle.bindSandbox', bindInput, 'bind_sandbox'))

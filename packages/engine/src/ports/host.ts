@@ -24,7 +24,7 @@ export interface HostPorts {
    * person it works for, on their own sign-in.
    */
   readonly credentials: CredentialPort
-  /** How long an approval waits. Standalone: forever. */
+  /** How long an approval waits, and whether the host decides it. Standalone: a person, forever. */
   readonly approvals: ApprovalPolicy
   /** GitHub access. Standalone: Shuttle's own GitHub App, from `env`. */
   readonly git: GitAccess | null
