@@ -14,6 +14,7 @@ const args: LlmCompleteArgs = {
   instructions: '',
   tools: [],
   messages: [{ role: 'user', content: 'hello' }],
+  run: { runId, threadId: 'thr_1', attributes: {}, secrets: {} },
 }
 
 describe('the model key for Shuttle’s own loop', () => {

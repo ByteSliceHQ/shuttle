@@ -162,7 +162,7 @@ export function createReasoningLlm(options: ReasoningLlmOptions): LlmAdapter {
   return {
     complete: async (args: LlmCompleteArgs): Promise<AgentTurnResult> => {
       const attachments = options.resolveAttachment
-        ? await resolveAttachments(args.messages, options.resolveAttachment)
+        ? await resolveAttachments(args.messages, options.resolveAttachment, args.run)
         : undefined
 
       const messages = toModelMessages(args.messages, { attachments })
