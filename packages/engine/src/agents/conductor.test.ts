@@ -11,7 +11,15 @@ const conductor = createConductorAgent(fakeEnv(), 'run_1')
 
 async function toolNames(input: { text: string; repos?: string[] }): Promise<string[]> {
   const resolved =
-    (await conductor.resolveTools?.({ threadId: 'thr_c', turn: 1, input, ids: typeIds })) ?? []
+    (await conductor.resolveTools?.({
+      runId: 'run_1',
+      threadId: 'thr_c',
+      turn: 1,
+      input,
+      ids: typeIds,
+      attributes: {},
+      secrets: {},
+    })) ?? []
 
   return [...(conductor.tools ?? []), ...resolved].map((tool) => tool.name)
 }

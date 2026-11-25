@@ -100,6 +100,7 @@ function args(overrides: Partial<LlmCompleteArgs> = {}): LlmCompleteArgs {
       { role: 'user', content: 'Add a README' },
     ],
     tools: [],
+    run: { runId: 'run 1', threadId: 'thr_1', attributes: {}, secrets: {} },
     ...overrides,
   }
 }
