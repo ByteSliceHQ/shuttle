@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 
+import { retainPulls } from './retention'
 import {
   AutoReviewModeSchema,
   CheckRollupSchema,
@@ -136,12 +137,14 @@ export type PullInboxState = {
   >
 }
 
+export const PullInboxStateSchema = Schema.Struct({
+  pulls: Schema.Record(Schema.String, PullSummarySchema),
+  policies: Schema.Record(Schema.String, RepoPolicySchema),
+})
+
 export const pullInbox = pullsModule.projection({
   name: 'pullInbox',
-  shape: Schema.Struct({
-    pulls: Schema.Record(Schema.String, PullSummarySchema),
-    policies: Schema.Record(Schema.String, RepoPolicySchema),
-  }),
+  shape: PullInboxStateSchema,
   initialState: { pulls: {}, policies: {} } satisfies PullInboxState,
   reduce(state, event): PullInboxState {
     if (event.type === 'pulls.pull.upserted') {
@@ -154,7 +157,7 @@ export const pullInbox = pullsModule.projection({
 
       return {
         ...state,
-        pulls: {
+        pulls: retainPulls({
           ...state.pulls,
           [key]: {
             installationId: event.payload.installationId,
@@ -180,7 +183,7 @@ export const pullInbox = pullsModule.projection({
             linkedSessions: existing?.linkedSessions ?? [],
             reviewingRunId: existing?.reviewingRunId ?? null,
           },
-        },
+        }),
       }
     }
 
@@ -194,7 +197,7 @@ export const pullInbox = pullsModule.projection({
 
       return {
         ...state,
-        pulls: {
+        pulls: retainPulls({
           ...state.pulls,
           [key]: {
             ...existing,
@@ -202,7 +205,7 @@ export const pullInbox = pullsModule.projection({
             updatedAt: Math.max(existing.updatedAt, event.payload.updatedAt),
             reviewingRunId: null,
           },
-        },
+        }),
       }
     }
 
