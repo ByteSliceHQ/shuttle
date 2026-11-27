@@ -10,6 +10,7 @@ import {
   type ThreadDefinition,
 } from '@swirls/looms/core'
 
+import { retainPulls } from './retention'
 import { pullKey, pullsModule, type AutoReviewMode, type PullLinkedRole } from './scope'
 
 export interface PullRecord {
@@ -184,7 +185,7 @@ export function createPullsThread(): ThreadDefinition<PullsState> {
 
         return {
           ...state,
-          pulls: { ...state.pulls, [key]: pull },
+          pulls: retainPulls({ ...state.pulls, [key]: pull }),
           pendingAutoReviews,
         }
       }
@@ -199,7 +200,7 @@ export function createPullsThread(): ThreadDefinition<PullsState> {
 
         return {
           ...state,
-          pulls: {
+          pulls: retainPulls({
             ...state.pulls,
             [key]: {
               ...existing,
@@ -207,7 +208,7 @@ export function createPullsThread(): ThreadDefinition<PullsState> {
               updatedAt: Math.max(existing.updatedAt, event.payload.updatedAt),
               reviewingRunId: null,
             },
-          },
+          }),
           pendingAutoReviews: state.pendingAutoReviews.filter(
             (item) => !(item.fullName === existing.fullName && item.number === existing.number),
           ),

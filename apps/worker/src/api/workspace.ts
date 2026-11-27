@@ -226,7 +226,7 @@ async function syncPullsOfFolder(
 
   const pullsStub = loomsStub(env.LOOMS_RUN, pullsRunId(env, orgId))
 
-  return syncFolderRepos(env, pullsStub, folderId, folder.repos)
+  return syncFolderRepos(env, pullsStub, pullsRunId(env, orgId), folderId, folder.repos)
 }
 
 /**
