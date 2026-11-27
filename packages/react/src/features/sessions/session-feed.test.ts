@@ -50,6 +50,36 @@ describe('session feed', () => {
     expect(feed.brief[0]).toMatchObject({ version: 1, text: 'Ship it' })
   })
 
+  test('keeps the repositories the session started with', () => {
+    const repo = {
+      installationId: 7,
+      owner: 'acme',
+      name: 'api',
+      fullName: 'acme/api',
+      defaultBranch: 'main',
+      private: true,
+    }
+
+    const feed = fold([
+      event('runtime.thread.started', { input: { goal: 'Ship it', repos: [repo] } }),
+      // A worker's thread starts with its own input, which names no repositories.
+      event('runtime.thread.started', { input: { goal: 'Do a part' } }, 'thr_worker'),
+    ])
+
+    expect(feed.repos).toEqual([repo])
+  })
+
+  test('has no repositories when the start names none, or names them badly', () => {
+    const none = fold([event('runtime.thread.started', { input: { goal: 'Ship it' } })])
+
+    const malformed = fold([
+      event('runtime.thread.started', { input: { goal: 'Ship it', repos: [{ name: 1 }] } }),
+    ])
+
+    expect(none.repos).toEqual([])
+    expect(malformed.repos).toEqual([])
+  })
+
   test('shows initial attachments on the goal and in session media', () => {
     const screenshot = { id: 'ast_a', name: 'bug.png', mediaType: 'image/png', size: 2048 }
 

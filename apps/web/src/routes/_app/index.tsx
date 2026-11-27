@@ -119,8 +119,8 @@ function HomePage() {
             What should the agents build?
           </h1>
           <p className="text-muted-foreground mt-2 max-w-xl text-sm leading-relaxed text-pretty">
-            Sessions live inside folders. Link GitHub repos to a folder and every agent spawned
-            there gets worktrees of those repos.
+            Sessions live inside folders. Link GitHub repositories to a folder and every new session
+            there gets a worktree of each.
           </p>
 
           <div className="bg-card mt-6 rounded-xl border p-1.5 shadow-xl shadow-black/20">

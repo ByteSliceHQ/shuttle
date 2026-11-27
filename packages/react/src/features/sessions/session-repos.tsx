@@ -1,21 +1,31 @@
-import { ArrowRight, ChevronDown, ExternalLink, GitBranch, Lock } from 'lucide-react'
+import { ChevronDown, ExternalLink, Folder as FolderIcon, GitBranch, Lock } from 'lucide-react'
 
 import { Button } from '../../components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover'
 import { Link } from '../../shuttle'
 import { RepoName } from '../workspace/repo-chip'
-import { repoCountLabel, type LinkedRepo } from '../workspace/workspace'
+import type { LinkedRepo } from '../workspace/workspace'
 
-/** One trigger for every linked repo, so its width doesn't grow with the folder. */
+function triggerLabel(count: number): string {
+  return count === 1
+    ? '1 repository in this session'
+    : `${count.toLocaleString()} repositories in this session`
+}
+
+/**
+ * The repositories the session started with, behind one trigger so its width doesn't grow with
+ * them. They are read only: a session keeps the ones it started with, and linking is done on
+ * the folder, for the sessions started after.
+ */
 export function SessionRepos({
-  folderId,
-  folderName,
   repos,
+  folder,
   align = 'end',
 }: {
-  folderId: string
-  folderName: string
+  /** The session's own repositories, not its folder's as they are now. */
   repos: readonly LinkedRepo[]
+  /** The session's folder, where what hosts it keeps folders. */
+  folder?: { readonly folderId: string; readonly name: string }
   align?: 'start' | 'end'
 }) {
   const [first] = repos
@@ -31,7 +41,7 @@ export function SessionRepos({
           variant="ghost"
           size="sm"
           className="data-[state=open]:bg-accent data-[state=open]:text-foreground max-w-44"
-          aria-label={`${repoCountLabel(repos.length)} in ${folderName}`}
+          aria-label={triggerLabel(repos.length)}
         >
           <GitBranch />
           <span className="hidden min-w-0 truncate md:inline">
@@ -47,13 +57,18 @@ export function SessionRepos({
           <span className="text-muted-foreground font-mono text-[11px] tabular-nums">
             {repos.length.toLocaleString()}
           </span>
-          <span
-            className="text-muted-foreground ml-auto min-w-0 truncate text-[11px]"
-            dir="auto"
-            title={folderName}
-          >
-            {folderName}
-          </span>
+          {folder ? (
+            <Link
+              to={{ page: 'folder', folderId: folder.folderId }}
+              title={folder.name}
+              className="text-muted-foreground hover:text-foreground focus-visible:text-foreground ml-auto inline-flex min-w-0 items-center gap-1.5 self-center rounded-sm text-[11px] transition-colors duration-100 outline-none"
+            >
+              <FolderIcon className="size-3 shrink-0" />
+              <span className="truncate" dir="auto">
+                {folder.name}
+              </span>
+            </Link>
+          ) : null}
         </div>
         <ul className="max-h-72 overflow-y-auto overscroll-contain p-1">
           {repos.map((repo) => (
@@ -79,15 +94,9 @@ export function SessionRepos({
             </li>
           ))}
         </ul>
-        <div className="border-t p-1">
-          <Link
-            to={{ page: 'folder', folderId: folderId }}
-            className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:bg-accent flex h-8 items-center gap-2 rounded-md px-2 text-[12px] transition-colors duration-100 outline-none"
-          >
-            Manage repos
-            <ArrowRight className="ml-auto size-3.5" />
-          </Link>
-        </div>
+        <p className="text-muted-foreground border-t px-3 py-2 text-[11px]">
+          Set when this session started
+        </p>
       </PopoverContent>
     </Popover>
   )

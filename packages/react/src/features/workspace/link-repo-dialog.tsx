@@ -99,13 +99,15 @@ export function LinkRepoDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Link repositories</DialogTitle>
-          <DialogDescription>
-            Agents spawned in{' '}
-            <span className="text-foreground wrap-anywhere" dir="auto">
+          <DialogTitle>
+            Link repositories to{' '}
+            <span className="wrap-anywhere" dir="auto">
               {folderName}
-            </span>{' '}
-            get worktrees of every linked repo.
+            </span>
+          </DialogTitle>
+          <DialogDescription>
+            New sessions get a worktree of each linked repository. Sessions already running keep the
+            ones they started with.
           </DialogDescription>
         </DialogHeader>
 
