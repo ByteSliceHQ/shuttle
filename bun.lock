@@ -276,7 +276,7 @@
     },
     "packages/shuttle": {
       "name": "@swirls/shuttle",
-      "version": "0.13.1",
+      "version": "0.13.2",
       "dependencies": {
         "@ai-sdk/typesafe-ai": "^3.0.35",
         "@openrouter/ai-sdk-provider": "^3.0.0",
