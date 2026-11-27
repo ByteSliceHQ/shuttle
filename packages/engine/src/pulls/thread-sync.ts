@@ -1,11 +1,10 @@
-import { Schema } from 'effect'
-
 import { listPullThreads, type PullThreadSnapshot } from '@shuttle/git/github/pulls'
 
 import { pullsRunId } from '../config'
 import type { EngineEnv } from '../env'
 import { loomsStub } from '../looms-stub'
 import type { LinkedRepo } from '../workspace/scope'
+import { readProjected } from './projection'
 import { pullKey } from './scope'
 import { syncThreads } from './signals'
 import { PullThreadsStateSchema } from './threads'
@@ -45,8 +44,6 @@ export function sameThreads(
   return shape(known ?? []) === shape(fetched)
 }
 
-const ProjectionBodySchema = Schema.Struct({ value: Schema.optional(PullThreadsStateSchema) })
-
 async function knownThreads(
   env: EngineEnv,
   runId: string,
@@ -62,9 +59,13 @@ async function knownThreads(
     return undefined
   }
 
-  const body = Schema.decodeUnknownSync(ProjectionBodySchema)(await response.json())
+  const projected = await readProjected(PullThreadsStateSchema, response)
 
-  return body.value?.pulls[key]
+  if (projected.kind === 'unreadable') {
+    throw new Error('the pullThreads projection did not decode')
+  }
+
+  return projected.kind === 'value' ? projected.value.pulls[key] : undefined
 }
 
 export async function syncPullThreads(

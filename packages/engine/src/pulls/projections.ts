@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
 
+import { retainPulls } from './retention'
 import {
   AutoReviewModeSchema,
   CheckRollupSchema,
@@ -8,7 +9,6 @@ import {
   pullKey,
   pullsModule,
 } from './scope'
-import { retainPulls } from './retention'
 
 const PullAuthorSchema = Schema.Struct({
   login: Schema.String,

@@ -1,11 +1,10 @@
-import { Schema } from 'effect'
-
 import { getInstallation, GithubGraphqlError } from '@shuttle/git/github/client'
 import { listOpenPulls, type PullSummary } from '@shuttle/git/github/pulls'
 
 import type { EngineEnv } from '../env'
 import type { LoomsRunStub } from '../looms-stub'
 import type { LinkedRepo } from '../workspace/scope'
+import { readProjected } from './projection'
 import { PullInboxStateSchema, type PullInboxState, type PullInboxSummary } from './projections'
 import { pullKey } from './scope'
 import { upsertPull } from './signals'
@@ -158,17 +157,15 @@ export function alreadyRecorded(
 
   return (
     shape(known) ===
-    shape({ ...fetched, author: { login: fetched.authorLogin, avatarUrl: fetched.authorAvatarUrl } })
+    shape({
+      ...fetched,
+      author: { login: fetched.authorLogin, avatarUrl: fetched.authorAvatarUrl },
+    })
   )
 }
 
-const ProjectionBodySchema = Schema.Struct({ value: Schema.optional(PullInboxStateSchema) })
-
 /** Every pull request the inbox already mirrors, so a sync records only what changed. */
-async function knownPulls(
-  sink: PullSignalSink,
-  runId: string,
-): Promise<PullInboxState['pulls']> {
+async function knownPulls(sink: PullSignalSink, runId: string): Promise<PullInboxState['pulls']> {
   const response = await sink
     .fetch(
       new Request(`https://shuttle.internal/runs/${runId}/projections/pullInbox`, {
@@ -181,9 +178,10 @@ async function knownPulls(
     return {}
   }
 
-  const body = Schema.decodeUnknownSync(ProjectionBodySchema)(await response.json())
+  const projected = await readProjected(PullInboxStateSchema, response)
 
-  return body.value?.pulls ?? {}
+  // An inbox the projection cannot answer for records every pull, as no mirror exists to compare.
+  return projected.kind === 'value' ? projected.value.pulls : {}
 }
 
 async function syncRepo(
