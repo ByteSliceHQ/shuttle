@@ -35,7 +35,7 @@ Default `SHUTTLE_WORKSPACE_MODE=memory` needs no Docker. Set
 2. **Custom Looms modules** — `shuttleSession`, `reflect`, and `workspace` sit
    beside native `agent`, `evaluator`, and `approval`.
 3. **Folders + GitHub** — organize sessions in folders, connect a GitHub App,
-   and link repos so every agent in that folder gets worktrees.
+   and link repositories so every new session in that folder gets worktrees.
 4. **Bring your own Cloudflare** — Durable Objects, optional D1, optional
    Sandbox containers. See [apps/worker/README.md](apps/worker/README.md).
 
