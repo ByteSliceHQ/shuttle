@@ -89,7 +89,7 @@
     "@pierre/highlights": "0.5.1",
     "@pierre/sdk": "^0.1.2",
     "@pierre/words": "0.2.2",
-    "@swirls/looms": "0.28.0",
+    "@swirls/looms": "0.30.0",
     "@tanstack/react-virtual": "^3.14.26",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-webgl": "^0.19.0",
