@@ -43,7 +43,7 @@ export function folderMenuEntries(
 
   return [
     { kind: 'action', label: 'Rename', onSelect: onRename },
-    { kind: 'action', label: 'Link repository…', onSelect: onLinkRepo },
+    { kind: 'action', label: 'Link repositories', onSelect: onLinkRepo },
     { kind: 'separator' },
     { kind: 'action', label: 'Archive', onSelect: onArchive },
   ]

@@ -90,8 +90,8 @@ export function SessionComposer({
   context,
 }: {
   /**
-   * What the session works from, shown under the box on the left. Left out, it is the folder's
-   * repositories and the brief.
+   * What the session works from, shown under the box on the left. Left out, it is the
+   * repositories the session started with and the brief.
    */
   context?: ReactNode
 }) {
@@ -114,14 +114,7 @@ export function SessionComposer({
       context={
         context ?? (
           <>
-            {folder ? (
-              <SessionRepos
-                folderId={folder.folderId}
-                folderName={folder.name}
-                repos={folder.repos}
-                align="start"
-              />
-            ) : null}
+            <SessionRepos repos={session.feed.repos} folder={folder} align="start" />
             <SessionContextButtons feed={session.feed} />
           </>
         )

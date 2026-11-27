@@ -33,7 +33,7 @@ describe('folderMenuEntries', () => {
   test('matches the folder menu, and drops archive actions once archived', () => {
     expect(folderMenuEntries(false, rename, link, archive)).toEqual([
       { kind: 'action', label: 'Rename', onSelect: rename },
-      { kind: 'action', label: 'Link repository…', onSelect: link },
+      { kind: 'action', label: 'Link repositories', onSelect: link },
       { kind: 'separator' },
       { kind: 'action', label: 'Archive', onSelect: archive },
     ])

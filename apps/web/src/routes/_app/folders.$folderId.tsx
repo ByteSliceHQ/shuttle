@@ -181,25 +181,25 @@ function FolderWorkspace({ tree, folder }: { tree: WorkspaceTree; folder: Worksp
                     <Button
                       variant="ghost"
                       size="icon-xs"
-                      aria-label="Link another repository"
+                      aria-label="Link repositories"
                       onClick={() => setLinkOpen(true)}
                       className="rounded-full"
                     >
                       <Plus />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Link another repository</TooltipContent>
+                  <TooltipContent>Link repositories</TooltipContent>
                 </Tooltip>
               ) : (
                 <Button variant="ghost" size="xs" onClick={() => setLinkOpen(true)}>
                   <Link2 />
-                  Link a repository
+                  Link repositories
                 </Button>
               )}
             </div>
             {hasRepos ? null : (
               <p className="text-muted-foreground mt-2 text-xs">
-                No repos linked yet, so agents work in the demo workspace.
+                No repositories linked, so new sessions start in a demo workspace.
               </p>
             )}
 

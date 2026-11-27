@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { LinkedRepo } from '@shuttle/api'
 import {
   isJsonObject,
   type JsonObject,
@@ -229,6 +230,11 @@ export interface SessionFeed {
   readonly queued: Readonly<Record<string, string>>
   /** Every file in the session, oldest first: those people attached and those agents shared. */
   readonly media: readonly SessionMedia[]
+  /**
+   * The repositories the session started with: its folder's, as they were then. Linking or
+   * unlinking on the folder since has not changed them.
+   */
+  readonly repos: readonly LinkedRepo[]
   /** PRs this session opened (from shuttle.pr.published). */
   readonly publishedPulls: readonly PublishedPull[]
   /** Inline review comments drafted during a review session. */
@@ -281,6 +287,7 @@ export interface PlaybookLessonRef {
 
 const initialFeed: SessionFeed = {
   media: [],
+  repos: [],
   publishedPulls: [],
   draftReviewComments: [],
   items: [],
@@ -611,6 +618,15 @@ function withSharedMedia(
   }
 }
 
+const StartingRepos = z.array(LinkedRepo)
+
+/** The repositories a session's start names. A start that names none, or names them badly, has none. */
+function startingReposOf(value: JsonValue | undefined): readonly LinkedRepo[] {
+  const parsed = StartingRepos.safeParse(value)
+
+  return parsed.success ? parsed.data : []
+}
+
 function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
   const payload = eventFields(event)
 
@@ -622,9 +638,10 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
 
       const goal = jsonText(jsonFields(payload.input).goal)
       const attachments = mediaAssetsOf(jsonFields(payload.input).attachments)
+      const repos = startingReposOf(jsonFields(payload.input).repos)
 
       if (!hasText(goal) || !hasText(event.threadId)) {
-        return { ...feed, rootThreadId: event.threadId ?? undefined }
+        return { ...feed, repos, rootThreadId: event.threadId ?? undefined }
       }
 
       return {
@@ -647,6 +664,7 @@ function reduceFeed(feed: SessionFeed, event: SessionEvent): SessionFeed {
             ts: event.ts,
           })),
         ],
+        repos,
         rootThreadId: event.threadId,
         brief: [{ version: 1, text: goal, ts: event.ts }],
       }

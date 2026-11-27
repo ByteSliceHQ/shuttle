@@ -17,7 +17,7 @@ type GithubConnectResult = NonNullable<ReturnType<typeof useGithubSearchParam>>
 function messageFor(result: GithubConnectResult): string {
   switch (result) {
     case 'connected':
-      return 'GitHub connected. You can link repos to folders from the sidebar.'
+      return 'GitHub connected. You can link repositories to folders from the sidebar.'
     case 'requested':
       return 'Install request sent to the GitHub organization’s owners. Once they approve it, choose Connect GitHub again to link it.'
     case 'already_connected':
