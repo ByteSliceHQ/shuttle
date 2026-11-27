@@ -93,6 +93,9 @@ function connected(payload: CredentialPayload | null): VendorTurnDeps['credentia
 
 function args(overrides: Partial<LlmCompleteArgs> = {}): LlmCompleteArgs {
   return {
+    agent: { name: 'conductor', version: '1' },
+    turn: 1,
+    input: 'Add a README',
     instructions: 'You are the conductor.',
     messages: [
       { role: 'user', content: 'first task' },

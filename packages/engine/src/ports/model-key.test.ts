@@ -11,6 +11,9 @@ const runId = scopedRunId('org1', 'session_a')
 
 const args: LlmCompleteArgs = {
   model: 'any',
+  agent: { name: 'conductor', version: '1' },
+  turn: 1,
+  input: 'hello',
   instructions: '',
   tools: [],
   messages: [{ role: 'user', content: 'hello' }],
