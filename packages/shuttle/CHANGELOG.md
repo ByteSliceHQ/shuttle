@@ -1,5 +1,13 @@
 # @swirls/shuttle
 
+## 0.13.1
+
+### Patch Changes
+
+- 80856b4: Run on `@swirls/looms` 0.31.0. Pin Looms to `0.31.0` together with this Shuttle release; Shuttle pins Looms exactly.
+
+  Looms 0.31.0 changes the swarm module (a failed member activation no longer fails the swarm run; `SwarmMemberStatus` gains `failed` and `lastError`) and adds an opt-in `handlesEffectFailures` flag for threads. Shuttle runs no swarm and defines no thread that uses the flag, so nothing else changes here.
+
 ## 0.13.0
 
 ### Minor Changes
